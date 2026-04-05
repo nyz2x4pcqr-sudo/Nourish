@@ -2,99 +2,239 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <title>Meal Planner</title>
+    <title>Nourish Meal Planner</title>
     <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
+            background-color: #1a1a1a;
+            color: #fff;
             font-family: Arial, sans-serif;
-            margin: 40px;
-            max-width: 800px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 40px 20px;
         }
-
-        textarea, input {
+        .card {
+            background-color: #2c2c2c;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 600px;
             width: 100%;
-            margin: 10px 0;
-            padding: 10px;
         }
-
-        button {
-            padding: 10px 15px;
-            cursor: pointer;
+        .title {
+            font-size: 2em;
+            color: #ff6b35;
+            margin-bottom: 4px;
         }
-
-        #output {
-            white-space: pre-wrap;
+        .subtitle {
+            font-size: 1em;
+            color: #aaa;
+            margin-bottom: 24px;
+        }
+        label {
+            display: block;
+            font-size: 0.85em;
+            color: #aaa;
+            margin-bottom: 4px;
+            margin-top: 16px;
+        }
+        input {
+            background-color: #3c3c3c;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 10px 14px;
+            border-radius: 8px;
+            width: 100%;
+            font-size: 1em;
+        }
+        input:focus {
+            outline: none;
+            border-color: #ff6b35;
+        }
+        .goal-label {
             margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #ccc;
+            margin-bottom: 8px;
+            font-size: 0.85em;
+            color: #aaa;
+        }
+        .goal-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .goal-btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            border: 2px solid #444;
+            background: #3c3c3c;
+            color: #aaa;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .goal-btn.active {
+            border-color: #ff6b35;
+            background: #ff6b35;
+            color: #fff;
+        }
+        #generateBtn {
+            width: 100%;
+            margin-top: 24px;
+            padding: 14px;
+            border-radius: 8px;
+            border: none;
+            background: #ff6b35;
+            color: #fff;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        #generateBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #loading {
+            display: none;
+            margin-top: 24px;
+            text-align: center;
+            color: #ff6b35;
+            font-size: 1em;
+        }
+        #error {
+            display: none;
+            margin-top: 16px;
+            padding: 12px;
+            background: #3a1a1a;
+            border: 1px solid #ff4444;
+            border-radius: 8px;
+            color: #ff4444;
+            font-size: 0.9em;
+        }
+        #output {
+            display: none;
+            margin-top: 24px;
+        }
+        .day-card {
+            border-left: 3px solid #ff6b35;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            background: #3c3c3c;
+            border-radius: 0 8px 8px 0;
+        }
+        .day-title {
+            font-weight: bold;
+            color: #ff6b35;
+            margin-bottom: 8px;
+            font-size: 1em;
+        }
+        .meal {
+            font-size: 0.9em;
+            color: #ddd;
+            margin-bottom: 4px;
         }
     </style>
 </head>
-
 <body>
+    <div class="card">
+        <h1 class="title">🍽️ Nourish</h1>
+        <p class="subtitle">Your AI Meal Planner</p>
 
-    <h1>7-Day Meal Planner</h1>
+        <label>Foods you like</label>
+        <input type="text" id="likes" placeholder="e.g. chicken, pasta, avocado" />
 
-    <textarea id="prefs" placeholder="Enter dietary preferences (e.g. high protein, low carb, vegetarian)"></textarea>
+        <label>Foods you hate or can't eat</label>
+        <input type="text" id="hates" placeholder="e.g. mushrooms, shellfish, dairy" />
 
-    <button id="generateBtn">Generate Meal Plan</button>
+        <p class="goal-label">Your goal</p>
+        <div class="goal-buttons">
+            <button class="goal-btn" onclick="setGoal('Cut', this)">Cut</button>
+            <button class="goal-btn" onclick="setGoal('Maintain', this)">Maintain</button>
+            <button class="goal-btn" onclick="setGoal('Gain', this)">Gain</button>
+        </div>
 
-    <div id="output"></div>
+        <button id="generateBtn" onclick="generateMealPlan()">Generate Meal Plan</button>
 
-<script>
-const endpoint = "http://localhost:1234/v1/chat/completions";
+        <div id="loading">🍳 Generating your meal plan...</div>
+        <div id="error"></div>
+        <div id="output"></div>
+    </div>
 
-document.getElementById("generateBtn").addEventListener("click", generateMealPlan);
+    <script>
+        let goal = '';
 
-async function generateMealPlan() {
-    const output = document.getElementById("output");
-    const prefs = document.getElementById("prefs").value.trim();
-
-    output.textContent = "Generating meal plan...";
-
-    try {
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "local_model",
-                messages: [
-                    {
-                        role: "system",
-                        content: "You are a professional nutritionist. Return structured meal plans."
-                    },
-                    {
-                        role: "user",
-                        content: `Generate a 7-day meal plan (breakfast, lunch, dinner). Preferences: ${prefs}`
-                    }
-                ],
-                temperature: 0.7,
-                max_tokens: 2000
-            })
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errText}`);
+        function setGoal(newGoal, btn) {
+            goal = newGoal;
+            document.querySelectorAll('.goal-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
         }
 
-        const data = await response.json();
+        async function generateMealPlan() {
+            const likes = document.getElementById('likes').value.trim();
+            const hates = document.getElementById('hates').value.trim();
+            const output = document.getElementById('output');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const btn = document.getElementById('generateBtn');
 
-        const result = data?.choices?.[0]?.message?.content;
+            if (!goal) {
+                error.textContent = 'Please select a goal (Cut, Maintain, or Gain)';
+                error.style.display = 'block';
+                return;
+            }
 
-        if (!result) {
-            throw new Error("No response content returned from model.");
+            output.style.display = 'none';
+            error.style.display = 'none';
+            loading.style.display = 'block';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('http://localhost:1234/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'local-model',
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'You are a professional nutritionist and chef. Generate structured 7-day meal plans. Format each day exactly like this: DAY 1: Breakfast: [meal] Lunch: [meal] Dinner: [meal]'
+                            },
+                            {
+                                role: 'user',
+                                content: `Generate a 7-day meal plan. Foods I like: ${likes || 'anything'}. Foods I hate or cannot eat: ${hates || 'none'}. My goal: ${goal}.`
+                            }
+                        ],
+                        temperature: 0.7,
+                        max_tokens: 2000
+                    })
+                });
+
+                if (!response.ok) throw new Error('API error');
+
+                const data = await response.json();
+                const result = data?.choices?.[0]?.message?.content;
+                if (!result) throw new Error('No content');
+
+                output.innerHTML = result
+                    .split(/day \d+/gi)
+                    .filter(s => s.trim())
+                    .map((day, i) => `
+                        <div class="day-card">
+                            <div class="day-title">Day ${i + 1}</div>
+                            <div class="meal">${day.trim().replace(/\n/g, '<br>')}</div>
+                        </div>
+                    `).join('');
+
+                output.style.display = 'block';
+            } catch (err) {
+                error.textContent = 'Something went wrong. Make sure LM Studio is running on port 1234.';
+                error.style.display = 'block';
+            } finally {
+                loading.style.display = 'none';
+                btn.disabled = false;
+            }
         }
-
-        output.textContent = result;
-
-    } catch (err) {
-        output.textContent = "Error:\n" + err.message;
-        console.error(err);
-    }
-}
-</script>
-
+    </script>
 </body>
 </html>
