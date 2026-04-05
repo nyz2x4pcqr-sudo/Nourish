@@ -22,23 +22,10 @@
             max-width: 600px;
             width: 100%;
         }
-        .title {
-            font-size: 2em;
-            color: #ff6b35;
-            margin-bottom: 4px;
-        }
-        .subtitle {
-            font-size: 1em;
-            color: #aaa;
-            margin-bottom: 24px;
-        }
-        label {
-            display: block;
-            font-size: 0.85em;
-            color: #aaa;
-            margin-bottom: 4px;
-            margin-top: 16px;
-        }
+        .title { font-size: 2em; color: #ff6b35; margin-bottom: 4px; }
+        .subtitle { font-size: 1em; color: #aaa; margin-bottom: 8px; }
+        .model-indicator { font-size: 0.75em; color: #666; margin-bottom: 16px; }
+        label { display: block; font-size: 0.85em; color: #aaa; margin-bottom: 4px; margin-top: 16px; }
         input {
             background-color: #3c3c3c;
             color: #fff;
@@ -48,98 +35,55 @@
             width: 100%;
             font-size: 1em;
         }
-        input:focus {
-            outline: none;
-            border-color: #ff6b35;
-        }
-        .goal-label {
-            margin-top: 20px;
-            margin-bottom: 8px;
-            font-size: 0.85em;
-            color: #aaa;
-        }
-        .goal-buttons {
-            display: flex;
-            gap: 10px;
-        }
+        input:focus { outline: none; border-color: #ff6b35; }
+        .goal-label { margin-top: 20px; margin-bottom: 8px; font-size: 0.85em; color: #aaa; }
+        .goal-buttons { display: flex; gap: 10px; }
         .goal-btn {
-            flex: 1;
-            padding: 10px;
-            border-radius: 8px;
-            border: 2px solid #444;
-            background: #3c3c3c;
-            color: #aaa;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.2s;
+            flex: 1; padding: 10px; border-radius: 8px;
+            border: 2px solid #444; background: #3c3c3c;
+            color: #aaa; font-weight: bold; cursor: pointer; transition: all 0.2s;
         }
-        .goal-btn.active {
-            border-color: #ff6b35;
-            background: #ff6b35;
-            color: #fff;
-        }
+        .goal-btn.active { border-color: #ff6b35; background: #ff6b35; color: #fff; }
         #generateBtn {
-            width: 100%;
-            margin-top: 24px;
-            padding: 14px;
-            border-radius: 8px;
-            border: none;
-            background: #ff6b35;
-            color: #fff;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            transition: opacity 0.2s;
+            width: 100%; margin-top: 24px; padding: 14px;
+            border-radius: 8px; border: none; background: #ff6b35;
+            color: #fff; font-size: 1.1em; font-weight: bold;
+            cursor: pointer; transition: opacity 0.2s;
         }
-        #generateBtn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        #loading {
-            display: none;
-            margin-top: 24px;
-            text-align: center;
-            color: #ff6b35;
-            font-size: 1em;
-        }
+        #generateBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+        #loading { display: none; margin-top: 24px; text-align: center; color: #ff6b35; font-size: 1em; }
         #error {
-            display: none;
-            margin-top: 16px;
-            padding: 12px;
-            background: #3a1a1a;
-            border: 1px solid #ff4444;
-            border-radius: 8px;
-            color: #ff4444;
-            font-size: 0.9em;
+            display: none; margin-top: 16px; padding: 12px;
+            background: #3a1a1a; border: 1px solid #ff4444;
+            border-radius: 8px; color: #ff4444; font-size: 0.9em;
         }
-        #output {
-            display: none;
-            margin-top: 24px;
-        }
+        #output { display: none; margin-top: 24px; }
         .day-card {
-            border-left: 3px solid #ff6b35;
-            padding: 12px 16px;
-            margin-bottom: 16px;
-            background: #3c3c3c;
-            border-radius: 0 8px 8px 0;
+            border-left: 3px solid #ff6b35; padding: 12px 16px;
+            margin-bottom: 16px; background: #3c3c3c; border-radius: 0 8px 8px 0;
         }
-        .day-title {
-            font-weight: bold;
-            color: #ff6b35;
-            margin-bottom: 8px;
-            font-size: 1em;
+        .day-title { font-weight: bold; color: #ff6b35; margin-bottom: 8px; font-size: 1em; }
+        .meal { font-size: 0.9em; color: #ddd; margin-bottom: 4px; }
+        #groceryListBtn {
+            width: 100%; margin-top: 12px; padding: 12px;
+            border-radius: 8px; border: none; background: #44aa44;
+            color: #fff; font-size: 1em; font-weight: bold;
+            cursor: pointer; transition: opacity 0.2s; display: none;
         }
-        .meal {
-            font-size: 0.9em;
-            color: #ddd;
-            margin-bottom: 4px;
+        #groceryListBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .grocery-section {
+            margin-top: 24px; padding: 12px 16px;
+            background: #3c3c3c; border-radius: 8px; border-left: 3px solid #44aa44;
         }
+        .grocery-title { font-weight: bold; color: #44aa44; margin-bottom: 12px; font-size: 1.1em; }
+        .category-items { color: #ddd; font-size: 0.9em; line-height: 1.6; }
     </style>
 </head>
 <body>
     <div class="card">
         <h1 class="title">🍽️ Nourish</h1>
         <p class="subtitle">Your AI Meal Planner</p>
+        <p id="modelIndicator" class="model-indicator">Loading model...</p>
 
         <label>Foods you like</label>
         <input type="text" id="likes" placeholder="e.g. chicken, pasta, avocado" />
@@ -155,14 +99,34 @@
         </div>
 
         <button id="generateBtn" onclick="generateMealPlan()">Generate Meal Plan</button>
+        <button id="groceryListBtn" onclick="generateGroceryList()">🛒 Generate Grocery List</button>
 
         <div id="loading">🍳 Generating your meal plan...</div>
         <div id="error"></div>
         <div id="output"></div>
+        <div id="groceryLoading" style="display:none; margin-top:16px; color:#44aa44;">🛒 Generating grocery list...</div>
+        <div id="groceryOutput"></div>
     </div>
 
     <script>
         let goal = '';
+        let currentMealPlan = '';
+        let activeModel = 'qwen2.5-coder-7b-instruct';
+
+        async function loadModel() {
+            try {
+                const res = await fetch('http://localhost:1234/v1/models');
+                const data = await res.json();
+                if (data?.data?.[0]?.id) {
+                    activeModel = data.data[0].id;
+                    document.getElementById('modelIndicator').textContent = '🤖 Model: ' + activeModel;
+                }
+            } catch (e) {
+                document.getElementById('modelIndicator').textContent = '⚠️ Could not connect to LM Studio';
+            }
+        }
+
+        loadModel();
 
         function setGoal(newGoal, btn) {
             goal = newGoal;
@@ -194,15 +158,15 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'local-model',
+                        model: activeModel,
                         messages: [
                             {
                                 role: 'system',
-                                content: 'You are a professional nutritionist and chef. Generate structured 7-day meal plans. Format each day exactly like this: DAY 1: Breakfast: [meal] Lunch: [meal] Dinner: [meal]'
+                                content: 'You are a professional nutritionist and chef. Generate a 7-day meal plan. Do not include any intro text or commentary. Start your response immediately with "DAY 1:" and follow this exact format for every day:\n\nDAY 1:\nBreakfast: [specific recipe name and brief description]\nLunch: [specific recipe name and brief description]\nDinner: [specific recipe name and brief description]\n\nDAY 2:\n...and so on through DAY 7. Each meal must include quantities and key ingredients.'
                             },
                             {
                                 role: 'user',
-                                content: `Generate a 7-day meal plan. Foods I like: ${likes || 'anything'}. Foods I hate or cannot eat: ${hates || 'none'}. My goal: ${goal}.`
+                                content: `Generate a 7-day meal plan. Foods I like: ${likes || 'anything'}. Foods I hate or cannot eat: ${hates || 'none'}. My goal: ${goal}. Start immediately with DAY 1: and include quantities for each meal.`
                             }
                         ],
                         temperature: 0.7,
@@ -216,22 +180,84 @@
                 const result = data?.choices?.[0]?.message?.content;
                 if (!result) throw new Error('No content');
 
-                output.innerHTML = result
-                    .split(/day \d+/gi)
-                    .filter(s => s.trim())
-                    .map((day, i) => `
-                        <div class="day-card">
-                            <div class="day-title">Day ${i + 1}</div>
-                            <div class="meal">${day.trim().replace(/\n/g, '<br>')}</div>
-                        </div>
-                    `).join('');
+                currentMealPlan = result;
+
+                const days = result.split(/DAY \d+:/i).filter(s => s.trim());
+                output.innerHTML = days.map((day, i) => `
+                    <div class="day-card">
+                        <div class="day-title">Day ${i + 1}</div>
+                        <div class="meal">${day.trim().replace(/\n/g, '<br>')}</div>
+                    </div>
+                `).join('');
 
                 output.style.display = 'block';
+                document.getElementById('groceryListBtn').style.display = 'block';
+                document.getElementById('groceryOutput').innerHTML = '';
             } catch (err) {
                 error.textContent = 'Something went wrong. Make sure LM Studio is running on port 1234.';
                 error.style.display = 'block';
             } finally {
                 loading.style.display = 'none';
+                btn.disabled = false;
+            }
+        }
+
+        async function generateGroceryList() {
+            const error = document.getElementById('error');
+            const groceryOutput = document.getElementById('groceryOutput');
+            const groceryLoading = document.getElementById('groceryLoading');
+            const btn = document.getElementById('groceryListBtn');
+
+            if (!currentMealPlan) {
+                error.textContent = 'No meal plan available. Generate a meal plan first.';
+                error.style.display = 'block';
+                return;
+            }
+
+            groceryOutput.innerHTML = '';
+            error.style.display = 'none';
+            groceryLoading.style.display = 'block';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('http://localhost:1234/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: activeModel,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'You are a helpful assistant. Extract a grouped grocery list from the meal plan. Include quantities for every item. Organize by category: Proteins, Vegetables, Fruits, Grains, Dairy, Pantry/Other. Do not include intro text. Start immediately with the first category.'
+                            },
+                            {
+                                role: 'user',
+                                content: `Create a grouped grocery list with quantities from this meal plan:\n\n${currentMealPlan}`
+                            }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 1500
+                    })
+                });
+
+                if (!response.ok) throw new Error('API error');
+
+                const data = await response.json();
+                const result = data?.choices?.[0]?.message?.content;
+                if (!result) throw new Error('No content');
+
+                groceryOutput.innerHTML = `
+                    <div class="grocery-section">
+                        <div class="grocery-title">🛒 Grocery List</div>
+                        <div class="category-items">${result.replace(/\n/g, '<br>')}</div>
+                    </div>
+                `;
+                groceryOutput.style.display = 'block';
+            } catch (err) {
+                error.textContent = 'Failed to generate grocery list. Make sure LM Studio is running on port 1234.';
+                error.style.display = 'block';
+            } finally {
+                groceryLoading.style.display = 'none';
                 btn.disabled = false;
             }
         }
