@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Meal Planner</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            max-width: 800px;
+        }
+
+        textarea, input {
+            width: 100%;
+            margin: 10px 0;
+            padding: 10px;
+        }
+
+        button {
+            padding: 10px 15px;
+            cursor: pointer;
+        }
+
+        #output {
+            white-space: pre-wrap;
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>7-Day Meal Planner</h1>
+
+    <textarea id="prefs" placeholder="Enter dietary preferences (e.g. high protein, low carb, vegetarian)"></textarea>
+
+    <button id="generateBtn">Generate Meal Plan</button>
+
+    <div id="output"></div>
+
+<script>
+const endpoint = "http://localhost:1234/v1/chat/completions";
+
+document.getElementById("generateBtn").addEventListener("click", generateMealPlan);
+
+async function generateMealPlan() {
+    const output = document.getElementById("output");
+    const prefs = document.getElementById("prefs").value.trim();
+
+    output.textContent = "Generating meal plan...";
+
+    try {
+        const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: "local_model",
+                messages: [
+                    {
+                        role: "system",
+                        content: "You are a professional nutritionist. Return structured meal plans."
+                    },
+                    {
+                        role: "user",
+                        content: `Generate a 7-day meal plan (breakfast, lunch, dinner). Preferences: ${prefs}`
+                    }
+                ],
+                temperature: 0.7,
+                max_tokens: 2000
+            })
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json();
+
+        const result = data?.choices?.[0]?.message?.content;
+
+        if (!result) {
+            throw new Error("No response content returned from model.");
+        }
+
+        output.textContent = result;
+
+    } catch (err) {
+        output.textContent = "Error:\n" + err.message;
+        console.error(err);
+    }
+}
+</script>
+
+</body>
+</html>
