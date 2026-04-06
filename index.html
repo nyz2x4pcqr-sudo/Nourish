@@ -2,15 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <title>Nourish Meal Planner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nourish - AI Meal Planner</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * { 
+            box-sizing: border-box; 
+            margin: 0; 
+            padding: 0; 
+        }
+        
         body {
             background-color: #1a1a1a;
-            color: #fff;
-            font-family: Arial, sans-serif;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             min-height: 100vh;
-            padding: 40px 20px;
+            padding: 20px;
         }
         
         /* INPUT SECTION */
@@ -20,258 +26,441 @@
             border-radius: 12px;
             max-width: 900px;
             margin: 0 auto 40px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
         }
-        .title { font-size: 2em; color: #ff6b35; margin-bottom: 4px; }
-        .subtitle { font-size: 1em; color: #aaa; margin-bottom: 8px; }
-        .model-indicator { font-size: 0.75em; color: #666; margin-bottom: 16px; }
-        label { display: block; font-size: 0.85em; color: #aaa; margin-bottom: 4px; margin-top: 16px; }
-        input {
+        
+        .title { 
+            font-size: 2em; 
+            color: #ff6b35; 
+            margin-bottom: 4px; 
+            font-weight: 700;
+        }
+        
+        .subtitle { 
+            font-size: 1em; 
+            color: #aaa; 
+            margin-bottom: 8px; 
+        }
+        
+        .model-indicator { 
+            font-size: 0.85em; 
+            color: #888; 
+            margin-bottom: 20px; 
+            padding: 8px 12px;
+            background: #1a1a1a;
+            border-radius: 6px;
+            display: inline-block;
+        }
+        
+        label { 
+            display: block; 
+            font-size: 0.9em; 
+            color: #bbb; 
+            margin-bottom: 6px; 
+            margin-top: 18px;
+            font-weight: 500;
+        }
+        
+        input[type="text"] {
             background-color: #3c3c3c;
             color: #fff;
-            border: 1px solid #444;
-            padding: 10px 14px;
+            border: 2px solid #444;
+            padding: 12px 14px;
             border-radius: 8px;
             width: 100%;
             font-size: 1em;
+            transition: border-color 0.2s;
         }
-        input:focus { outline: none; border-color: #ff6b35; }
-        .goal-label { margin-top: 20px; margin-bottom: 8px; font-size: 0.85em; color: #aaa; }
-        .goal-buttons { display: flex; gap: 10px; }
+        
+        input[type="text"]:focus { 
+            outline: none; 
+            border-color: #ff6b35; 
+        }
+        
+        .goal-label { 
+            margin-top: 24px; 
+            margin-bottom: 10px; 
+            font-size: 0.9em; 
+            color: #bbb;
+            font-weight: 500;
+        }
+        
+        .goal-buttons { 
+            display: flex; 
+            gap: 12px; 
+        }
+        
         .goal-btn {
-            flex: 1; padding: 10px; border-radius: 8px;
-            border: 2px solid #444; background: #3c3c3c;
-            color: #aaa; font-weight: bold; cursor: pointer; transition: all 0.2s;
+            flex: 1; 
+            padding: 12px; 
+            border-radius: 8px;
+            border: 2px solid #444; 
+            background: #3c3c3c;
+            color: #aaa; 
+            font-weight: 600; 
+            cursor: pointer; 
+            transition: all 0.2s;
+            font-size: 0.95em;
         }
-        .goal-btn.active { border-color: #ff6b35; background: #ff6b35; color: #fff; }
+        
+        .goal-btn:hover {
+            border-color: #555;
+            background: #4c4c4c;
+        }
+        
+        .goal-btn.active { 
+            border-color: #ff6b35; 
+            background: #ff6b35; 
+            color: #fff; 
+        }
+        
         #generateBtn {
-            width: 100%; margin-top: 24px; padding: 14px;
-            border-radius: 8px; border: none; background: #ff6b35;
-            color: #fff; font-size: 1.1em; font-weight: bold;
-            cursor: pointer; transition: opacity 0.2s;
+            width: 100%; 
+            margin-top: 28px; 
+            padding: 14px;
+            border-radius: 8px; 
+            border: none; 
+            background: linear-gradient(135deg, #ff6b35, #ff8555);
+            color: #fff; 
+            font-size: 1em; 
+            font-weight: 600;
+            cursor: pointer; 
+            transition: all 0.2s;
         }
-        #generateBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        #generateBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+        }
+        
+        #generateBtn:disabled { 
+            opacity: 0.5; 
+            cursor: not-allowed; 
+        }
+        
         .control-messages {
-            display: none; margin-top: 16px;
+            display: none; 
+            margin-top: 20px;
         }
-        #loading { color: #ff6b35; font-size: 1em; text-align: center; }
-        #error {
+        
+        #loading { 
+            color: #ff6b35; 
+            font-size: 0.95em; 
+            text-align: center;
             padding: 12px;
-            background: #3a1a1a; border: 1px solid #ff4444;
-            border-radius: 8px; color: #ff4444; font-size: 0.9em;
+            background: rgba(255, 107, 53, 0.1);
+            border-radius: 8px;
+            display: none;
         }
-
+        
+        #error {
+            padding: 14px;
+            background: rgba(255, 68, 68, 0.15); 
+            border: 2px solid #ff4444;
+            border-radius: 8px; 
+            color: #ff6666; 
+            font-size: 0.9em;
+            display: none;
+        }
+        
         /* MEAL PLAN DISPLAY SECTION */
         .meal-plan-container {
             display: none;
             max-width: 1400px;
             margin: 0 auto;
             display: grid;
-            grid-template-columns: 1fr 350px;
+            grid-template-columns: 1fr 380px;
             gap: 24px;
         }
-        .meal-plan-container.active { display: grid; }
-
+        
+        .meal-plan-container.active { 
+            display: grid; 
+        }
+        
         /* DAY CARDS (LEFT - ACCORDION) */
         .days-panel {
             display: flex;
             flex-direction: column;
             gap: 12px;
         }
-
+        
         .day-accordion {
             background: #2c2c2c;
             border-radius: 12px;
-            border-left: 4px solid #ff6b35;
+            border-left: 5px solid #ff6b35;
             overflow: hidden;
             transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         }
-
+        
         .day-accordion-header {
-            padding: 16px 20px;
+            padding: 18px 20px;
             background: #3c3c3c;
             color: #fff;
-            font-weight: bold;
+            font-weight: 600;
             font-size: 1.1em;
             cursor: pointer;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            user-select: none;
         }
-
-        .day-accordion-header:hover { background: #4c4c4c; }
-
-        .day-accordion-header.expanded { background: #ff6b35; }
-
+        
+        .day-accordion-header:hover { 
+            background: #4c4c4c; 
+        }
+        
+        .day-accordion-header.expanded { 
+            background: #ff6b35;
+            color: #fff;
+        }
+        
         .accordion-arrow {
             font-size: 1.2em;
             transition: transform 0.3s;
         }
-
+        
         .day-accordion-header.expanded .accordion-arrow {
             transform: rotate(180deg);
         }
-
+        
         .day-accordion-content {
             max-height: 0;
             overflow: hidden;
             transition: max-height 0.3s ease;
             background: #2c2c2c;
         }
-
+        
         .day-accordion-content.expanded {
-            max-height: 2000px;
+            max-height: 3000px;
         }
-
+        
         .day-content {
-            padding: 20px;
+            padding: 24px;
         }
-
+        
         .meal-type {
-            margin-bottom: 20px;
+            margin-bottom: 28px;
         }
-
-        .meal-type:last-child { margin-bottom: 0; }
-
+        
+        .meal-type:last-child { 
+            margin-bottom: 0; 
+        }
+        
         .meal-type-header {
-            font-size: 1em;
-            font-weight: bold;
+            font-size: 0.9em;
+            font-weight: 700;
             color: #ff6b35;
             margin-bottom: 8px;
-            text-transform: capitalize;
-        }
-
-        .meal-name {
-            font-size: 1.05em;
-            color: #fff;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-
-        .ingredients-section {
-            margin-bottom: 12px;
-        }
-
-        .section-label {
-            font-size: 0.85em;
-            color: #aaa;
-            font-weight: bold;
             text-transform: uppercase;
-            margin-bottom: 6px;
             letter-spacing: 0.5px;
         }
-
+        
+        .meal-name {
+            font-size: 1.15em;
+            color: #fff;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+        
+        .ingredients-section {
+            margin-bottom: 16px;
+        }
+        
+        .section-label {
+            font-size: 0.8em;
+            color: #999;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+        
         .ingredients-list {
-            font-size: 0.9em;
+            font-size: 0.95em;
             color: #ddd;
             line-height: 1.8;
             margin-left: 16px;
         }
-
+        
         .ingredient-item {
-            margin-bottom: 4px;
+            margin-bottom: 6px;
+            color: #e0e0e0;
         }
-
+        
+        .ingredient-item::before {
+            content: "•";
+            margin-right: 8px;
+            color: #ff6b35;
+            font-weight: bold;
+        }
+        
         .instructions-section {
-            margin-top: 12px;
+            margin-top: 14px;
         }
-
+        
         .instructions-list {
-            font-size: 0.9em;
+            font-size: 0.95em;
             color: #ddd;
-            line-height: 1.8;
-            counter-reset: step;
+            line-height: 1.9;
             list-style: none;
+            counter-reset: step;
         }
-
+        
         .instruction-item {
-            margin-bottom: 8px;
-            margin-left: 24px;
+            margin-bottom: 10px;
+            margin-left: 32px;
             counter-increment: step;
             position: relative;
+            color: #e0e0e0;
         }
-
+        
         .instruction-item::before {
             content: counter(step);
             position: absolute;
-            left: -24px;
+            left: -32px;
             top: 0;
             background: #ff6b35;
             color: #fff;
-            width: 20px;
-            height: 20px;
+            width: 24px;
+            height: 24px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.8em;
-            font-weight: bold;
+            font-size: 0.75em;
+            font-weight: 700;
         }
-
+        
         /* GROCERY LIST PANEL (RIGHT) */
         .grocery-panel {
             background: #2c2c2c;
             border-radius: 12px;
-            border-left: 4px solid #44aa44;
-            padding: 20px;
+            border-left: 5px solid #44aa44;
+            padding: 24px;
             max-height: calc(100vh - 120px);
             overflow-y: auto;
             position: sticky;
             top: 40px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         }
-
+        
         .grocery-panel-title {
-            font-size: 1.2em;
-            font-weight: bold;
+            font-size: 1.15em;
+            font-weight: 700;
             color: #44aa44;
-            margin-bottom: 16px;
+            margin-bottom: 18px;
             text-align: center;
         }
-
+        
+        .grocery-category {
+            margin-bottom: 20px;
+        }
+        
+        .grocery-category:last-child {
+            margin-bottom: 0;
+        }
+        
+        .category-label {
+            font-size: 0.8em;
+            font-weight: 700;
+            color: #999;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+        
         .grocery-item {
             padding: 10px 0;
-            border-bottom: 1px solid #3c3c3c;
             font-size: 0.95em;
             color: #ddd;
             display: flex;
-            align-items: center;
-            gap: 10px;
+            align-items: flex-start;
+            gap: 12px;
         }
-
-        .grocery-item:last-child { border-bottom: none; }
-
+        
         .grocery-checkbox {
             width: 18px;
             height: 18px;
             cursor: pointer;
             accent-color: #44aa44;
+            flex-shrink: 0;
+            margin-top: 2px;
         }
-
+        
         .grocery-item-text {
             flex: 1;
+            word-break: break-word;
         }
-
+        
+        .grocery-item.checked .grocery-item-text {
+            text-decoration: line-through;
+            color: #666;
+        }
+        
+        /* SCROLLBAR */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #2c2c2c;
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #ff6b35;
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #ff8555;
+        }
+        
         /* RESPONSIVE */
-        @media (max-width: 1024px) {
+        @media (max-width: 1200px) {
             .meal-plan-container {
                 grid-template-columns: 1fr;
             }
+            
             .grocery-panel {
                 position: static;
                 max-height: none;
             }
         }
-
+        
         @media (max-width: 768px) {
             .input-section {
                 padding: 20px;
+                margin-bottom: 30px;
             }
-            .day-content {
-                padding: 16px;
+            
+            .title {
+                font-size: 1.6em;
             }
+            
             .day-accordion-header {
                 padding: 14px 16px;
                 font-size: 1em;
+            }
+            
+            .day-content {
+                padding: 16px;
+            }
+            
+            .goal-buttons {
+                gap: 8px;
+            }
+            
+            .goal-btn {
+                padding: 10px;
+                font-size: 0.85em;
+            }
+            
+            #generateBtn {
+                margin-top: 20px;
+                padding: 12px;
             }
         }
     </style>
@@ -283,10 +472,10 @@
         <p class="subtitle">Your AI Meal Planner</p>
         <p id="modelIndicator" class="model-indicator">Loading model...</p>
 
-        <label>Foods you like</label>
+        <label for="likes">Foods you like</label>
         <input type="text" id="likes" placeholder="e.g. chicken, pasta, avocado" />
 
-        <label>Foods you hate or can't eat</label>
+        <label for="hates">Foods you hate or can't eat</label>
         <input type="text" id="hates" placeholder="e.g. mushrooms, shellfish, dairy" />
 
         <p class="goal-label">Your goal</p>
@@ -312,7 +501,6 @@
 
     <script>
         let goal = '';
-        let currentMealPlan = '';
         let activeModel = 'qwen2.5-coder-7b-instruct';
 
         async function loadModel() {
@@ -365,99 +553,54 @@
                         messages: [
                             {
                                 role: 'system',
-                                content: `You are a professional chef and nutritionist.
+                                content: `You are a professional chef and nutritionist. Generate a 3-day meal plan based on user preferences and goals.
 
-Generate a 3-day meal plan.
+CRITICAL: Respond ONLY with valid JSON. No other text before or after the JSON.
 
-----------------------------
-INPUT PARAMETERS
-----------------------------
-Goal: ${goal}
-Likes: ${likes || 'anything'}
-Dislikes: ${hates || 'none'}
+Use this exact JSON structure:
+{
+  "days": [
+    {
+      "day": 1,
+      "breakfast": {
+        "name": "Meal name",
+        "ingredients": [
+          {"item": "ingredient name", "quantity": "1", "unit": "cup"}
+        ],
+        "instructions": ["Step 1", "Step 2"]
+      },
+      "lunch": { "name": "", "ingredients": [], "instructions": [] },
+      "dinner": { "name": "", "ingredients": [], "instructions": [] }
+    }
+  ],
+  "groceryList": [
+    {"item": "ingredient", "quantity": "2", "unit": "lbs", "category": "Produce"}
+  ]
+}
 
-----------------------------
-STRICT OUTPUT RULES
-----------------------------
-
-1. OUTPUT LIMIT
-- Generate EXACTLY 3 days only
-- Each day must include: Breakfast, Lunch, Dinner
-- Do not add anything outside these 3 days
-
-2. NO EXTRA SECTIONS
-- Do NOT include a grocery list
-- Do NOT include summaries, notes, or commentary
-- Do NOT include shopping suggestions or tips
-- Output ONLY the meal plan
-
-3. INGREDIENT RULES (VERY STRICT)
-- Every ingredient in instructions MUST appear in the ingredients list
-- Every ingredient must have a specific measurable quantity
-- Do NOT use vague terms:
-  ❌ "to taste"
-  ❌ "optional"
-  ❌ "a handful"
-- Do NOT use generic groupings:
-  ❌ "mixed vegetables"
-  ❌ "seasonings"
-  → Instead list each ingredient individually with quantities
-
-4. COOKING REALISM RULES
-- Use realistic cooking methods only
-- Do NOT combine unrelated cooking processes (e.g., baking quinoa with salmon unless explicitly separate steps)
-- Instructions must reflect real-world cooking practices
-
-5. VARIETY RULE
-- Do NOT repeat the same meal more than once across all 3 days
-
-----------------------------
-FORMAT (FOLLOW EXACTLY)
-----------------------------
-
-Day 1:
-Breakfast:
-Name:
-Ingredients:
-- ingredient (quantity + unit)
-- ingredient (quantity + unit)
-Instructions:
-1.
-2.
-3.
-
-Lunch:
-Name:
-Ingredients:
-- ...
-Instructions:
-1.
-2.
-3.
-
-Dinner:
-Name:
-Ingredients:
-- ...
-Instructions:
-1.
-2.
-3.
-
-(repeat same structure for Day 2 and Day 3)
-
-----------------------------
-FINAL RULE
-----------------------------
-If you violate any rule above, the response is invalid.`
+Requirements:
+- Generate exactly 3 days
+- Each day must have breakfast, lunch, and dinner
+- Every ingredient must have: item name, quantity number, and unit
+- No vague terms like "to taste" or "handful"
+- List each ingredient individually (no "mixed vegetables")
+- Every ingredient in instructions must appear in the ingredients list
+- Recipes should be realistic and followable
+- Grocery list categories: Produce, Proteins, Dairy, Grains, Pantry, Other
+- Do not repeat meals across the 3 days
+- Respond ONLY with the JSON object, no other text`
                             },
                             {
                                 role: 'user',
-                                content: `Generate the 3-day meal plan following ALL the rules exactly. No exceptions.`
+                                content: `Goal: ${goal}
+Favorite foods: ${likes || 'any'}
+Foods to avoid: ${hates || 'none'}
+
+Generate the 3-day meal plan as JSON only.`
                             }
                         ],
                         temperature: 0.7,
-                        max_tokens: 2000
+                        max_tokens: 3000
                     })
                 });
 
@@ -467,12 +610,30 @@ If you violate any rule above, the response is invalid.`
                 const result = data?.choices?.[0]?.message?.content;
                 if (!result) throw new Error('No content');
 
-                currentMealPlan = result;
-                parseMealPlanAndRender(result);
-                
+                // Parse and validate JSON
+                let mealPlanData;
+                try {
+                    // Extract JSON from response (in case there's extra text)
+                    const jsonMatch = result.match(/\{[\s\S]*\}/);
+                    if (!jsonMatch) throw new Error('No JSON found in response');
+                    mealPlanData = JSON.parse(jsonMatch[0]);
+                } catch (parseErr) {
+                    error.textContent = 'Failed to parse meal plan. The model may not have returned valid JSON.';
+                    error.style.display = 'block';
+                    loading.style.display = 'none';
+                    btn.disabled = false;
+                    return;
+                }
+
+                // Validate structure
+                if (!mealPlanData.days || !Array.isArray(mealPlanData.days) || mealPlanData.days.length === 0) {
+                    throw new Error('Invalid meal plan structure');
+                }
+
+                renderMealPlan(mealPlanData);
                 controlMessages.style.display = 'none';
             } catch (err) {
-                error.textContent = 'Something went wrong. Make sure LM Studio is running on port 1234.';
+                error.textContent = 'Error: ' + (err.message || 'Something went wrong. Make sure LM Studio is running on port 1234.');
                 error.style.display = 'block';
             } finally {
                 loading.style.display = 'none';
@@ -480,68 +641,7 @@ If you violate any rule above, the response is invalid.`
             }
         }
 
-        function parseMealPlanAndRender(mealPlanText) {
-            // Parse text into structured data
-            const mealData = [];
-            const dayRegex = /Day (\d+):/i;
-            const mealTypeRegex = /(Breakfast|Lunch|Dinner):/i;
-            const nameRegex = /Name:\s*(.+?)(?=\n)/;
-            const ingredientsRegex = /Ingredients:([\s\S]*?)(?=Instructions:|$)/i;
-            const instructionsRegex = /Instructions:([\s\S]*?)(?=Breakfast:|Lunch:|Dinner:|Day \d+:|$)/i;
-
-            const dayMatches = mealPlanText.split(/Day \d+:/i);
-
-            for (let dayIndex = 1; dayIndex <= 3; dayIndex++) {
-                if (!dayMatches[dayIndex]) break;
-                
-                const dayContent = dayMatches[dayIndex];
-                const dayObj = { day: dayIndex, meals: {} };
-
-                const mealTypes = ['Breakfast', 'Lunch', 'Dinner'];
-                
-                for (const mealType of mealTypes) {
-                    const mealRegex = new RegExp(`${mealType}:(\\s*([\\s\\S]*?))(?=Breakfast:|Lunch:|Dinner:|$)`, 'i');
-                    const mealMatch = dayContent.match(mealRegex);
-
-                    if (mealMatch) {
-                        const mealContent = mealMatch[1];
-                        const nameMatch = mealContent.match(/Name:\s*(.+?)(?:\n|$)/i);
-                        const ingredientsMatch = mealContent.match(/Ingredients:([\s\S]*?)(?=Instructions:|$)/i);
-                        const instructionsMatch = mealContent.match(/Instructions:([\s\S]*?)(?=Breakfast:|Lunch:|Dinner:|$)/i);
-
-                        const name = nameMatch ? nameMatch[1].trim() : 'Meal';
-                        const ingredients = extractIngredients(ingredientsMatch ? ingredientsMatch[1] : '');
-                        const instructions = extractInstructions(instructionsMatch ? instructionsMatch[1] : '');
-
-                        dayObj.meals[mealType.toLowerCase()] = {
-                            name,
-                            ingredients,
-                            instructions
-                        };
-                    }
-                }
-
-                mealData.push(dayObj);
-            }
-
-            renderMealPlan(mealData);
-        }
-
-        function extractIngredients(text) {
-            return text
-                .split('\n')
-                .map(line => line.replace(/^[-•]\s*/, '').trim())
-                .filter(line => line.length > 0);
-        }
-
-        function extractInstructions(text) {
-            return text
-                .split('\n')
-                .map(line => line.replace(/^\d+\.\s*/, '').trim())
-                .filter(line => line.length > 0);
-        }
-
-        function renderMealPlan(mealData) {
+        function renderMealPlan(mealPlanData) {
             document.getElementById('mealPlanContainer').classList.add('active');
             
             const daysPanel = document.getElementById('daysPanel');
@@ -551,7 +651,7 @@ If you violate any rule above, the response is invalid.`
             groceryPanel.innerHTML = '';
 
             // Render day accordions
-            mealData.forEach((dayData, index) => {
+            mealPlanData.days.forEach((dayData, index) => {
                 const accordion = createDayAccordion(dayData);
                 daysPanel.appendChild(accordion);
 
@@ -567,8 +667,8 @@ If you violate any rule above, the response is invalid.`
                 toggleAccordion(daysPanel.children[0], daysPanel);
             }
 
-            // Render grocery list (placeholder - extract from meal data)
-            renderGroceryList(mealData);
+            // Render grocery list grouped by category
+            renderGroceryList(mealPlanData.groceryList || []);
         }
 
         function createDayAccordion(dayData) {
@@ -590,7 +690,7 @@ If you violate any rule above, the response is invalid.`
 
             // Add meals
             ['breakfast', 'lunch', 'dinner'].forEach(mealType => {
-                const meal = dayData.meals[mealType];
+                const meal = dayData[mealType];
                 if (meal) {
                     const mealHTML = createMealSection(mealType, meal);
                     contentInner.appendChild(mealHTML);
@@ -614,7 +714,7 @@ If you violate any rule above, the response is invalid.`
 
             const name = document.createElement('div');
             name.className = 'meal-name';
-            name.textContent = meal.name;
+            name.textContent = meal.name || 'Meal';
 
             const ingredientsSection = document.createElement('div');
             ingredientsSection.className = 'ingredients-section';
@@ -625,12 +725,18 @@ If you violate any rule above, the response is invalid.`
 
             const ingredientsList = document.createElement('div');
             ingredientsList.className = 'ingredients-list';
-            meal.ingredients.forEach(ingredient => {
-                const item = document.createElement('div');
-                item.className = 'ingredient-item';
-                item.textContent = ingredient;
-                ingredientsList.appendChild(item);
-            });
+            
+            if (meal.ingredients && Array.isArray(meal.ingredients)) {
+                meal.ingredients.forEach(ing => {
+                    const item = document.createElement('div');
+                    item.className = 'ingredient-item';
+                    const text = ing.quantity && ing.unit 
+                        ? `${ing.item} - ${ing.quantity} ${ing.unit}`
+                        : (ing.item || ing);
+                    item.textContent = text;
+                    ingredientsList.appendChild(item);
+                });
+            }
 
             ingredientsSection.appendChild(ingredientsLabel);
             ingredientsSection.appendChild(ingredientsList);
@@ -644,12 +750,15 @@ If you violate any rule above, the response is invalid.`
 
             const instructionsList = document.createElement('ol');
             instructionsList.className = 'instructions-list';
-            meal.instructions.forEach(instruction => {
-                const item = document.createElement('li');
-                item.className = 'instruction-item';
-                item.textContent = instruction;
-                instructionsList.appendChild(item);
-            });
+            
+            if (meal.instructions && Array.isArray(meal.instructions)) {
+                meal.instructions.forEach(instruction => {
+                    const item = document.createElement('li');
+                    item.className = 'instruction-item';
+                    item.textContent = instruction;
+                    instructionsList.appendChild(item);
+                });
+            }
 
             instructionsSection.appendChild(instructionsLabel);
             instructionsSection.appendChild(instructionsList);
@@ -674,31 +783,54 @@ If you violate any rule above, the response is invalid.`
             clickedAccordion.querySelector('.day-accordion-content').classList.add('expanded');
         }
 
-        function renderGroceryList(mealData) {
+        function renderGroceryList(groceryItems) {
             const groceryPanel = document.getElementById('groceryPanel');
             
-            // Extract all unique ingredients across all meals
-            const groceryItems = new Set();
-            
-            mealData.forEach(dayData => {
-                Object.values(dayData.meals).forEach(meal => {
-                    meal.ingredients.forEach(ingredient => {
-                        groceryItems.add(ingredient);
-                    });
-                });
-            });
-
             groceryPanel.innerHTML = '<div class="grocery-panel-title">🛒 Grocery List</div>';
 
-            const sortedItems = Array.from(groceryItems).sort();
-            sortedItems.forEach(item => {
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'grocery-item';
-                itemDiv.innerHTML = `
-                    <input type="checkbox" class="grocery-checkbox" />
-                    <span class="grocery-item-text">${item}</span>
-                `;
-                groceryPanel.appendChild(itemDiv);
+            // Group by category
+            const grouped = {};
+            groceryItems.forEach(item => {
+                const category = item.category || 'Other';
+                if (!grouped[category]) {
+                    grouped[category] = [];
+                }
+                grouped[category].push(item);
+            });
+
+            // Sort categories and render
+            const sortedCategories = Object.keys(grouped).sort();
+            sortedCategories.forEach(category => {
+                const categoryDiv = document.createElement('div');
+                categoryDiv.className = 'grocery-category';
+
+                const categoryLabel = document.createElement('div');
+                categoryLabel.className = 'category-label';
+                categoryLabel.textContent = category;
+                categoryDiv.appendChild(categoryLabel);
+
+                grouped[category].forEach(item => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'grocery-item';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'grocery-checkbox';
+                    checkbox.addEventListener('change', (e) => {
+                        e.target.parentElement.classList.toggle('checked');
+                    });
+
+                    const text = document.createElement('span');
+                    text.className = 'grocery-item-text';
+                    const quantity = item.quantity ? ` - ${item.quantity} ${item.unit || ''}`.trim() : '';
+                    text.textContent = item.item + quantity;
+
+                    itemDiv.appendChild(checkbox);
+                    itemDiv.appendChild(text);
+                    categoryDiv.appendChild(itemDiv);
+                });
+
+                groceryPanel.appendChild(categoryDiv);
             });
         }
     </script>
