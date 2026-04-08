@@ -152,17 +152,6 @@
             border-radius: 8px;
             display: none;
         }
-
-        #usda-loading {
-            color: #ff6b35;
-            font-size: 0.85em;
-            text-align: center;
-            padding: 8px;
-            background: rgba(255, 107, 53, 0.1);
-            border-radius: 8px;
-            display: none;
-            margin-top: 12px;
-        }
         
         #error {
             padding: 14px;
@@ -188,14 +177,15 @@
             display: grid; 
         }
         
-        /* DAY CARDS (LEFT - ACCORDION) */
+        /* DAYS PANEL (LEFT) */
         .days-panel {
             display: flex;
             flex-direction: column;
             gap: 12px;
         }
         
-        .day-accordion {
+        /* DAY CARD */
+        .day-card {
             background: #2c2c2c;
             border-radius: 12px;
             border-left: 5px solid #ff6b35;
@@ -204,7 +194,7 @@
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         }
         
-        .day-accordion-header {
+        .day-card-header {
             padding: 18px 20px;
             background: #3c3c3c;
             color: #fff;
@@ -218,48 +208,48 @@
             user-select: none;
         }
         
-        .day-accordion-header:hover { 
+        .day-card-header:hover { 
             background: #4c4c4c; 
         }
         
-        .day-accordion-header.expanded { 
+        .day-card-header.expanded { 
             background: #ff6b35;
             color: #fff;
         }
         
-        .accordion-arrow {
+        .day-arrow {
             font-size: 1.2em;
             transition: transform 0.3s;
         }
         
-        .day-accordion-header.expanded .accordion-arrow {
+        .day-card-header.expanded .day-arrow {
             transform: rotate(180deg);
         }
         
-        .day-accordion-content {
+        .day-card-content {
             max-height: 0;
             overflow: hidden;
             transition: max-height 0.3s ease;
             background: #2c2c2c;
         }
         
-        .day-accordion-content.expanded {
-            max-height: 5000px;
+        .day-card-content.expanded {
+            max-height: 3000px;
         }
         
-        .day-content {
-            padding: 24px;
+        .day-card-body {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
         }
         
-        .meal-section {
-            margin-bottom: 20px;
-            background: #1a1a1a;
+        /* MEAL ACCORDION (nested inside day) */
+        .meal-accordion {
+            background: #3c3c3c;
             border-radius: 8px;
+            border-left: 4px solid #ff6b35;
             overflow: hidden;
-        }
-        
-        .meal-section:last-child {
-            margin-bottom: 0;
         }
         
         .meal-accordion-header {
@@ -267,7 +257,7 @@
             background: #3c3c3c;
             color: #fff;
             font-weight: 600;
-            font-size: 1em;
+            font-size: 0.95em;
             cursor: pointer;
             display: flex;
             justify-content: space-between;
@@ -285,12 +275,12 @@
             color: #fff;
         }
         
-        .meal-accordion-header .meal-arrow {
+        .meal-accordion-arrow {
             font-size: 1em;
             transition: transform 0.3s;
         }
         
-        .meal-accordion-header.expanded .meal-arrow {
+        .meal-accordion-header.expanded .meal-accordion-arrow {
             transform: rotate(180deg);
         }
         
@@ -301,89 +291,81 @@
         }
         
         .meal-accordion-content.expanded {
-            max-height: 1000px;
+            max-height: 1500px;
         }
         
-        .meal-content {
+        .meal-accordion-body {
             padding: 16px;
             background: #2c2c2c;
-        }
-        
-        .meal-type-label {
-            font-size: 0.75em;
-            font-weight: 700;
-            color: #aaa;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
+            border-top: 1px solid #4c4c4c;
         }
         
         .meal-name {
-            font-size: 1.05em;
+            font-size: 0.95em;
             color: #fff;
-            font-weight: 700;
-            margin-bottom: 12px;
+            font-weight: 600;
+            margin-bottom: 10px;
         }
         
-        .nutrition-badges {
+        .meal-time {
+            font-size: 0.85em;
+            color: #aaa;
+            margin-bottom: 14px;
             display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .nutrition-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 8px;
-            flex-wrap: wrap;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
         
         .nutrition-badge {
             display: flex;
             flex-direction: column;
-            align-items: center;
-            padding: 8px 12px;
+            padding: 8px;
             border-radius: 6px;
-            font-size: 0.75em;
+            font-size: 0.8em;
             font-weight: 600;
-            color: #fff;
-            min-width: 70px;
             text-align: center;
         }
         
-        .badge-calories {
-            background: rgba(255, 107, 53, 0.3);
-            border: 1px solid #ff6b35;
-            color: #ffb380;
+        .nutrition-badge .badge-label {
+            font-size: 0.65em;
+            opacity: 0.9;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
         }
         
-        .badge-protein {
-            background: rgba(76, 175, 80, 0.3);
+        .nutrition-badge .badge-value {
+            font-size: 1em;
+            font-weight: 700;
+        }
+        
+        .badge-green {
+            background: rgba(76, 175, 80, 0.2);
             border: 1px solid #4caf50;
             color: #81c784;
         }
         
-        .badge-carbs {
-            background: rgba(33, 150, 243, 0.3);
-            border: 1px solid #2196f3;
-            color: #64b5f6;
-        }
-        
-        .badge-fat {
-            background: rgba(255, 193, 7, 0.3);
+        .badge-yellow {
+            background: rgba(255, 193, 7, 0.2);
             border: 1px solid #ffc107;
             color: #fff59d;
         }
         
-        .badge-label {
-            font-size: 0.65em;
-            opacity: 0.85;
-            margin-bottom: 2px;
-        }
-        
-        .badge-value {
-            font-size: 0.9em;
-            font-weight: 700;
+        .badge-red {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid #f44336;
+            color: #ef5350;
         }
         
         .ingredients-section {
-            margin-bottom: 16px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid #3c3c3c;
+            margin-bottom: 12px;
         }
         
         .section-label {
@@ -392,18 +374,19 @@
             font-weight: 700;
             text-transform: uppercase;
             margin-bottom: 8px;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.4px;
         }
         
         .ingredients-list {
-            font-size: 0.9em;
+            font-size: 0.85em;
             color: #ddd;
             line-height: 1.6;
         }
         
         .ingredient-item {
-            margin-bottom: 6px;
+            margin-bottom: 4px;
             color: #e0e0e0;
+            margin-left: 12px;
         }
         
         .ingredient-item::before {
@@ -418,17 +401,17 @@
         }
         
         .instructions-list {
-            font-size: 0.9em;
+            font-size: 0.85em;
             color: #ddd;
-            line-height: 1.7;
+            line-height: 1.6;
             list-style: none;
             counter-reset: step;
-            margin-left: 4px;
+            margin-left: 0;
         }
         
         .instruction-item {
             margin-bottom: 8px;
-            margin-left: 28px;
+            margin-left: 24px;
             counter-increment: step;
             position: relative;
             color: #e0e0e0;
@@ -437,22 +420,22 @@
         .instruction-item::before {
             content: counter(step);
             position: absolute;
-            left: -28px;
+            left: -24px;
             top: 0;
             background: #ff6b35;
             color: #fff;
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.7em;
+            font-size: 0.65em;
             font-weight: 700;
         }
         
         /* RIGHT PANEL */
-        .nutrition-panel {
+        .right-panel {
             background: #2c2c2c;
             border-radius: 12px;
             border-left: 5px solid #ff6b35;
@@ -474,53 +457,8 @@
             letter-spacing: 0.5px;
         }
         
-        .panel-section {
-            margin-bottom: 28px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #3c3c3c;
-        }
-        
-        .panel-section:last-child {
-            margin-bottom: 0;
-            padding-bottom: 0;
-            border-bottom: none;
-        }
-        
-        .summary-stat {
-            margin-bottom: 14px;
-        }
-        
-        .summary-stat:last-child {
-            margin-bottom: 0;
-        }
-        
-        .stat-label {
-            font-size: 0.75em;
-            color: #aaa;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .stat-value {
-            font-size: 1.6em;
-            font-weight: 700;
-            color: #fff;
-        }
-        
-        .stat-unit {
-            font-size: 0.7em;
-            color: #888;
-            margin-left: 4px;
-        }
-        
-        .stat-calories .stat-value { color: #ffb380; }
-        .stat-protein .stat-value { color: #81c784; }
-        .stat-carbs .stat-value { color: #64b5f6; }
-        .stat-fat .stat-value { color: #fff59d; }
-        
         .grocery-category {
-            margin-bottom: 18px;
+            margin-bottom: 16px;
         }
         
         .grocery-category:last-child {
@@ -532,7 +470,7 @@
             font-weight: 700;
             color: #aaa;
             text-transform: uppercase;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             letter-spacing: 0.5px;
         }
         
@@ -589,7 +527,7 @@
                 grid-template-columns: 1fr;
             }
             
-            .nutrition-panel {
+            .right-panel {
                 position: static;
                 max-height: none;
             }
@@ -605,13 +543,19 @@
                 font-size: 1.6em;
             }
             
-            .day-accordion-header {
+            .day-card-header {
                 padding: 14px 16px;
                 font-size: 1em;
             }
             
-            .day-content {
-                padding: 16px;
+            .meal-accordion-header {
+                padding: 12px 14px;
+                font-size: 0.9em;
+            }
+            
+            .day-card-body {
+                padding: 12px;
+                gap: 10px;
             }
             
             .goal-buttons {
@@ -626,15 +570,6 @@
             #generateBtn {
                 margin-top: 20px;
                 padding: 12px;
-            }
-            
-            .nutrition-badges {
-                gap: 6px;
-            }
-            
-            .nutrition-badge {
-                padding: 6px 10px;
-                min-width: 60px;
             }
         }
     </style>
@@ -662,8 +597,7 @@
         <button id="generateBtn" onclick="generateMealPlan()">Generate 7-Day Meal Plan</button>
 
         <div class="control-messages">
-            <div id="loading">🍳 Generating your 7-day meal plan...</div>
-            <div id="usda-loading">🔍 Fetching nutritional data from USDA...</div>
+            <div id="loading">🍳 Generating your cooked meal plan...</div>
             <div id="error"></div>
         </div>
     </div>
@@ -671,14 +605,13 @@
     <!-- MEAL PLAN DISPLAY -->
     <div class="meal-plan-container" id="mealPlanContainer">
         <div class="days-panel" id="daysPanel"></div>
-        <div class="nutrition-panel" id="nutritionPanel"></div>
+        <div class="right-panel" id="rightPanel"></div>
     </div>
 
     <script>
         let goal = '';
         let activeModel = 'qwen2.5-coder-7b-instruct';
-        let mealPlanData = null;
-        let usda_cache = {};
+        let daysData = [];
 
         async function loadModel() {
             try {
@@ -716,6 +649,13 @@
                 return;
             }
 
+            if (!likes && !hates) {
+                error.textContent = 'Enter at least some food preferences';
+                controlMessages.style.display = 'block';
+                error.style.display = 'block';
+                return;
+            }
+
             controlMessages.style.display = 'block';
             error.style.display = 'none';
             loading.style.display = 'block';
@@ -730,57 +670,33 @@
                         messages: [
                             {
                                 role: 'system',
-                                content: `You are a professional chef and nutritionist. Generate a 7-day meal plan based on user preferences and goals.
+                                content: 'Return ONLY valid JSON, no other text, no markdown. Generate a 7-day meal plan with breakfast lunch dinner each day. Real cooked meals with ingredients and steps. JSON only.'
+                            },
+                            {
+                                role: 'user',
+                                content: `Generate a 7-day meal plan with breakfast, lunch, and dinner each day. Goal: ${goal}. Favorite foods: ${likes || 'any'}. Avoid: ${hates || 'none'}.
 
-CRITICAL: Respond ONLY with valid JSON. No other text before or after the JSON.
-
-Use this exact JSON structure:
+Return this exact JSON structure (no markdown, no extra text):
 {
   "days": [
     {
       "day": 1,
       "breakfast": {
-        "name": "Meal name",
-        "calories": 400,
-        "protein": 25,
-        "carbs": 45,
-        "fat": 12,
-        "ingredients": [
-          {"item": "ingredient name", "quantity": "1", "unit": "cup"}
-        ],
-        "instructions": ["Step 1", "Step 2"]
+        "name": "meal name",
+        "time_minutes": 30,
+        "nutrition": {"calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0},
+        "ingredients": ["item 1", "item 2"],
+        "steps": ["step 1", "step 2"]
       },
-      "lunch": {"name": "", "calories": 0, "protein": 0, "carbs": 0, "fat": 0, "ingredients": [], "instructions": []},
-      "dinner": {"name": "", "calories": 0, "protein": 0, "carbs": 0, "fat": 0, "ingredients": [], "instructions": []}
+      "lunch": {...},
+      "dinner": {...}
     }
-  ],
-  "groceryList": [
-    {"item": "ingredient", "quantity": "2", "unit": "lbs", "category": "Produce"}
   ]
-}
-
-Requirements:
-- Generate exactly 7 days
-- Each day must have breakfast, lunch, and dinner
-- Each meal MUST have: name, calories, protein (g), carbs (g), fat (g), ingredients array, instructions array
-- Each ingredient must have: item, quantity, unit
-- Instructions must be an array of strings
-- Grocery list items must have: item, quantity, unit, category
-- Categories: Produce, Proteins, Dairy, Grains, Pantry, Other
-- Do not repeat meals across the 7 days
-- Respond ONLY with the JSON object, no other text`
-                            },
-                            {
-                                role: 'user',
-                                content: `Goal: ${goal}
-Favorite foods: ${likes || 'any'}
-Foods to avoid: ${hates || 'none'}
-
-Generate the 7-day meal plan as JSON only.`
+}`
                             }
                         ],
                         temperature: 0.7,
-                        max_tokens: 5000
+                        max_tokens: 4000
                     })
                 });
 
@@ -790,12 +706,11 @@ Generate the 7-day meal plan as JSON only.`
                 const result = data?.choices?.[0]?.message?.content;
                 if (!result) throw new Error('No content');
 
-                // Parse and validate JSON
-                let parsedMealPlan;
+                let parsedData;
                 try {
                     const jsonMatch = result.match(/\{[\s\S]*\}/);
                     if (!jsonMatch) throw new Error('No JSON found in response');
-                    parsedMealPlan = JSON.parse(jsonMatch[0]);
+                    parsedData = JSON.parse(jsonMatch[0]);
                 } catch (parseErr) {
                     error.textContent = 'Failed to parse meal plan. The model may not have returned valid JSON.';
                     error.style.display = 'block';
@@ -804,204 +719,138 @@ Generate the 7-day meal plan as JSON only.`
                     return;
                 }
 
-                if (!parsedMealPlan.days || !Array.isArray(parsedMealPlan.days) || parsedMealPlan.days.length === 0) {
+                if (!parsedData.days || !Array.isArray(parsedData.days) || parsedData.days.length === 0) {
                     throw new Error('Invalid meal plan structure');
                 }
 
-                mealPlanData = parsedMealPlan;
-                renderMealPlan(mealPlanData);
-                updateNutritionPanel();
-                
-                // Fetch USDA data for ingredients
-                loading.style.display = 'none';
-                document.getElementById('usda-loading').style.display = 'block';
-                await fetchUSDAData(mealPlanData);
-                document.getElementById('usda-loading').style.display = 'none';
-                
+                daysData = parsedData.days;
+                renderMealPlan(daysData);
+                updateRightPanel(daysData);
                 controlMessages.style.display = 'none';
             } catch (err) {
                 error.textContent = 'Error: ' + (err.message || 'Something went wrong. Make sure LM Studio is running on port 1234.');
                 error.style.display = 'block';
             } finally {
                 loading.style.display = 'none';
-                document.getElementById('usda-loading').style.display = 'none';
                 btn.disabled = false;
             }
         }
 
-        async function fetchUSDAData(data) {
-            const uniqueIngredients = new Set();
-            data.days.forEach(day => {
-                ['breakfast', 'lunch', 'dinner'].forEach(mealType => {
-                    const meal = day[mealType];
-                    if (meal && meal.ingredients) {
-                        meal.ingredients.forEach(ing => {
-                            uniqueIngredients.add(ing.item.toLowerCase());
-                        });
-                    }
-                });
-            });
-
-            const ingredientArray = Array.from(uniqueIngredients);
-            for (const ingredient of ingredientArray) {
-                try {
-                    const response = await fetch(
-                        `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(ingredient)}&pageSize=1&api_key=DEMO_KEY`
-                    );
-                    const result = await response.json();
-                    if (result.foods && result.foods[0]) {
-                        const food = result.foods[0];
-                        const nutrients = {};
-                        if (food.foodNutrients) {
-                            food.foodNutrients.forEach(n => {
-                                if (n.nutrientName === 'Energy') nutrients.calories = n.value;
-                                if (n.nutrientName === 'Protein') nutrients.protein = n.value;
-                                if (n.nutrientName === 'Carbohydrate, by difference') nutrients.carbs = n.value;
-                                if (n.nutrientName === 'Total lipid (fat)') nutrients.fat = n.value;
-                            });
-                        }
-                        usda_cache[ingredient] = nutrients;
-                    }
-                } catch (e) {
-                    // Silently skip if USDA lookup fails
-                }
-            }
-            
-            updateNutritionBadges();
-        }
-
-        function updateNutritionBadges() {
-            const badges = document.querySelectorAll('.nutrition-badge');
-            badges.forEach(badge => {
-                const parent = badge.closest('.meal-content');
-                if (!parent) return;
-                
-                const mealName = parent.querySelector('.meal-name')?.textContent || '';
-                const ingredients = parent.querySelector('.ingredients-list');
-                if (!ingredients) return;
-                
-                const updatedCalories = updateBadgeValue(badge, 'Calories');
-                const updatedProtein = updateBadgeValue(badge, 'Protein');
-                const updatedCarbs = updateBadgeValue(badge, 'Carbs');
-                const updatedFat = updateBadgeValue(badge, 'Fat');
-            });
-        }
-
-        function updateBadgeValue(badge, nutrientType) {
-            const badgeClass = {
-                'Calories': 'badge-calories',
-                'Protein': 'badge-protein',
-                'Carbs': 'badge-carbs',
-                'Fat': 'badge-fat'
-            }[nutrientType];
-            
-            if (!badge.classList.contains(badgeClass)) return false;
-            
-            // Badges now show initial LM Studio values
-            // USDA data is stored in cache for future use
-            return true;
-        }
-
-        function renderMealPlan(data) {
+        function renderMealPlan(days) {
             document.getElementById('mealPlanContainer').classList.add('active');
             const daysPanel = document.getElementById('daysPanel');
             daysPanel.innerHTML = '';
 
-            data.days.forEach((dayData) => {
-                const accordion = createDayAccordion(dayData);
-                daysPanel.appendChild(accordion);
-
-                const header = accordion.querySelector('.day-accordion-header');
-                header.addEventListener('click', () => {
-                    toggleDayAccordion(accordion, daysPanel);
-                });
+            days.forEach((dayData, dayIndex) => {
+                const dayCard = createDayCard(dayData, dayIndex);
+                daysPanel.appendChild(dayCard);
             });
 
+            // Expand first day by default
             if (daysPanel.children.length > 0) {
-                toggleDayAccordion(daysPanel.children[0], daysPanel);
+                const firstHeader = daysPanel.children[0].querySelector('.day-card-header');
+                toggleDayCard(daysPanel.children[0]);
             }
         }
 
-        function createDayAccordion(dayData) {
-            const accordion = document.createElement('div');
-            accordion.className = 'day-accordion';
+        function createDayCard(dayData, dayIndex) {
+            const card = document.createElement('div');
+            card.className = 'day-card';
+            card.dataset.dayIndex = dayIndex;
 
             const header = document.createElement('div');
-            header.className = 'day-accordion-header';
-            header.innerHTML = `Day ${dayData.day} <span class="accordion-arrow">▾</span>`;
+            header.className = 'day-card-header';
+            header.textContent = `Day ${dayData.day}`;
+            const arrow = document.createElement('span');
+            arrow.className = 'day-arrow';
+            arrow.textContent = '▾';
+            header.appendChild(arrow);
+
+            header.addEventListener('click', () => toggleDayCard(card));
 
             const content = document.createElement('div');
-            content.className = 'day-accordion-content';
+            content.className = 'day-card-content';
 
-            const contentInner = document.createElement('div');
-            contentInner.className = 'day-content';
+            const body = document.createElement('div');
+            body.className = 'day-card-body';
 
+            // Create meal accordions
             ['breakfast', 'lunch', 'dinner'].forEach(mealType => {
                 const meal = dayData[mealType];
                 if (meal) {
-                    const mealSection = createMealAccordion(mealType, meal);
-                    contentInner.appendChild(mealSection);
+                    const mealAccordion = createMealAccordion(meal, mealType);
+                    body.appendChild(mealAccordion);
                 }
             });
 
-            content.appendChild(contentInner);
-            accordion.appendChild(header);
-            accordion.appendChild(content);
+            content.appendChild(body);
+            card.appendChild(header);
+            card.appendChild(content);
 
-            return accordion;
+            return card;
         }
 
-        function createMealAccordion(mealType, meal) {
-            const section = document.createElement('div');
-            section.className = 'meal-section';
+        function createMealAccordion(meal, mealType) {
+            const accordion = document.createElement('div');
+            accordion.className = 'meal-accordion';
+
+            const mealTypeLabel = mealType.charAt(0).toUpperCase() + mealType.slice(1);
 
             const header = document.createElement('div');
             header.className = 'meal-accordion-header';
-            header.innerHTML = `<div style="font-weight: 600;">${meal.name || mealType}</div><span class="meal-arrow">▾</span>`;
+            header.textContent = `${mealTypeLabel}: ${meal.name}`;
+            const arrow = document.createElement('span');
+            arrow.className = 'meal-accordion-arrow';
+            arrow.textContent = '▾';
+            header.appendChild(arrow);
+
+            header.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleMealAccordion(accordion);
+            });
 
             const content = document.createElement('div');
             content.className = 'meal-accordion-content';
 
-            const contentInner = document.createElement('div');
-            contentInner.className = 'meal-content';
-
-            // Type label
-            const typeLabel = document.createElement('div');
-            typeLabel.className = 'meal-type-label';
-            typeLabel.textContent = mealType.toUpperCase();
-            contentInner.appendChild(typeLabel);
+            const body = document.createElement('div');
+            body.className = 'meal-accordion-body';
 
             // Meal name
             const nameDiv = document.createElement('div');
             nameDiv.className = 'meal-name';
-            nameDiv.textContent = meal.name || 'Meal';
-            contentInner.appendChild(nameDiv);
+            nameDiv.textContent = meal.name;
+            body.appendChild(nameDiv);
 
-            // Badges
-            const badges = document.createElement('div');
-            badges.className = 'nutrition-badges';
-            
-            const caloriesBadge = document.createElement('div');
-            caloriesBadge.className = 'nutrition-badge badge-calories';
-            caloriesBadge.innerHTML = `<div class="badge-label">Calories</div><div class="badge-value">${Math.round(meal.calories || 0)}</div>`;
-            badges.appendChild(caloriesBadge);
+            // Time
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'meal-time';
+            timeDiv.innerHTML = `⏱️ ${meal.time_minutes || 30} minutes`;
+            body.appendChild(timeDiv);
 
-            const proteinBadge = document.createElement('div');
-            proteinBadge.className = 'nutrition-badge badge-protein';
-            proteinBadge.innerHTML = `<div class="badge-label">Protein</div><div class="badge-value">${Math.round(meal.protein || 0)}g</div>`;
-            badges.appendChild(proteinBadge);
-
-            const carbsBadge = document.createElement('div');
-            carbsBadge.className = 'nutrition-badge badge-carbs';
-            carbsBadge.innerHTML = `<div class="badge-label">Carbs</div><div class="badge-value">${Math.round(meal.carbs || 0)}g</div>`;
-            badges.appendChild(carbsBadge);
-
-            const fatBadge = document.createElement('div');
-            fatBadge.className = 'nutrition-badge badge-fat';
-            fatBadge.innerHTML = `<div class="badge-label">Fat</div><div class="badge-value">${Math.round(meal.fat || 0)}g</div>`;
-            badges.appendChild(fatBadge);
-
-            contentInner.appendChild(badges);
+            // Nutrition Badges
+            if (meal.nutrition) {
+                const nutritionSection = document.createElement('div');
+                nutritionSection.className = 'nutrition-section';
+                
+                const nutritionItems = [
+                    { label: 'Calories', key: 'calories', value: meal.nutrition.calories, unit: 'kcal' },
+                    { label: 'Protein', key: 'protein_g', value: meal.nutrition.protein_g, unit: 'g' },
+                    { label: 'Carbs', key: 'carbs_g', value: meal.nutrition.carbs_g, unit: 'g' },
+                    { label: 'Fat', key: 'fat_g', value: meal.nutrition.fat_g, unit: 'g' }
+                ];
+                
+                nutritionItems.forEach(item => {
+                    const badge = document.createElement('div');
+                    badge.className = `nutrition-badge badge-green`;
+                    badge.innerHTML = `
+                        <div class="badge-label">${item.label}</div>
+                        <div class="badge-value">${Math.round(item.value)}<span style="font-size: 0.8em; margin-left: 2px;">${item.unit}</span></div>
+                    `;
+                    nutritionSection.appendChild(badge);
+                });
+                
+                body.appendChild(nutritionSection);
+            }
 
             // Ingredients
             if (meal.ingredients && meal.ingredients.length > 0) {
@@ -1018,204 +867,147 @@ Generate the 7-day meal plan as JSON only.`
                 meal.ingredients.forEach(ing => {
                     const item = document.createElement('div');
                     item.className = 'ingredient-item';
-                    const qty = ing.quantity && ing.unit ? ` - ${ing.quantity} ${ing.unit}` : '';
-                    item.textContent = ing.item + qty;
+                    item.textContent = ing;
                     ingredientsList.appendChild(item);
                 });
                 ingredientsSection.appendChild(ingredientsList);
-                contentInner.appendChild(ingredientsSection);
+                body.appendChild(ingredientsSection);
             }
 
-            // Instructions
-            if (meal.instructions && meal.instructions.length > 0) {
-                const instructionsSection = document.createElement('div');
-                instructionsSection.className = 'instructions-section';
+            // Steps
+            if (meal.steps && meal.steps.length > 0) {
+                const stepsSection = document.createElement('div');
+                stepsSection.className = 'instructions-section';
 
-                const instructionsLabel = document.createElement('div');
-                instructionsLabel.className = 'section-label';
-                instructionsLabel.textContent = 'Instructions';
-                instructionsSection.appendChild(instructionsLabel);
+                const stepsLabel = document.createElement('div');
+                stepsLabel.className = 'section-label';
+                stepsLabel.textContent = 'Steps';
+                stepsSection.appendChild(stepsLabel);
 
-                const instructionsList = document.createElement('ol');
-                instructionsList.className = 'instructions-list';
-                meal.instructions.forEach(instruction => {
+                const stepsList = document.createElement('ol');
+                stepsList.className = 'instructions-list';
+                meal.steps.forEach(step => {
                     const item = document.createElement('li');
                     item.className = 'instruction-item';
-                    item.textContent = instruction;
-                    instructionsList.appendChild(item);
+                    item.textContent = step;
+                    stepsList.appendChild(item);
                 });
-                instructionsSection.appendChild(instructionsList);
-                contentInner.appendChild(instructionsSection);
+                stepsSection.appendChild(stepsList);
+                body.appendChild(stepsSection);
             }
 
-            content.appendChild(contentInner);
-            section.appendChild(header);
-            section.appendChild(content);
+            content.appendChild(body);
+            accordion.appendChild(header);
+            accordion.appendChild(content);
 
-            // Add click handler for meal accordion
-            header.addEventListener('click', () => {
-                toggleMealAccordion(section);
-            });
-
-            return section;
+            return accordion;
         }
 
-        function toggleDayAccordion(clickedAccordion, container) {
-            container.querySelectorAll('.day-accordion').forEach(acc => {
-                acc.querySelector('.day-accordion-header').classList.remove('expanded');
-                acc.querySelector('.day-accordion-content').classList.remove('expanded');
-            });
-
-            clickedAccordion.querySelector('.day-accordion-header').classList.add('expanded');
-            clickedAccordion.querySelector('.day-accordion-content').classList.add('expanded');
-        }
-
-        function toggleMealAccordion(section) {
-            const header = section.querySelector('.meal-accordion-header');
-            const content = section.querySelector('.meal-accordion-content');
-            
+        function toggleDayCard(card) {
+            const header = card.querySelector('.day-card-header');
+            const content = card.querySelector('.day-card-content');
             header.classList.toggle('expanded');
             content.classList.toggle('expanded');
         }
 
-        function updateNutritionPanel() {
-            const nutritionPanel = document.getElementById('nutritionPanel');
-            nutritionPanel.innerHTML = '';
+        function toggleMealAccordion(accordion) {
+            const header = accordion.querySelector('.meal-accordion-header');
+            const content = accordion.querySelector('.meal-accordion-content');
+            header.classList.toggle('expanded');
+            content.classList.toggle('expanded');
+        }
 
-            if (!mealPlanData || !mealPlanData.days) return;
+        function updateRightPanel(days) {
+            const rightPanel = document.getElementById('rightPanel');
+            rightPanel.innerHTML = '';
 
-            let totalCalories = 0;
-            let totalProtein = 0;
-            let totalCarbs = 0;
-            let totalFat = 0;
-
-            mealPlanData.days.forEach(day => {
+            // Extract all unique ingredients for grocery list
+            const allIngredients = [];
+            days.forEach(day => {
                 ['breakfast', 'lunch', 'dinner'].forEach(mealType => {
                     const meal = day[mealType];
-                    if (meal) {
-                        totalCalories += meal.calories || 0;
-                        totalProtein += meal.protein || 0;
-                        totalCarbs += meal.carbs || 0;
-                        totalFat += meal.fat || 0;
+                    if (meal && meal.ingredients) {
+                        allIngredients.push(...meal.ingredients);
                     }
                 });
             });
 
-            // Nutrition Summary Title
+            // Parse ingredients to extract quantity and category
+            const groceryItems = parseGroceryItems(allIngredients);
+
+            // Group by category
+            const grouped = {};
+            groceryItems.forEach(item => {
+                const category = item.category || 'Other';
+                if (!grouped[category]) grouped[category] = [];
+                grouped[category].push(item);
+            });
+
+            // Grocery List Title
             const titleDiv = document.createElement('div');
             titleDiv.className = 'panel-title';
-            titleDiv.textContent = '📊 Weekly Summary';
-            nutritionPanel.appendChild(titleDiv);
-
-            // Weekly Totals Section
-            const weeklySection = document.createElement('div');
-            weeklySection.className = 'panel-section';
-
-            const stats = [
-                { label: 'Total Calories', value: Math.round(totalCalories), unit: 'kcal', className: 'stat-calories' },
-                { label: 'Total Protein', value: Math.round(totalProtein), unit: 'g', className: 'stat-protein' },
-                { label: 'Total Carbs', value: Math.round(totalCarbs), unit: 'g', className: 'stat-carbs' },
-                { label: 'Total Fat', value: Math.round(totalFat), unit: 'g', className: 'stat-fat' }
-            ];
-
-            stats.forEach(stat => {
-                const statDiv = document.createElement('div');
-                statDiv.className = `summary-stat ${stat.className}`;
-                statDiv.innerHTML = `
-                    <div class="stat-label">${stat.label}</div>
-                    <div class="stat-value">${stat.value}<span class="stat-unit">${stat.unit}</span></div>
-                `;
-                weeklySection.appendChild(statDiv);
-            });
-
-            nutritionPanel.appendChild(weeklySection);
-
-            // Daily Average Section
-            const dailySection = document.createElement('div');
-            dailySection.className = 'panel-section';
-
-            const dailyTitle = document.createElement('div');
-            dailyTitle.className = 'panel-title';
-            dailyTitle.style.fontSize = '0.95em';
-            dailyTitle.style.marginBottom = '12px';
-            dailyTitle.textContent = 'Daily Average';
-            dailySection.appendChild(dailyTitle);
-
-            const dailyStats = [
-                { label: 'Calories', value: Math.round(totalCalories / 7), unit: 'kcal/day', emoji: '🔥' },
-                { label: 'Protein', value: Math.round(totalProtein / 7), unit: 'g/day', emoji: '🥚' },
-                { label: 'Carbs', value: Math.round(totalCarbs / 7), unit: 'g/day', emoji: '🍞' },
-                { label: 'Fat', value: Math.round(totalFat / 7), unit: 'g/day', emoji: '🧈' }
-            ];
-
-            dailyStats.forEach(stat => {
-                const statDiv = document.createElement('div');
-                statDiv.className = 'summary-stat';
-                statDiv.style.marginBottom = '8px';
-                statDiv.style.paddingBottom = '0';
-                statDiv.style.borderBottom = 'none';
-                statDiv.innerHTML = `<div style="font-size: 0.9em; color: #ddd;">${stat.emoji} ${stat.value} ${stat.unit}</div>`;
-                dailySection.appendChild(statDiv);
-            });
-
-            nutritionPanel.appendChild(dailySection);
+            titleDiv.textContent = '🛒 Grocery List';
+            rightPanel.appendChild(titleDiv);
 
             // Grocery List Section
-            if (mealPlanData.groceryList && mealPlanData.groceryList.length > 0) {
-                const grocerySection = document.createElement('div');
-                grocerySection.className = 'panel-section';
+            const sortedCategories = Object.keys(grouped).sort();
+            sortedCategories.forEach(category => {
+                const categoryDiv = document.createElement('div');
+                categoryDiv.className = 'grocery-category';
 
-                const groceryTitle = document.createElement('div');
-                groceryTitle.className = 'panel-title';
-                groceryTitle.style.fontSize = '0.95em';
-                groceryTitle.style.marginBottom = '14px';
-                groceryTitle.textContent = '🛒 Grocery List';
-                grocerySection.appendChild(groceryTitle);
+                const categoryLabel = document.createElement('div');
+                categoryLabel.className = 'category-label';
+                categoryLabel.textContent = category;
+                categoryDiv.appendChild(categoryLabel);
 
-                // Group by category
-                const grouped = {};
-                mealPlanData.groceryList.forEach(item => {
-                    const category = item.category || 'Other';
-                    if (!grouped[category]) grouped[category] = [];
-                    grouped[category].push(item);
-                });
-
-                const sortedCategories = Object.keys(grouped).sort();
-                sortedCategories.forEach(category => {
-                    const categoryDiv = document.createElement('div');
-                    categoryDiv.className = 'grocery-category';
-
-                    const categoryLabel = document.createElement('div');
-                    categoryLabel.className = 'category-label';
-                    categoryLabel.textContent = category;
-                    categoryDiv.appendChild(categoryLabel);
-
-                    grouped[category].forEach(item => {
-                        const itemDiv = document.createElement('div');
-                        itemDiv.className = 'grocery-item';
-                        
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.className = 'grocery-checkbox';
-                        checkbox.addEventListener('change', (e) => {
-                            e.target.parentElement.classList.toggle('checked');
-                        });
-
-                        const text = document.createElement('span');
-                        text.className = 'grocery-item-text';
-                        const quantity = item.quantity ? ` - ${item.quantity} ${item.unit || ''}`.trim() : '';
-                        text.textContent = item.item + quantity;
-
-                        itemDiv.appendChild(checkbox);
-                        itemDiv.appendChild(text);
-                        categoryDiv.appendChild(itemDiv);
+                grouped[category].forEach(item => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'grocery-item';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'grocery-checkbox';
+                    checkbox.addEventListener('change', (e) => {
+                        e.target.parentElement.classList.toggle('checked');
                     });
 
-                    grocerySection.appendChild(categoryDiv);
+                    const text = document.createElement('span');
+                    text.className = 'grocery-item-text';
+                    text.textContent = item.name;
+
+                    itemDiv.appendChild(checkbox);
+                    itemDiv.appendChild(text);
+                    categoryDiv.appendChild(itemDiv);
                 });
 
-                nutritionPanel.appendChild(grocerySection);
-            }
+                rightPanel.appendChild(categoryDiv);
+            });
+        }
+
+        function parseGroceryItems(ingredients) {
+            const items = [];
+            const categories = {
+                'chicken': 'Proteins', 'beef': 'Proteins', 'pork': 'Proteins', 'fish': 'Proteins', 'salmon': 'Proteins', 'shrimp': 'Proteins', 'turkey': 'Proteins', 'egg': 'Proteins', 'tofu': 'Proteins', 'lamb': 'Proteins',
+                'milk': 'Dairy', 'cheese': 'Dairy', 'yogurt': 'Dairy', 'butter': 'Dairy', 'cream': 'Dairy',
+                'rice': 'Grains', 'pasta': 'Grains', 'bread': 'Grains', 'oat': 'Grains', 'flour': 'Grains', 'quinoa': 'Grains',
+                'tomato': 'Produce', 'onion': 'Produce', 'garlic': 'Produce', 'lettuce': 'Produce', 'spinach': 'Produce', 'broccoli': 'Produce', 'carrot': 'Produce', 'apple': 'Produce', 'banana': 'Produce', 'lemon': 'Produce', 'lime': 'Produce', 'bell pepper': 'Produce', 'mushroom': 'Produce', 'potato': 'Produce', 'zucchini': 'Produce', 'cucumber': 'Produce', 'celery': 'Produce', 'kale': 'Produce', 'cabbage': 'Produce', 'avocado': 'Produce',
+                'oil': 'Pantry', 'salt': 'Pantry', 'pepper': 'Pantry', 'spice': 'Pantry', 'sauce': 'Pantry', 'vinegar': 'Pantry', 'soy': 'Pantry', 'garlic': 'Pantry'
+            };
+
+            ingredients.forEach(ing => {
+                if (!ing) return;
+                let category = 'Other';
+                const lowerIng = ing.toLowerCase();
+                for (const [key, cat] of Object.entries(categories)) {
+                    if (lowerIng.includes(key)) {
+                        category = cat;
+                        break;
+                    }
+                }
+                items.push({ name: ing, category: category });
+            });
+
+            return items;
         }
     </script>
 </body>
