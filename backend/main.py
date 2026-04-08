@@ -20,9 +20,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-chroma_client = chromadb.PersistentClient(path="/data/chroma")
-collection = chroma_client.get_or_create_collection("nourish_knowledge")
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+# Initialize globals
+chroma_client = None
+collection = None
+embedder = None
+
+try:
+    chroma_client = chromadb.PersistentClient(path="./chroma_data")
+    collection = chroma_client.get_or_create_collection("nourish_knowledge")
+except Exception as e:
+    print(f"Warning: ChromaDB initialization failed: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    global embedder
+    try:
+        embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        print("Sentence transformer model loaded successfully")
+    except Exception as e:
+        print(f"Warning: Sentence transformer initialization failed: {e}")
 
 class GenerateRequest(BaseModel):
     provider: str
@@ -80,6 +96,8 @@ async def generate(req: GenerateRequest):
 
 @app.post("/api/knowledge/add-text")
 async def add_knowledge_text(req: KnowledgeTextRequest):
+    if not collection or not embedder:
+        raise HTTPException(status_code=503, detail="Knowledge base not initialized")
     chunks = [req.content[i:i+500] for i in range(0, len(req.content), 450)]
     embeddings = embedder.encode(chunks).tolist()
     ids = [str(uuid.uuid4()) for _ in chunks]
@@ -89,6 +107,8 @@ async def add_knowledge_text(req: KnowledgeTextRequest):
 
 @app.post("/api/knowledge/add")
 async def add_knowledge_file(file: UploadFile = File(...)):
+    if not collection or not embedder:
+        raise HTTPException(status_code=503, detail="Knowledge base not initialized")
     content = await file.read()
     text = content.decode("utf-8", errors="ignore")
     name = file.filename
@@ -101,6 +121,8 @@ async def add_knowledge_file(file: UploadFile = File(...)):
 
 @app.post("/api/knowledge/query")
 async def query_knowledge(req: QueryRequest):
+    if not collection or not embedder:
+        raise HTTPException(status_code=503, detail="Knowledge base not initialized")
     embedding = embedder.encode([req.query]).tolist()
     results = collection.query(query_embeddings=embedding, n_results=req.n_results)
     docs = results.get("documents", [[]])[0]
@@ -108,12 +130,16 @@ async def query_knowledge(req: QueryRequest):
 
 @app.get("/api/knowledge")
 async def list_knowledge():
+    if not collection:
+        raise HTTPException(status_code=503, detail="Knowledge base not initialized")
     results = collection.get()
     names = list(set(m.get("name") for m in results.get("metadatas", [])))
     return {"entries": names}
 
 @app.delete("/api/knowledge/{name}")
 async def delete_knowledge(name: str):
+    if not collection:
+        raise HTTPException(status_code=503, detail="Knowledge base not initialized")
     results = collection.get(where={"name": name})
     if results["ids"]:
         collection.delete(ids=results["ids"])
