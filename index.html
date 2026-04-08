@@ -113,6 +113,43 @@
             background: #ff6b35; 
             color: #fff; 
         }
+
+        .source-label {
+            margin-top: 24px;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            color: #bbb;
+            font-weight: 500;
+        }
+
+        .source-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .source-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            border: 2px solid #444;
+            background: #3c3c3c;
+            color: #aaa;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.95em;
+        }
+
+        .source-btn:hover {
+            border-color: #555;
+            background: #4c4c4c;
+        }
+
+        .source-btn.active {
+            border-color: #ff6b35;
+            background: #ff6b35;
+            color: #fff;
+        }
         
         #generateBtn {
             width: 100%; 
@@ -160,6 +197,347 @@
             border-radius: 8px; 
             color: #ff6666; 
             font-size: 0.9em;
+            display: none;
+        }
+        
+        #nutritionUpdate {
+            color: #ff6b35; 
+            font-size: 0.95em; 
+            text-align: center;
+            padding: 12px;
+            background: rgba(255, 107, 53, 0.1);
+            border-radius: 8px;
+            display: none;
+            margin-top: 10px;
+        }
+
+        .title-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 4px;
+        }
+
+        #settingsBtn {
+            background: none;
+            border: none;
+            color: #ff6b35;
+            font-size: 1.8em;
+            cursor: pointer;
+            padding: 0;
+            transition: transform 0.2s;
+        }
+
+        #settingsBtn:hover {
+            transform: rotate(20deg);
+        }
+
+        #settingsDrawer {
+            background: #3c3c3c;
+            border: 1px solid #4c4c4c;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease;
+            display: none;
+        }
+
+        #settingsDrawer.open {
+            display: block;
+            max-height: 1200px;
+        }
+
+        .settings-tabs {
+            display: flex;
+            border-bottom: 2px solid #4c4c4c;
+            background: #2c2c2c;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .settings-tab-btn {
+            flex: 1;
+            padding: 16px;
+            border: none;
+            background: none;
+            color: #aaa;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            border-bottom: 3px solid transparent;
+        }
+
+        .settings-tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 107, 53, 0.1);
+        }
+
+        .settings-tab-btn.active {
+            color: #ff6b35;
+            border-bottom-color: #ff6b35;
+        }
+
+        .settings-content {
+            padding: 24px;
+        }
+
+        .settings-tab-content {
+            display: none;
+        }
+
+        .settings-tab-content.active {
+            display: block;
+        }
+
+        .settings-group {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .settings-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .settings-input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .settings-input-group label {
+            font-size: 0.85em;
+            color: #aaa;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .settings-input-group input,
+        .settings-input-group select {
+            background-color: #2c2c2c;
+            color: #fff;
+            border: 2px solid #444;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            transition: border-color 0.2s;
+        }
+
+        .settings-input-group input:focus,
+        .settings-input-group select:focus {
+            outline: none;
+            border-color: #ff6b35;
+        }
+
+        .settings-input-group select {
+            cursor: pointer;
+        }
+
+        .input-with-button {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .input-with-button input {
+            flex: 1;
+        }
+
+        .input-with-button button {
+            padding: 10px 16px;
+            border-radius: 6px;
+            border: 2px solid #ff6b35;
+            background: rgba(255, 107, 53, 0.1);
+            color: #ff6b35;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.85em;
+            white-space: nowrap;
+        }
+
+        .input-with-button button:hover {
+            background: rgba(255, 107, 53, 0.2);
+        }
+
+        .test-result {
+            font-size: 0.85em;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        .test-result.success {
+            background: rgba(76, 175, 80, 0.2);
+            color: #81c784;
+            display: block;
+        }
+
+        .test-result.error {
+            background: rgba(244, 67, 54, 0.2);
+            color: #ef5350;
+            display: block;
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .radio-item input[type="radio"] {
+            accent-color: #ff6b35;
+            cursor: pointer;
+            width: 18px;
+            height: 18px;
+        }
+
+        .radio-item label {
+            cursor: pointer;
+            color: #ddd;
+            font-size: 0.95em;
+            margin: 0;
+            text-transform: none;
+            font-weight: 400;
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+            background: #444;
+            border-radius: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .toggle-switch.on {
+            background: #4caf50;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            background: #fff;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: left 0.2s;
+        }
+
+        .toggle-switch.on::after {
+            left: 26px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .badge-free {
+            background: rgba(76, 175, 80, 0.2);
+            color: #81c784;
+            border: 1px solid #4caf50;
+        }
+
+        .settings-link {
+            color: #ff6b35;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .settings-link:hover {
+            color: #ff8555;
+        }
+
+        .helper-text {
+            font-size: 0.8em;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .about-content {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .about-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .about-title {
+            font-size: 1em;
+            font-weight: 700;
+            color: #ff6b35;
+        }
+
+        .about-text {
+            font-size: 0.9em;
+            color: #ddd;
+            line-height: 1.6;
+        }
+
+        .settings-save-area {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding-top: 16px;
+            border-top: 1px solid #4c4c4c;
+            margin-top: 24px;
+        }
+
+        #saveSettingsBtn {
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #ff6b35, #ff8555);
+            color: #fff;
+            font-size: 0.95em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: auto;
+        }
+
+        #saveSettingsBtn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+        }
+
+        #settingsSavedMsg {
+            color: #81c784;
+            font-size: 0.9em;
+            font-weight: 600;
             display: none;
         }
         
@@ -345,19 +723,49 @@
             font-size: 1em;
             font-weight: 700;
         }
-        
-        .badge-green {
+
+        .badge-calories {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid #ffc107;
+            color: #fff59d;
+        }
+
+        .badge-protein {
             background: rgba(76, 175, 80, 0.2);
             border: 1px solid #4caf50;
             color: #81c784;
         }
-        
+
+        .badge-carbs {
+            background: rgba(255, 152, 0, 0.2);
+            border: 1px solid #ff9800;
+            color: #ffb74d;
+        }
+
+        .badge-fat {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid #f44336;
+            color: #ef5350;
+        }
+
         .badge-yellow {
             background: rgba(255, 193, 7, 0.2);
             border: 1px solid #ffc107;
             color: #fff59d;
         }
-        
+
+        .badge-green {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid #4caf50;
+            color: #81c784;
+        }
+
+        .badge-orange {
+            background: rgba(255, 152, 0, 0.2);
+            border: 1px solid #ff9800;
+            color: #ffb74d;
+        }
+
         .badge-red {
             background: rgba(244, 67, 54, 0.2);
             border: 1px solid #f44336;
@@ -561,8 +969,17 @@
             .goal-buttons {
                 gap: 8px;
             }
+
+            .source-buttons {
+                gap: 8px;
+            }
             
             .goal-btn {
+                padding: 10px;
+                font-size: 0.85em;
+            }
+
+            .source-btn {
                 padding: 10px;
                 font-size: 0.85em;
             }
@@ -577,9 +994,237 @@
 <body>
     <!-- INPUT SECTION -->
     <div class="input-section">
-        <h1 class="title">🍽️ Nourish</h1>
-        <p class="subtitle">Your AI Meal Planner</p>
+        <div class="title-bar">
+            <div>
+                <h1 class="title">🍽️ Nourish</h1>
+                <p class="subtitle">Your AI Meal Planner</p>
+            </div>
+            <button id="settingsBtn" onclick="toggleSettings()" title="Settings">⚙️</button>
+        </div>
         <p id="modelIndicator" class="model-indicator">Loading model...</p>
+
+        <div id="settingsDrawer">
+            <div class="settings-tabs">
+                <button class="settings-tab-btn active" onclick="switchSettingsTab('models')">AI Models</button>
+                <button class="settings-tab-btn" onclick="switchSettingsTab('sources')">Recipe Sources</button>
+                <button class="settings-tab-btn" onclick="switchSettingsTab('nutrition')">Nutrition</button>
+                <button class="settings-tab-btn" onclick="switchSettingsTab('kb')">Knowledge Base</button>
+                <button class="settings-tab-btn" onclick="switchSettingsTab('about')">About</button>
+            </div>
+
+            <div class="settings-content">
+                <!-- AI Models Tab -->
+                <div id="models-tab" class="settings-tab-content active">
+                    <div class="settings-group">
+                        <div class="settings-input-group">
+                            <label>LM Studio</label>
+                            <div class="input-with-button">
+                                <input type="text" id="lmstudioUrlInput" placeholder="http://localhost:1234" />
+                                <button onclick="testConnection('lmstudio')">Test</button>
+                            </div>
+                            <div id="lmstudio-test" class="test-result"></div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Claude API Key</label>
+                            <input type="password" id="claudeApiKeyInput" placeholder="sk-ant-..." />
+                            <div class="helper-text">Get key at <a class="settings-link" href="https://console.anthropic.com/account/api-keys" target="_blank">console.anthropic.com</a></div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Claude Model</label>
+                            <select id="claudeModelSelect">
+                                <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+                                <option value="claude-sonnet-4-5">Claude Sonnet 4.5 (balanced)</option>
+                                <option value="claude-opus-4-5">Claude Opus 4.5 (best)</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>OpenAI API Key</label>
+                            <input type="password" id="openaiApiKeyInput" placeholder="sk-..." />
+                            <div class="helper-text">Get key at <a class="settings-link" href="https://platform.openai.com/account/api-keys" target="_blank">platform.openai.com</a></div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>OpenAI Model</label>
+                            <select id="openaiModelSelect">
+                                <option value="gpt-4o">GPT-4o (recommended)</option>
+                                <option value="gpt-4o-mini">GPT-4o Mini (faster)</option>
+                                <option value="gpt-3.5-turbo">GPT-3.5 Turbo (legacy)</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Ollama URL</label>
+                            <div class="input-with-button">
+                                <input type="text" id="ollamaUrlInput" placeholder="http://localhost:11434" />
+                                <button onclick="testConnection('ollama')">Test</button>
+                            </div>
+                            <div id="ollama-test" class="test-result"></div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Active AI Provider</label>
+                            <div class="radio-group">
+                                <div class="radio-item">
+                                    <input type="radio" id="provider-lmstudio" name="activeProvider" value="lmstudio" onchange="saveSettingsAuto()" />
+                                    <label for="provider-lmstudio">LM Studio</label>
+                                </div>
+                                <div class="radio-item">
+                                    <input type="radio" id="provider-claude" name="activeProvider" value="claude" onchange="saveSettingsAuto()" />
+                                    <label for="provider-claude">Claude (Anthropic)</label>
+                                </div>
+                                <div class="radio-item">
+                                    <input type="radio" id="provider-openai" name="activeProvider" value="openai" onchange="saveSettingsAuto()" />
+                                    <label for="provider-openai">OpenAI</label>
+                                </div>
+                                <div class="radio-item">
+                                    <input type="radio" id="provider-ollama" name="activeProvider" value="ollama" onchange="saveSettingsAuto()" />
+                                    <label for="provider-ollama">Ollama</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recipe Sources Tab -->
+                <div id="sources-tab" class="settings-tab-content">
+                    <div class="settings-group">
+                        <div class="settings-input-group">
+                            <label>TheMealDB <span class="badge badge-free">FREE</span></label>
+                            <div class="toggle-group">
+                                <div class="toggle-switch" id="themealdb-toggle" onclick="toggleTheMealDB()"></div>
+                                <span style="color: #ddd;">No API key required · Free recipe database</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Spoonacular API Key</label>
+                            <input type="password" id="spoonacularApiKeyInput" placeholder="DEMO" />
+                            <div class="helper-text">Get free key at <a class="settings-link" href="https://spoonacular.com/food-api" target="_blank">spoonacular.com</a></div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Edamam Recipe Search - App ID</label>
+                            <input type="text" id="edamamAppIdInput" placeholder="Edamam App ID" />
+                            <div class="helper-text">Get at <a class="settings-link" href="https://developer.edamam.com" target="_blank">developer.edamam.com</a></div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Edamam Recipe Search - App Key</label>
+                            <input type="password" id="edamamAppKeyInput" placeholder="Edamam App Key" />
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Tasty API Key (RapidAPI)</label>
+                            <input type="password" id="tastyApiKeyInput" placeholder="RapidAPI Key" />
+                            <div class="helper-text">Get at <a class="settings-link" href="https://rapidapi.com/apidojo/api/tasty" target="_blank">rapidapi.com/tasty</a></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Nutrition Tab -->
+                <div id="nutrition-tab" class="settings-tab-content">
+                    <div class="settings-group">
+                        <div class="settings-input-group">
+                            <label>USDA FoodData Central API Key</label>
+                            <input type="password" id="usdaApiKeyInput" placeholder="DEMO_KEY" />
+                            <div class="helper-text">Free key at <a class="settings-link" href="https://fdc.nal.usda.gov/api-key-signup" target="_blank">fdc.nal.usda.gov</a></div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Auto-fetch USDA Nutrition</label>
+                            <div class="toggle-group">
+                                <div class="toggle-switch on" id="autofetch-toggle" onclick="toggleAutoFetch()"></div>
+                                <span style="color: #ddd;">Automatically fetch real nutrition data after generating meals</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Show Nutrition Badges</label>
+                            <div class="toggle-group">
+                                <div class="toggle-switch on" id="badges-toggle" onclick="toggleNutritionBadges()"></div>
+                                <span style="color: #ddd;">Display nutrition info on meal cards</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Knowledge Base Tab -->
+                <div id="kb-tab" class="settings-tab-content">
+                    <div class="settings-group">
+                        <div class="settings-input-group">
+                            <label>Use Knowledge Base</label>
+                            <div class="toggle-group">
+                                <div class="toggle-switch" id="use-kb-toggle" onclick="toggleUseKB()"></div>
+                                <span style="color: #ddd;">Inject KB content into meal generation prompts</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Knowledge Base Name</label>
+                            <input type="text" id="kbNameInput" placeholder="e.g., My Recipes, Dietary Guidelines" />
+                        </div>
+
+                        <div class="settings-input-group">
+                            <label>Add Knowledge Content</label>
+                            <p style="font-size: 0.8em; color: #888; margin-bottom: 12px;">Upload .txt or .pdf files, or paste text directly:</p>
+                            <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+                                <input type="file" id="kbFileInput" accept=".txt,.pdf" placeholder="Select .txt or .pdf file" style="flex: 1; background-color: #3c3c3c; color: #fff; border: 2px solid #444; padding: 10px 12px; border-radius: 6px; font-size: 0.9em; cursor: pointer;" />
+                                <button onclick="uploadKBFile()" style="padding: 10px 16px; border-radius: 6px; border: 2px solid #ff6b35; background: rgba(255, 107, 53, 0.1); color: #ff6b35; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 0.85em; white-space: nowrap;">📤 Upload File</button>
+                            </div>
+                            <div id="fileUploadStatus" style="font-size: 0.8em; display: none; margin-bottom: 12px; padding: 8px; border-radius: 4px;"></div>
+                            <textarea id="kbContentInput" placeholder="Or paste recipes, cookbooks, nutrition facts, dietary guidelines, or any text you want the AI to use..." style="min-height: 150px; background-color: #2c2c2c; color: #fff; border: 2px solid #444; padding: 10px 12px; border-radius: 6px; font-size: 0.9em; font-family: monospace; resize: vertical;"></textarea>
+                        </div>
+
+                        <button onclick="addKBEntry()" style="padding: 12px 24px; border-radius: 8px; border: none; background: linear-gradient(135deg, #ff6b35, #ff8555); color: #fff; font-size: 0.95em; font-weight: 600; cursor: pointer; transition: all 0.2s;">Add to Knowledge Base</button>
+
+                        <div class="settings-input-group">
+                            <label>Saved Knowledge Base Entries</label>
+                            <div id="kbEntriesList" style="display: flex; flex-direction: column; gap: 12px; max-height: 300px; overflow-y: auto; border: 2px solid #444; border-radius: 6px; padding: 12px; background: #2c2c2c;">
+                                <p style="color: #888; text-align: center; padding: 20px; margin: 0;">No knowledge base entries yet</p>
+                            </div>
+                        </div>
+
+                        <button onclick="clearAllKBEntries()" style="margin-top: 12px; padding: 10px 16px; border-radius: 6px; border: 2px solid #f44336; background: rgba(244, 67, 54, 0.1); color: #ef5350; font-size: 0.9em; font-weight: 600; cursor: pointer; transition: all 0.2s;">Clear All Entries</button>
+                    </div>
+                </div>
+
+                <!-- About Tab -->
+                <div id="about-tab" class="settings-tab-content">
+                    <div class="about-content">
+                        <div class="about-section">
+                            <div class="about-title">Nourish v0.3.0</div>
+                            <div class="about-text">Your AI-powered meal planner with real nutrition data</div>
+                        </div>
+
+                        <div class="about-section">
+                            <div class="about-title">Open Source</div>
+                            <div class="about-text">
+                                <a class="settings-link" href="https://github.com/stonys-mind/nourish" target="_blank">View on GitHub</a>
+                                <br />Licensed under AGPL v3
+                            </div>
+                        </div>
+
+                        <div class="about-section">
+                            <div class="about-title">Built With</div>
+                            <div class="about-text">
+                                • LM Studio for local AI<br />
+                                • USDA FoodData Central for nutrition<br />
+                                • TheMealDB & Spoonacular for recipes<br />
+                                • Anthropic Claude & OpenAI APIs
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-save-area">
+                    <span id="settingsSavedMsg">✅ Saved to device</span>
+                    <button id="saveSettingsBtn" onclick="saveSettings()">Save All Settings</button>
+                </div>
+            </div>
+        </div>
 
         <label for="likes">Foods you like</label>
         <input type="text" id="likes" placeholder="e.g. chicken, pasta, avocado" />
@@ -594,10 +1239,18 @@
             <button class="goal-btn" onclick="setGoal('Gain', this)">Gain</button>
         </div>
 
+        <p class="source-label">Recipe source</p>
+        <div class="source-buttons">
+            <button class="source-btn active" onclick="setSource('aiChef', this)">AI Chef</button>
+            <button class="source-btn" onclick="setSource('spoonacular', this)">Spoonacular</button>
+            <button class="source-btn" onclick="setSource('themealdb', this)">The Meal DB</button>
+        </div>
+
         <button id="generateBtn" onclick="generateMealPlan()">Generate 7-Day Meal Plan</button>
 
         <div class="control-messages">
             <div id="loading">🍳 Generating your cooked meal plan...</div>
+            <div id="nutritionUpdate">📊 Updating nutrition data...</div>
             <div id="error"></div>
         </div>
     </div>
@@ -610,20 +1263,435 @@
 
     <script>
         let goal = '';
+        let source = 'aiChef';
         let activeModel = 'qwen2.5-coder-7b-instruct';
         let daysData = [];
+        let mealIndexCounter = 0;
+        let lmStudioUrl = 'http://localhost:1234';
+        let usdaApiKey = 'DEMO_KEY';
+        let spoonacularApiKey = 'DEMO';
+        let activeProvider = 'lmstudio';
+        let claudeApiKey = '';
+        let claudeModel = 'claude-haiku-4-5';
+        let openaiApiKey = '';
+        let openaiModel = 'gpt-4o';
+        let ollamaUrl = 'http://localhost:11434';
+        let themealdbEnabled = true;
+        let edamamAppId = '';
+        let edamamAppKey = '';
+        let tastyApiKey = '';
+        let autoFetchUSDA = true;
+        let showNutritionBadges = true;
+        let useKB = false;
+        let kbEntries = [];
+
+        function loadSettings() {
+            // AI Models
+            lmStudioUrl = localStorage.getItem('lmstudio_url') || 'http://localhost:1234';
+            claudeApiKey = localStorage.getItem('claude_api_key') || '';
+            claudeModel = localStorage.getItem('claude_model') || 'claude-haiku-4-5';
+            openaiApiKey = localStorage.getItem('openai_api_key') || '';
+            openaiModel = localStorage.getItem('openai_model') || 'gpt-4o';
+            ollamaUrl = localStorage.getItem('ollama_url') || 'http://localhost:11434';
+            activeProvider = localStorage.getItem('active_provider') || 'lmstudio';
+            
+            // Recipe Sources
+            themealdbEnabled = localStorage.getItem('themealdb_enabled') !== 'false';
+            spoonacularApiKey = localStorage.getItem('spoonacular_api_key') || 'DEMO';
+            edamamAppId = localStorage.getItem('edamam_app_id') || '';
+            edamamAppKey = localStorage.getItem('edamam_app_key') || '';
+            tastyApiKey = localStorage.getItem('tasty_api_key') || '';
+            
+            // Nutrition
+            usdaApiKey = localStorage.getItem('usda_api_key') || 'DEMO_KEY';
+            autoFetchUSDA = localStorage.getItem('autofetch_usda') !== 'false';
+            showNutritionBadges = localStorage.getItem('show_nutrition_badges') !== 'false';
+            useKB = localStorage.getItem('use_kb') === 'true';
+            // Try to load KB entries from backend, fallback to localStorage
+            try {
+                fetch('http://localhost:8000/api/knowledge')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.entries && data.entries.length > 0) {
+                            kbEntries = data.entries;
+                            renderKBEntries();
+                        }
+                    })
+                    .catch(() => {
+                        // Fallback to localStorage
+                        const kbEntriesJSON = localStorage.getItem('kb_entries');
+                        kbEntries = kbEntriesJSON ? JSON.parse(kbEntriesJSON) : [];
+                        renderKBEntries();
+                    });
+            } catch (e) {
+                const kbEntriesJSON = localStorage.getItem('kb_entries');
+                kbEntries = kbEntriesJSON ? JSON.parse(kbEntriesJSON) : [];
+                renderKBEntries();
+            }
+            
+            // Populate input fields
+            document.getElementById('lmstudioUrlInput').value = lmStudioUrl;
+            document.getElementById('claudeApiKeyInput').value = claudeApiKey;
+            document.getElementById('claudeModelSelect').value = claudeModel;
+            document.getElementById('openaiApiKeyInput').value = openaiApiKey;
+            document.getElementById('openaiModelSelect').value = openaiModel;
+            document.getElementById('ollamaUrlInput').value = ollamaUrl;
+            document.getElementById('spoonacularApiKeyInput').value = spoonacularApiKey;
+            document.getElementById('edamamAppIdInput').value = edamamAppId;
+            document.getElementById('edamamAppKeyInput').value = edamamAppKey;
+            document.getElementById('tastyApiKeyInput').value = tastyApiKey;
+            document.getElementById('usdaApiKeyInput').value = usdaApiKey;
+            
+            // Set radio buttons and toggles
+            document.getElementById('provider-' + activeProvider).checked = true;
+            if (themealdbEnabled) {
+                document.getElementById('themealdb-toggle').classList.add('on');
+            }
+            if (autoFetchUSDA) {
+                document.getElementById('autofetch-toggle').classList.add('on');
+            }
+            if (showNutritionBadges) {
+                document.getElementById('badges-toggle').classList.add('on');
+            }
+            if (useKB) {
+                document.getElementById('use-kb-toggle').classList.add('on');
+            }
+            
+            updateModelIndicator();
+        }
+
+        function saveSettings() {
+            // AI Models
+            lmStudioUrl = document.getElementById('lmstudioUrlInput').value || 'http://localhost:1234';
+            claudeApiKey = document.getElementById('claudeApiKeyInput').value || '';
+            claudeModel = document.getElementById('claudeModelSelect').value || 'claude-haiku-4-5';
+            openaiApiKey = document.getElementById('openaiApiKeyInput').value || '';
+            openaiModel = document.getElementById('openaiModelSelect').value || 'gpt-4o';
+            ollamaUrl = document.getElementById('ollamaUrlInput').value || 'http://localhost:11434';
+            activeProvider = document.querySelector('input[name="activeProvider"]:checked').value || 'lmstudio';
+            
+            // Recipe Sources
+            spoonacularApiKey = document.getElementById('spoonacularApiKeyInput').value || 'DEMO';
+            edamamAppId = document.getElementById('edamamAppIdInput').value || '';
+            edamamAppKey = document.getElementById('edamamAppKeyInput').value || '';
+            tastyApiKey = document.getElementById('tastyApiKeyInput').value || '';
+            
+            // Nutrition
+            usdaApiKey = document.getElementById('usdaApiKeyInput').value || 'DEMO_KEY';
+            
+            // Save to localStorage
+            localStorage.setItem('lmstudio_url', lmStudioUrl);
+            localStorage.setItem('claude_api_key', claudeApiKey);
+            localStorage.setItem('claude_model', claudeModel);
+            localStorage.setItem('openai_api_key', openaiApiKey);
+            localStorage.setItem('openai_model', openaiModel);
+            localStorage.setItem('ollama_url', ollamaUrl);
+            localStorage.setItem('active_provider', activeProvider);
+            localStorage.setItem('themealdb_enabled', themealdbEnabled);
+            localStorage.setItem('spoonacular_api_key', spoonacularApiKey);
+            localStorage.setItem('edamam_app_id', edamamAppId);
+            localStorage.setItem('edamam_app_key', edamamAppKey);
+            localStorage.setItem('tasty_api_key', tastyApiKey);
+            localStorage.setItem('usda_api_key', usdaApiKey);
+            localStorage.setItem('autofetch_usda', autoFetchUSDA);
+            localStorage.setItem('show_nutrition_badges', showNutritionBadges);
+            
+            // Show saved notification
+            const savedMsg = document.getElementById('settingsSavedMsg');
+            savedMsg.style.display = 'block';
+            setTimeout(() => {
+                savedMsg.style.display = 'none';
+            }, 3000);
+            
+            updateModelIndicator();
+        }
+
+        function saveSettingsAuto() {
+            activeProvider = document.querySelector('input[name="activeProvider"]:checked').value;
+            localStorage.setItem('active_provider', activeProvider);
+            updateModelIndicator();
+        }
+
+        function toggleSettings() {
+            const drawer = document.getElementById('settingsDrawer');
+            drawer.classList.toggle('open');
+        }
+
+        function switchSettingsTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.settings-tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.settings-tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        async function testConnection(provider) {
+            const resultEl = document.getElementById(provider + '-test');
+            resultEl.className = 'test-result';
+            resultEl.textContent = 'Testing...';
+            resultEl.style.display = 'block';
+            
+            try {
+                let url, endpoint;
+                if (provider === 'lmstudio') {
+                    url = document.getElementById('lmstudioUrlInput').value || 'http://localhost:1234';
+                    endpoint = '/v1/models';
+                } else if (provider === 'ollama') {
+                    url = document.getElementById('ollamaUrlInput').value || 'http://localhost:11434';
+                    endpoint = '/api/tags';
+                }
+                
+                const response = await fetch(url + endpoint, { timeout: 5000 });
+                if (response.ok) {
+                    resultEl.className = 'test-result success';
+                    resultEl.textContent = '✅ Connected';
+                } else {
+                    resultEl.className = 'test-result error';
+                    resultEl.textContent = '❌ Failed: ' + response.status;
+                }
+            } catch (err) {
+                resultEl.className = 'test-result error';
+                resultEl.textContent = '❌ Failed: ' + err.message;
+            }
+        }
+
+        function toggleTheMealDB() {
+            const toggle = document.getElementById('themealdb-toggle');
+            themealdbEnabled = !themealdbEnabled;
+            toggle.classList.toggle('on');
+            localStorage.setItem('themealdb_enabled', themealdbEnabled);
+        }
+
+        function toggleAutoFetch() {
+            const toggle = document.getElementById('autofetch-toggle');
+            autoFetchUSDA = !autoFetchUSDA;
+            toggle.classList.toggle('on');
+            localStorage.setItem('autofetch_usda', autoFetchUSDA);
+        }
+
+        function toggleNutritionBadges() {
+            const toggle = document.getElementById('badges-toggle');
+            showNutritionBadges = !showNutritionBadges;
+            toggle.classList.toggle('on');
+            localStorage.setItem('show_nutrition_badges', showNutritionBadges);
+        }
+
+        function updateModelIndicator() {
+            const providerNames = {
+                'lmstudio': 'LM Studio',
+                'claude': 'Claude',
+                'openai': 'OpenAI',
+                'ollama': 'Ollama'
+            };
+            const modelNames = {
+                'lmstudio': activeModel || 'Loading...',
+                'claude': claudeModel,
+                'openai': openaiModel,
+                'ollama': 'Ollama'
+            };
+            const providerName = providerNames[activeProvider] || activeProvider;
+            const modelName = modelNames[activeProvider] || 'Unknown';
+            document.getElementById('modelIndicator').textContent = '🤖 ' + providerName + ' • ' + modelName;
+        }
+
+        async function addKBEntry() {
+            const name = document.getElementById('kbNameInput').value.trim();
+            const content = document.getElementById('kbContentInput').value.trim();
+            
+            if (!name) {
+                alert('Please enter a name for this knowledge base entry');
+                return;
+            }
+            if (!content) {
+                alert('Please enter some content');
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:8000/api/knowledge/add-text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, content })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to add knowledge base entry');
+                }
+                
+                const result = await response.json();
+                alert(`✅ Added "${name}" with ${result.chunks_created} chunks (${result.total_content_length} chars)`);
+                
+                document.getElementById('kbNameInput').value = '';
+                document.getElementById('kbContentInput').value = '';
+                await refreshKBEntries();
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        }
+
+        async function uploadKBFile() {
+            const fileInput = document.getElementById('kbFileInput');
+            const nameInput = document.getElementById('kbNameInput');
+            const file = fileInput.files[0];
+            const statusEl = document.getElementById('fileUploadStatus');
+            
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+            
+            let name = nameInput.value.trim();
+            if (!name) {
+                name = file.name.split('.')[0];
+                nameInput.value = name;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('name', name);
+            
+            try {
+                statusEl.style.display = 'block';
+                statusEl.style.background = 'rgba(255, 193, 7, 0.2)';
+                statusEl.style.color = '#fff59d';
+                statusEl.textContent = '⏳ Uploading and processing...';
+                
+                const response = await fetch('http://localhost:8000/api/knowledge/add', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to upload file');
+                }
+                
+                const result = await response.json();
+                statusEl.style.background = 'rgba(76, 175, 80, 0.2)';
+                statusEl.style.color = '#81c784';
+                statusEl.textContent = `✅ File "${name}" added with ${result.chunks_created} chunks`;
+                
+                fileInput.value = '';
+                document.getElementById('kbContentInput').value = '';
+                await refreshKBEntries();
+                
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 3000);
+            } catch (err) {
+                statusEl.style.background = 'rgba(244, 67, 54, 0.2)';
+                statusEl.style.color = '#ef5350';
+                statusEl.textContent = '❌ Error: ' + err.message;
+            }
+        }
+
+        async function refreshKBEntries() {
+            try {
+                const response = await fetch('http://localhost:8000/api/knowledge');
+                if (response.ok) {
+                    const result = await response.json();
+                    // Update kbEntries with backend entries
+                    kbEntries = result.entries.map(name => ({ name, content: '' }));
+                    renderKBEntries();
+                }
+            } catch (err) {
+                console.error('Error refreshing KB entries:', err);
+            }
+        }
+
+        async function deleteKBEntry(index) {
+            if (confirm('Delete this knowledge base entry?')) {
+                const entryName = kbEntries[index]?.name;
+                if (!entryName) return;
+                
+                try {
+                    const response = await fetch(`http://localhost:8000/api/knowledge/${encodeURIComponent(entryName)}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        kbEntries.splice(index, 1);
+                        renderKBEntries();
+                    } else {
+                        alert('Failed to delete entry');
+                    }
+                } catch (err) {
+                    alert('Error: ' + err.message);
+                }
+            }
+        }
+
+        async function clearAllKBEntries() {
+            if (confirm('Delete all knowledge base entries? This cannot be undone.')) {
+                try {
+                    // Delete all entries
+                    for (const entry of kbEntries) {
+                        await fetch(`http://localhost:8000/api/knowledge/${encodeURIComponent(entry.name)}`, {
+                            method: 'DELETE'
+                        });
+                    }
+                    kbEntries = [];
+                    renderKBEntries();
+                } catch (err) {
+                    alert('Error: ' + err.message);
+                }
+            }
+        }
+
+        function renderKBEntries() {
+            const listContainer = document.getElementById('kbEntriesList');
+            
+            if (kbEntries.length === 0) {
+                listContainer.innerHTML = '<p style="color: #888; text-align: center; padding: 20px; margin: 0;">No knowledge base entries yet</p>';
+                return;
+            }
+            
+            listContainer.innerHTML = kbEntries.map((entry, index) => {
+                const name = typeof entry === 'string' ? entry : entry.name;
+                return `
+                    <div style="background: #3c3c3c; padding: 12px; border-radius: 6px; border-left: 3px solid #ff6b35; display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; color: #ff6b35; font-size: 0.95em;">📚 ${name}</div>
+                        </div>
+                        <button onclick="deleteKBEntry(${index})" style="padding: 6px 12px; border-radius: 4px; border: none; background: rgba(244, 67, 54, 0.2); color: #ef5350; font-size: 0.85em; cursor: pointer; white-space: nowrap;">Delete</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleUseKB() {
+            const toggle = document.getElementById('use-kb-toggle');
+            useKB = !useKB;
+            toggle.classList.toggle('on');
+            localStorage.setItem('use_kb', useKB);
+        }
+
+        function getKBContent() {
+            if (!useKB || kbEntries.length === 0) return '';
+            const combined = kbEntries.map(entry => entry.content).join('\n\n---\n\n');
+            return combined.substring(0, 2000);
+        }
+
+        loadSettings();
 
         async function loadModel() {
-            try {
-                const res = await fetch('http://localhost:1234/v1/models');
-                const data = await res.json();
-                if (data?.data?.[0]?.id) {
-                    activeModel = data.data[0].id;
-                    document.getElementById('modelIndicator').textContent = '🤖 Model: ' + activeModel;
+            if (activeProvider === 'lmstudio') {
+                try {
+                    const res = await fetch('http://localhost:8000/api/models');
+                    const data = await res.json();
+                    if (data?.data?.[0]?.id) {
+                        activeModel = data.data[0].id;
+                    }
+                } catch (e) {
+                    // Silent fail for unavailable backend
                 }
-            } catch (e) {
-                document.getElementById('modelIndicator').textContent = '⚠️ Could not connect to LM Studio';
             }
+            updateModelIndicator();
         }
 
         loadModel();
@@ -631,6 +1699,12 @@
         function setGoal(newGoal, btn) {
             goal = newGoal;
             document.querySelectorAll('.goal-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        function setSource(newSource, btn) {
+            source = newSource;
+            document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
         }
 
@@ -662,73 +1736,43 @@
             btn.disabled = true;
 
             try {
-                const response = await fetch('http://localhost:1234/v1/chat/completions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: activeModel,
-                        messages: [
-                            {
-                                role: 'system',
-                                content: 'Return ONLY valid JSON, no other text, no markdown. Generate a 7-day meal plan with breakfast lunch dinner each day. Real cooked meals with ingredients and steps. JSON only.'
-                            },
-                            {
-                                role: 'user',
-                                content: `Generate a 7-day meal plan with breakfast, lunch, and dinner each day. Goal: ${goal}. Favorite foods: ${likes || 'any'}. Avoid: ${hates || 'none'}.
-
-Return this exact JSON structure (no markdown, no extra text):
-{
-  "days": [
-    {
-      "day": 1,
-      "breakfast": {
-        "name": "meal name",
-        "time_minutes": 30,
-        "nutrition": {"calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0},
-        "ingredients": ["item 1", "item 2"],
-        "steps": ["step 1", "step 2"]
-      },
-      "lunch": {...},
-      "dinner": {...}
-    }
-  ]
-}`
-                            }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 4000
-                    })
-                });
-
-                if (!response.ok) throw new Error('API error');
-
-                const data = await response.json();
-                const result = data?.choices?.[0]?.message?.content;
-                if (!result) throw new Error('No content');
-
+                let additionalContext = '';
+                // Query knowledge base if enabled
+                if (useKB) {
+                    const queryResponse = await fetch('http://localhost:8000/api/knowledge/query', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            query: `${likes} ${hates} ${goal}`
+                        })
+                    });
+                    if (queryResponse.ok) {
+                        const queryData = await queryResponse.json();
+                        additionalContext = queryData.context || '';
+                    }
+                }
+                
                 let parsedData;
-                try {
-                    const jsonMatch = result.match(/\{[\s\S]*\}/);
-                    if (!jsonMatch) throw new Error('No JSON found in response');
-                    parsedData = JSON.parse(jsonMatch[0]);
-                } catch (parseErr) {
-                    error.textContent = 'Failed to parse meal plan. The model may not have returned valid JSON.';
-                    error.style.display = 'block';
-                    loading.style.display = 'none';
-                    btn.disabled = false;
-                    return;
+                
+                if (source === 'aiChef') {
+                    parsedData = await generateWithAIChef(likes, hates, additionalContext);
+                } else if (source === 'spoonacular') {
+                    parsedData = await generateWithSpoonacular(likes, hates);
+                } else if (source === 'themealdb') {
+                    parsedData = await generateWithTheMealDB(likes, hates);
                 }
 
-                if (!parsedData.days || !Array.isArray(parsedData.days) || parsedData.days.length === 0) {
+                if (!parsedData || !parsedData.days || parsedData.days.length === 0) {
                     throw new Error('Invalid meal plan structure');
                 }
 
                 daysData = parsedData.days;
+                
                 renderMealPlan(daysData);
                 updateRightPanel(daysData);
                 controlMessages.style.display = 'none';
             } catch (err) {
-                error.textContent = 'Error: ' + (err.message || 'Something went wrong. Make sure LM Studio is running on port 1234.');
+                error.textContent = 'Error: ' + (err.message || 'Failed to generate meal plan');
                 error.style.display = 'block';
             } finally {
                 loading.style.display = 'none';
@@ -736,10 +1780,304 @@ Return this exact JSON structure (no markdown, no extra text):
             }
         }
 
+        async function generateWithAIChef(likes, hates, additionalContext = '') {
+            // Route to the appropriate AI provider
+            if (activeProvider === 'claude') {
+                return generateWithClaude(likes, hates, additionalContext);
+            } else if (activeProvider === 'openai') {
+                return generateWithOpenAI(likes, hates, additionalContext);
+            } else if (activeProvider === 'ollama') {
+                return generateWithOllama(likes, hates, additionalContext);
+            } else {
+                // Default to LM Studio
+                return generateWithLMStudio(likes, hates, additionalContext);
+            }
+        }
+
+        function getSystemPrompt(additionalContext = '') {
+            let prompt = 'Return ONLY raw JSON. No markdown. No backticks. No code blocks. No comments like "repeat for days". Write out ALL 7 days fully and completely. Format: {"days":[{"day":1,"breakfast":{"name":"","time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"ingredients":[""],"steps":[""]},"lunch":{same},"dinner":{same}}]}';
+            
+            if (additionalContext) {
+                prompt = 'KNOWLEDGE BASE:\n' + additionalContext + '\n\n---\n\n' + prompt;
+            }
+            return prompt;
+        }
+
+        async function generateWithLMStudio(likes, hates, additionalContext = '') {
+            const response = await fetch('http://localhost:8000/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: 'lmstudio',
+                    model: activeModel,
+                    api_key: '',
+                    messages: [
+                        {
+                            role: 'system',
+                            content: getSystemPrompt(additionalContext)
+                        },
+                        {
+                            role: 'user',
+                            content: `Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-day meal plan with exact JSON structure requested.`
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 4000
+                })
+            });
+
+            if (!response.ok) throw new Error('LM Studio API error');
+
+            const data = await response.json();
+            const result = data?.choices?.[0]?.message?.content;
+            if (!result) throw new Error('No content from LM Studio');
+
+            return parseJSONResponse(result);
+        }
+
+        async function generateWithClaude(likes, hates, additionalContext = '') {
+            if (!claudeApiKey) throw new Error('Add your Claude API key in Settings.');
+
+            let userPrompt = `You are a meal planner. Return ONLY raw JSON. No markdown. No backticks. No code blocks.
+Format: {"days":[{"day":1,"breakfast":{"name":"","time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"ingredients":[""],"steps":[""]},"lunch":{same},"dinner":{same}}]}
+Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-day meal plan.`;
+            
+            if (additionalContext) {
+                userPrompt = 'KNOWLEDGE BASE:\n' + additionalContext + '\n\n---\n\n' + userPrompt;
+            }
+
+            const response = await fetch('http://localhost:8000/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: 'claude',
+                    model: claudeModel,
+                    api_key: claudeApiKey,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: userPrompt
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 4000
+                })
+            });
+
+            if (!response.ok) throw new Error('Claude API error');
+
+            const data = await response.json();
+            const result = data?.content?.[0]?.text;
+            if (!result) throw new Error('No content from Claude');
+
+            return parseJSONResponse(result);
+        }
+
+        async function generateWithOpenAI(likes, hates, additionalContext = '') {
+            if (!openaiApiKey) throw new Error('Add your OpenAI API key in Settings.');
+
+            const response = await fetch('http://localhost:8000/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: 'openai',
+                    model: openaiModel,
+                    api_key: openaiApiKey,
+                    messages: [
+                        {
+                            role: 'system',
+                            content: getSystemPrompt(additionalContext)
+                        },
+                        {
+                            role: 'user',
+                            content: `Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-day meal plan with exact JSON structure requested.`
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 4000
+                })
+            });
+
+            if (!response.ok) throw new Error('OpenAI API error');
+
+            const data = await response.json();
+            const result = data?.choices?.[0]?.message?.content;
+            if (!result) throw new Error('No content from OpenAI');
+
+            return parseJSONResponse(result);
+        }
+
+        async function generateWithOllama(likes, hates, additionalContext = '') {
+            let prompt = `You are a meal planner. Return ONLY raw JSON. No markdown. No backticks.
+Format: {"days":[{"day":1,"breakfast":{"name":"","time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"ingredients":[""],"steps":[""]},"lunch":{same},"dinner":{same}}]}
+Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-day meal plan.`;
+            
+            if (additionalContext) {
+                prompt = 'KNOWLEDGE BASE:\n' + additionalContext + '\n\n---\n\n' + prompt;
+            }
+
+            const response = await fetch(ollamaUrl + '/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'neural-chat',
+                    prompt: prompt,
+                    stream: false
+                })
+            });
+
+            if (!response.ok) throw new Error('Ollama API error');
+
+            const data = await response.json();
+            const result = data?.response;
+            if (!result) throw new Error('No content from Ollama');
+
+            return parseJSONResponse(result);
+        }
+
+        function parseJSONResponse(result) {
+            try {
+                let raw = result.trim();
+                raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+                const start = raw.indexOf('{');
+                const end = raw.lastIndexOf('}');
+                if (start === -1 || end === -1) throw new Error('No JSON object found');
+                raw = raw.substring(start, end + 1);
+                raw = raw.replace(/\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1');
+                const parsedData = JSON.parse(raw);
+                return parsedData;
+            } catch (parseErr) {
+                throw new Error('AI returned invalid JSON: ' + parseErr.message);
+            }
+        }
+
+        async function generateWithSpoonacular(likes, hates) {
+            // Build complex search query
+            const likesList = (likes || '').split(',').map(s => s.trim()).filter(s => s);
+            const hatesList = (hates || '').split(',').map(s => s.trim()).filter(s => s);
+            
+            const query = likesList.length > 0 ? likesList[0] : 'chicken';
+            const excludeIngredients = hatesList.join(',');
+            
+            const params = new URLSearchParams({
+                apiKey: spoonacularApiKey,
+                number: 21,
+                addRecipeInformation: 'true',
+                fillIngredients: 'true',
+                query: query,
+                ...(excludeIngredients && { excludeIngredients })
+            });
+
+            const response = await fetch(`https://api.spoonacular.com/recipes/complexSearch?${params}`);
+            if (!response.ok) throw new Error('Spoonacular API error');
+
+            const data = await response.json();
+            if (!data.results || data.results.length === 0) {
+                throw new Error('No recipes found from Spoonacular');
+            }
+
+            return structureSpoonacularData(data.results);
+        }
+
+        function structureSpoonacularData(recipes) {
+            const recipesPerMeal = Math.ceil(recipes.length / 21); // 7 days * 3 meals
+            const days = [];
+
+            let recipeIndex = 0;
+            for (let day = 1; day <= 7; day++) {
+                const dayObj = { day };
+                ['breakfast', 'lunch', 'dinner'].forEach(meal => {
+                    if (recipeIndex < recipes.length) {
+                        const recipe = recipes[recipeIndex];
+                        dayObj[meal] = {
+                            name: recipe.title || 'Recipe',
+                            time_minutes: recipe.readyInMinutes || 30,
+                            nutrition: {
+                                calories: Math.round((recipe.nutrition?.nutrients?.find(n => n.name === 'Calories')?.amount || 0) / (recipe.servings || 1)),
+                                protein_g: Math.round((recipe.nutrition?.nutrients?.find(n => n.name === 'Protein')?.amount || 0) / (recipe.servings || 1)),
+                                carbs_g: Math.round((recipe.nutrition?.nutrients?.find(n => n.name === 'Carbohydrates')?.amount || 0) / (recipe.servings || 1)),
+                                fat_g: Math.round((recipe.nutrition?.nutrients?.find(n => n.name === 'Fat')?.amount || 0) / (recipe.servings || 1))
+                            },
+                            ingredients: (recipe.extendedIngredients || []).map(ing => `${ing.original}`),
+                            steps: (recipe.analyzedInstructions?.[0]?.steps || []).map(s => s.step).slice(0, 10)
+                        };
+                        recipeIndex++;
+                    }
+                });
+                days.push(dayObj);
+            }
+
+            return { days };
+        }
+
+        async function generateWithTheMealDB(likes, hates) {
+            const likesList = (likes || '').split(',').map(s => s.trim()).filter(s => s);
+            const query = likesList.length > 0 ? likesList[0] : 'Pasta';
+
+            const response = await fetch(`https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(query)}`);
+            if (!response.ok) throw new Error('The Meal DB API error');
+
+            const data = await response.json();
+            if (!data.meals || data.meals.length === 0) {
+                throw new Error('No meals found. Try different search terms.');
+            }
+
+            return structureMealDBData(data.meals);
+        }
+
+        function structureMealDBData(meals) {
+            const days = [];
+            let mealIndex = 0;
+
+            for (let day = 1; day <= 7; day++) {
+                const dayObj = { day };
+                ['breakfast', 'lunch', 'dinner'].forEach(meal => {
+                    if (mealIndex < meals.length) {
+                        const recipe = meals[mealIndex];
+                        
+                        // Extract ingredients
+                        const ingredients = [];
+                        for (let i = 1; i <= 20; i++) {
+                            const ing = recipe[`strIngredient${i}`];
+                            const measure = recipe[`strMeasure${i}`];
+                            if (ing && ing.trim()) {
+                                ingredients.push(`${measure || ''} ${ing}`.trim());
+                            }
+                        }
+
+                        // Extract steps
+                        const steps = (recipe.strInstructions || '').split('.')
+                            .map(s => s.trim())
+                            .filter(s => s.length > 10)
+                            .slice(0, 10);
+
+                        dayObj[meal] = {
+                            name: recipe.strMeal || 'Recipe',
+                            time_minutes: 30,
+                            nutrition: {
+                                calories: 2000,
+                                protein_g: 50,
+                                carbs_g: 250,
+                                fat_g: 65
+                            },
+                            ingredients,
+                            steps
+                        };
+                        mealIndex++;
+                    }
+                });
+                days.push(dayObj);
+            }
+
+            return { days };
+        }
+
         function renderMealPlan(days) {
             document.getElementById('mealPlanContainer').classList.add('active');
             const daysPanel = document.getElementById('daysPanel');
             daysPanel.innerHTML = '';
+            
+            mealIndexCounter = 0; // Reset meal index counter
 
             days.forEach((dayData, dayIndex) => {
                 const dayCard = createDayCard(dayData, dayIndex);
@@ -750,6 +2088,99 @@ Return this exact JSON structure (no markdown, no extra text):
             if (daysPanel.children.length > 0) {
                 const firstHeader = daysPanel.children[0].querySelector('.day-card-header');
                 toggleDayCard(daysPanel.children[0]);
+            }
+            
+            // Fetch USDA nutrition data in parallel if auto-fetch is enabled
+            if (autoFetchUSDA) {
+                fetchUSDANutrition(days);
+            }
+        }
+
+        async function fetchUSDANutrition(days) {
+            // Show "Updating nutrition data..." message
+            const nutritionUpdate = document.getElementById('nutritionUpdate');
+            nutritionUpdate.style.display = 'block';
+
+            // Create array of all meals with their index
+            const allMeals = [];
+            let mealIndex = 0;
+            days.forEach(day => {
+                ['breakfast', 'lunch', 'dinner'].forEach(mealType => {
+                    if (day[mealType]) {
+                        allMeals.push({
+                            mealIndex,
+                            mealData: day[mealType]
+                        });
+                        mealIndex++;
+                    }
+                });
+            });
+
+            // Create array of fetch promises - run all 21 in parallel
+            const fetchPromises = allMeals.map(async (meal) => {
+                return fetchUSDACaloriesForMeal(meal.mealIndex, meal.mealData);
+            });
+
+            // Wait for all fetches to complete
+            try {
+                await Promise.all(fetchPromises);
+            } catch (err) {
+                console.error('Error fetching USDA nutrition data:', err);
+            } finally {
+                // Hide the "Updating nutrition data..." message
+                nutritionUpdate.style.display = 'none';
+            }
+        }
+
+        async function fetchUSDACaloriesForMeal(mealIndex, mealData) {
+            try {
+                if (!mealData.ingredients || mealData.ingredients.length === 0) {
+                    return;
+                }
+
+                // Get the first ingredient
+                const firstIngredient = mealData.ingredients[0];
+                // Extract just the ingredient name (remove quantities like "1 ", "2 tbsp", etc.)
+                const ingredientName = firstIngredient.replace(/^\d+(\s+|-)?[a-z]*\.?\s*/i, '').split(/\s+/)[0];
+
+                // Fetch from USDA API
+                const response = await fetch(
+                    `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(ingredientName)}&pageSize=1&api_key=${usdaApiKey}`
+                );
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.foods && data.foods.length > 0) {
+                        const food = data.foods[0];
+                        const energyNutrient = food.foodNutrients?.find(n =>
+                            n.nutrientName === 'Energy' && n.unitName === 'kcal'
+                        );
+
+                        if (energyNutrient && energyNutrient.value) {
+                            const calorieValue = Math.round(energyNutrient.value);
+                            // Update the calorie badge in the DOM
+                            updateMealCalorieBadge(mealIndex, calorieValue);
+                        }
+                    }
+                }
+            } catch (err) {
+                // Silently fail - keep the AI estimated value
+                console.error(`Failed to fetch USDA data for meal ${mealIndex}:`, err);
+            }
+        }
+
+        function updateMealCalorieBadge(mealIndex, calorieValue) {
+            // Find the meal accordion with data-meal-index matching mealIndex
+            const mealAccordion = document.querySelector(`[data-meal-index="${mealIndex}"]`);
+            if (!mealAccordion) {
+                return;
+            }
+
+            // Find the calorie badge (the first nutrition badge which is calories/yellow)
+            const calorieBadge = mealAccordion.querySelector('.badge-yellow .badge-value');
+            if (calorieBadge) {
+                // Update the calorie value (keep the "kcal" unit)
+                calorieBadge.innerHTML = `${calorieValue}<span style="font-size: 0.8em; margin-left: 2px;">kcal</span>`;
             }
         }
 
@@ -778,7 +2209,8 @@ Return this exact JSON structure (no markdown, no extra text):
             ['breakfast', 'lunch', 'dinner'].forEach(mealType => {
                 const meal = dayData[mealType];
                 if (meal) {
-                    const mealAccordion = createMealAccordion(meal, mealType);
+                    const mealAccordion = createMealAccordion(meal, mealType, mealIndexCounter);
+                    mealIndexCounter++;
                     body.appendChild(mealAccordion);
                 }
             });
@@ -790,9 +2222,10 @@ Return this exact JSON structure (no markdown, no extra text):
             return card;
         }
 
-        function createMealAccordion(meal, mealType) {
+        function createMealAccordion(meal, mealType, mealIndex) {
             const accordion = document.createElement('div');
             accordion.className = 'meal-accordion';
+            accordion.dataset.mealIndex = mealIndex;
 
             const mealTypeLabel = mealType.charAt(0).toUpperCase() + mealType.slice(1);
 
@@ -827,21 +2260,21 @@ Return this exact JSON structure (no markdown, no extra text):
             timeDiv.innerHTML = `⏱️ ${meal.time_minutes || 30} minutes`;
             body.appendChild(timeDiv);
 
-            // Nutrition Badges
+            // Nutrition Badges with fixed colors
             if (meal.nutrition) {
                 const nutritionSection = document.createElement('div');
                 nutritionSection.className = 'nutrition-section';
                 
                 const nutritionItems = [
-                    { label: 'Calories', key: 'calories', value: meal.nutrition.calories, unit: 'kcal' },
-                    { label: 'Protein', key: 'protein_g', value: meal.nutrition.protein_g, unit: 'g' },
-                    { label: 'Carbs', key: 'carbs_g', value: meal.nutrition.carbs_g, unit: 'g' },
-                    { label: 'Fat', key: 'fat_g', value: meal.nutrition.fat_g, unit: 'g' }
+                    { label: 'Calories', key: 'calories', value: meal.nutrition.calories, unit: 'kcal', badgeClass: 'badge-yellow' },
+                    { label: 'Protein', key: 'protein_g', value: meal.nutrition.protein_g, unit: 'g', badgeClass: 'badge-green' },
+                    { label: 'Carbs', key: 'carbs_g', value: meal.nutrition.carbs_g, unit: 'g', badgeClass: 'badge-orange' },
+                    { label: 'Fat', key: 'fat_g', value: meal.nutrition.fat_g, unit: 'g', badgeClass: 'badge-red' }
                 ];
                 
                 nutritionItems.forEach(item => {
                     const badge = document.createElement('div');
-                    badge.className = `nutrition-badge badge-green`;
+                    badge.className = `nutrition-badge ${item.badgeClass}`;
                     badge.innerHTML = `
                         <div class="badge-label">${item.label}</div>
                         <div class="badge-value">${Math.round(item.value)}<span style="font-size: 0.8em; margin-left: 2px;">${item.unit}</span></div>
