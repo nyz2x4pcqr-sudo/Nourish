@@ -15,7 +15,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("/app/nourish.log")
+        logging.FileHandler("./nourish.log")
     ]
 )
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ def health():
 
 @app.get("/api/models")
 async def get_models():
-    lmstudio_url = os.getenv("LMSTUDIO_URL", "http://localhost:1234")
+    lmstudio_url = os.getenv("LMSTUDIO_URL", "http://host.docker.internal:1234")
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             res = await client.get(f"{lmstudio_url}/v1/models")
@@ -86,7 +86,7 @@ async def generate(req: GenerateRequest):
     logger.info(f"Generate request - provider: {req.provider}, model: {req.model}")
     try:
         if req.provider == "lmstudio":
-            url = f"{req.base_url or os.getenv('LMSTUDIO_URL', 'http://localhost:1234')}/v1/chat/completions"
+            url = f"{req.base_url or os.getenv('LMSTUDIO_URL', 'http://host.docker.internal:1234')}/v1/chat/completions"
             headers = {"Content-Type": "application/json"}
             body = {"model": req.model, "messages": req.messages, "max_tokens": req.max_tokens, "temperature": 0.7}
         elif req.provider == "openai":
@@ -200,7 +200,7 @@ async def delete_knowledge(name: str):
 @app.get("/api/logs")
 async def get_logs():
     try:
-        with open("/app/nourish.log", "r") as f:
+        with open("./nourish.log", "r") as f:
             lines = f.readlines()
         return {"logs": lines[-100:]}
     except Exception as e:
@@ -210,7 +210,7 @@ async def get_logs():
 @app.delete("/api/logs")
 async def clear_logs():
     try:
-        open("/app/nourish.log", "w").close()
+        open("./nourish.log", "w").close()
         logger.info("Logs cleared")
         return {"status": "logs cleared"}
     except Exception as e:
