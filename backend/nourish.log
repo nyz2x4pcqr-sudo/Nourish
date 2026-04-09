@@ -3,3 +3,8 @@
 2026-04-09 01:48:56,834 [ERROR] Failed to send telemetry event ClientCreateCollectionEvent: capture() takes 1 positional argument but 3 were given
 2026-04-09 01:48:56,849 [INFO] Use pytorch device_name: cpu
 2026-04-09 01:48:56,850 [INFO] Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2026-04-09 01:58:19,470 [INFO] Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2026-04-09 01:58:19,561 [ERROR] Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+2026-04-09 01:58:19,563 [ERROR] Failed to send telemetry event ClientCreateCollectionEvent: capture() takes 1 positional argument but 3 were given
+2026-04-09 01:58:19,572 [INFO] Use pytorch device_name: cpu
+2026-04-09 01:58:19,572 [INFO] Load pretrained SentenceTransformer: all-MiniLM-L6-v2

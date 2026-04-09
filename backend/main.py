@@ -9,16 +9,19 @@ from dotenv import load_dotenv
 import os
 import uuid
 import logging
+import sys
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("./nourish.log")
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("./nourish.log", mode='a')
     ]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("nourish")
+logging.getLogger("httpx").setLevel(logging.DEBUG)
+logging.getLogger("uvicorn").setLevel(logging.DEBUG)
 
 load_dotenv()
 
@@ -84,6 +87,7 @@ async def get_models():
 @app.post("/api/generate")
 async def generate(req: GenerateRequest):
     logger.info(f"Generate request - provider: {req.provider}, model: {req.model}")
+    logger.debug(f"Generate request body: provider={req.provider}, model={req.model}, base_url={req.base_url}, messages_count={len(req.messages)}")
     try:
         if req.provider == "lmstudio":
             url = f"{req.base_url or os.getenv('LMSTUDIO_URL', 'http://host.docker.internal:1234')}/v1/chat/completions"
@@ -101,8 +105,14 @@ async def generate(req: GenerateRequest):
             logger.error(f"Generate error: Unknown provider {req.provider}")
             raise HTTPException(status_code=400, detail="Unknown provider")
 
+        logger.debug(f"Calling URL: {url}")
+        logger.debug(f"Request headers: {headers}")
+        logger.debug(f"Request body: {body}")
+
         async with httpx.AsyncClient(timeout=120) as client:
             res = await client.post(url, json=body, headers=headers)
+            logger.debug(f"Response status: {res.status_code}")
+            logger.debug(f"Response body: {res.text[:500]}")
             logger.info(f"Generate successful - provider: {req.provider}")
             return res.json()
     except Exception as e:
@@ -199,13 +209,16 @@ async def delete_knowledge(name: str):
 
 @app.get("/api/logs")
 async def get_logs():
+    log_path = "./nourish.log"
+    logger.info(f"Fetching logs from {log_path}")
     try:
-        with open("./nourish.log", "r") as f:
+        if not os.path.exists(log_path):
+            return {"logs": [f"Log file not found at {log_path}"]}
+        with open(log_path, "r") as f:
             lines = f.readlines()
-        return {"logs": lines[-100:]}
+        return {"logs": lines[-200:]}
     except Exception as e:
-        logger.warning(f"Could not read logs: {str(e)}")
-        return {"logs": ["No logs yet"]}
+        return {"logs": [f"Error reading logs: {str(e)}"]}
 
 @app.delete("/api/logs")
 async def clear_logs():
