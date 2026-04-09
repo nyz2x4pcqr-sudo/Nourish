@@ -1009,6 +1009,7 @@
                 <button class="settings-tab-btn" onclick="switchSettingsTab('sources')">Recipe Sources</button>
                 <button class="settings-tab-btn" onclick="switchSettingsTab('nutrition')">Nutrition</button>
                 <button class="settings-tab-btn" onclick="switchSettingsTab('kb')">Knowledge Base</button>
+                <button class="settings-tab-btn" onclick="switchSettingsTab('logs')">Logs</button>
                 <button class="settings-tab-btn" onclick="switchSettingsTab('about')">About</button>
             </div>
 
@@ -1191,6 +1192,22 @@
                     </div>
                 </div>
 
+                <!-- Logs Tab -->
+                <div id="logs-tab" class="settings-tab-content">
+                    <div class="settings-group">
+                        <div class="settings-input-group">
+                            <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+                                <button onclick="refreshLogs()" style="padding: 10px 16px; border-radius: 6px; border: 2px solid #ff6b35; background: rgba(255, 107, 53, 0.1); color: #ff6b35; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 0.85em;">🔄 Refresh</button>
+                                <button onclick="clearLogs()" style="padding: 10px 16px; border-radius: 6px; border: 2px solid #f44336; background: rgba(244, 67, 54, 0.1); color: #ef5350; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 0.85em;">🗑️ Clear Logs</button>
+                                <span id="logsAutoRefreshStatus" style="color: #888; font-size: 0.9em; padding: 10px 12px; margin-left: auto;">Auto-refreshing...</span>
+                            </div>
+                            <div id="logsPanel" style="background: #1a1a1a; border: 2px solid #444; border-radius: 6px; padding: 12px; height: 400px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.4; color: #ddd;">
+                                <div style="color: #888; text-align: center; padding: 20px;">Loading logs...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- About Tab -->
                 <div id="about-tab" class="settings-tab-content">
                     <div class="about-content">
@@ -1262,6 +1279,19 @@
     </div>
 
     <script>
+        async function checkBackend() {
+            try {
+                const res = await fetch('http://localhost:8000/health');
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    document.getElementById('modelIndicator').textContent = '✅ Backend connected';
+                }
+            } catch(e) {
+                document.getElementById('modelIndicator').textContent = '❌ Backend offline - run docker-compose up';
+            }
+        }
+        checkBackend();
+
         let goal = '';
         let source = 'aiChef';
         let activeModel = 'qwen2.5-coder-7b-instruct';
@@ -1916,13 +1946,14 @@ Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-
                 prompt = 'KNOWLEDGE BASE:\n' + additionalContext + '\n\n---\n\n' + prompt;
             }
 
-            const response = await fetch(ollamaUrl + '/api/generate', {
+            const response = await fetch('http://localhost:8000/api/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    provider: 'ollama',
                     model: 'neural-chat',
-                    prompt: prompt,
-                    stream: false
+                    api_key: '',
+                    prompt: prompt
                 })
             });
 
@@ -1959,16 +1990,16 @@ Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-
             const query = likesList.length > 0 ? likesList[0] : 'chicken';
             const excludeIngredients = hatesList.join(',');
             
-            const params = new URLSearchParams({
-                apiKey: spoonacularApiKey,
-                number: 21,
-                addRecipeInformation: 'true',
-                fillIngredients: 'true',
-                query: query,
-                ...(excludeIngredients && { excludeIngredients })
+            const response = await fetch('http://localhost:8000/api/recipes/spoonacular', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    api_key: spoonacularApiKey,
+                    query: query,
+                    number: 21,
+                    excludeIngredients: excludeIngredients
+                })
             });
-
-            const response = await fetch(`https://api.spoonacular.com/recipes/complexSearch?${params}`);
             if (!response.ok) throw new Error('Spoonacular API error');
 
             const data = await response.json();
@@ -2014,7 +2045,13 @@ Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-
             const likesList = (likes || '').split(',').map(s => s.trim()).filter(s => s);
             const query = likesList.length > 0 ? likesList[0] : 'Pasta';
 
-            const response = await fetch(`https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(query)}`);
+            const response = await fetch('http://localhost:8000/api/recipes/themealdb', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    query: query
+                })
+            });
             if (!response.ok) throw new Error('The Meal DB API error');
 
             const data = await response.json();
@@ -2143,10 +2180,15 @@ Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-
                 // Extract just the ingredient name (remove quantities like "1 ", "2 tbsp", etc.)
                 const ingredientName = firstIngredient.replace(/^\d+(\s+|-)?[a-z]*\.?\s*/i, '').split(/\s+/)[0];
 
-                // Fetch from USDA API
-                const response = await fetch(
-                    `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(ingredientName)}&pageSize=1&api_key=${usdaApiKey}`
-                );
+                // Fetch from backend which calls USDA API
+                const response = await fetch('http://localhost:8000/api/nutrition/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: ingredientName,
+                        api_key: usdaApiKey
+                    })
+                });
 
                 if (response.ok) {
                     const data = await response.json();
@@ -2442,6 +2484,107 @@ Goal: ${goal}. Likes: ${likes || 'any'}. Avoids: ${hates || 'none'}. Generate 7-
 
             return items;
         }
+
+        let logsRefreshInterval = null;
+
+        async function fetchLogs() {
+            try {
+                const response = await fetch('http://localhost:8000/api/logs');
+                const data = await response.json();
+                displayLogs(data.logs || []);
+            } catch (err) {
+                console.error('Error fetching logs:', err);
+                const logsPanel = document.getElementById('logsPanel');
+                logsPanel.innerHTML = '<div style="color: #ef5350;">❌ Failed to fetch logs</div>';
+            }
+        }
+
+        function displayLogs(logs) {
+            const logsPanel = document.getElementById('logsPanel');
+            
+            if (!logs || logs.length === 0) {
+                logsPanel.innerHTML = '<div style="color: #888; text-align: center; padding: 20px;">No logs yet</div>';
+                return;
+            }
+
+            // Reverse to show newest first
+            const reversedLogs = [...logs].reverse();
+            
+            const logLines = reversedLogs.map(line => {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) return '';
+                
+                let color = '#ddd';
+                let icon = '•';
+                
+                if (trimmedLine.includes('[ERROR]')) {
+                    color = '#ef5350';
+                    icon = '❌';
+                } else if (trimmedLine.includes('[WARNING]')) {
+                    color = '#fff59d';
+                    icon = '⚠️';
+                } else if (trimmedLine.includes('[INFO]')) {
+                    color = '#81c784';
+                    icon = 'ℹ️';
+                }
+                
+                return `<div style="color: ${color};">${icon} ${trimmedLine}</div>`;
+            }).join('');
+            
+            logsPanel.innerHTML = logLines || '<div style="color: #888;">No log lines</div>';
+            logsPanel.scrollTop = logsPanel.scrollHeight;
+        }
+
+        async function refreshLogs() {
+            await fetchLogs();
+        }
+
+        async function clearLogs() {
+            if (!confirm('Are you sure you want to clear all logs?')) return;
+            
+            try {
+                const response = await fetch('http://localhost:8000/api/logs', {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    const logsPanel = document.getElementById('logsPanel');
+                    logsPanel.innerHTML = '<div style="color: #81c784; text-align: center; padding: 20px;">✅ Logs cleared</div>';
+                    await fetchLogs();
+                } else {
+                    alert('Failed to clear logs');
+                }
+            } catch (err) {
+                alert('Error clearing logs: ' + err.message);
+            }
+        }
+
+        function startLogsAutoRefresh() {
+            // Fetch logs immediately
+            fetchLogs();
+            
+            // Then refresh every 5 seconds
+            if (logsRefreshInterval) clearInterval(logsRefreshInterval);
+            logsRefreshInterval = setInterval(fetchLogs, 5000);
+        }
+
+        function stopLogsAutoRefresh() {
+            if (logsRefreshInterval) {
+                clearInterval(logsRefreshInterval);
+                logsRefreshInterval = null;
+            }
+        }
+
+        // Hook into settings tab switching to start/stop auto-refresh
+        const originalSwitchSettingsTab = window.switchSettingsTab;
+        window.switchSettingsTab = function(tabName) {
+            if (tabName === 'logs') {
+                startLogsAutoRefresh();
+            } else {
+                stopLogsAutoRefresh();
+            }
+            originalSwitchSettingsTab(tabName);
+        };
     </script>
 </body>
 </html>
