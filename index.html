@@ -2,298 +2,225 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Nourish - AI Meal Planner</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- INPUT SECTION -->
-    <div class="input-section">
-        <div class="title-bar">
-            <div>
-                <h1 class="title">🍽️ Nourish</h1>
-                <p class="subtitle">Your AI Meal Planner</p>
-            </div>
-            <button id="settingsBtn" onclick="toggleSettings()" title="Settings">⚙️</button>
-        </div>
-        <p id="modelIndicator" class="model-indicator">Loading model...</p>
-
-        <div id="settingsDrawer">
-            <div class="settings-tabs">
-                <button class="settings-tab-btn active" onclick="switchSettingsTab('models')">AI Models</button>
-                <button class="settings-tab-btn" onclick="switchSettingsTab('sources')">Recipe Sources</button>
-                <button class="settings-tab-btn" onclick="switchSettingsTab('nutrition')">Nutrition</button>
-                <button class="settings-tab-btn" onclick="switchSettingsTab('kb')">Knowledge Base</button>
-                <button class="settings-tab-btn" onclick="switchSettingsTab('logs')">Logs</button>
-                <button class="settings-tab-btn" onclick="switchSettingsTab('about')">About</button>
+    <!-- App Container -->
+    <div class="app-container">
+        <!-- Today Screen -->
+        <div class="screen screen-today active" id="screenToday">
+            <div class="screen-header">
+                <h1 class="large-title" id="todayTitle">Thursday, Apr 9</h1>
             </div>
 
-            <div class="settings-content">
-                <!-- AI Models Tab -->
-                <div id="models-tab" class="settings-tab-content active">
-                    <div class="settings-group">
-                        <div class="settings-input-group">
-                            <label>LM Studio</label>
-                            <div class="input-with-button">
-                                <input type="text" id="lmstudioUrlInput" placeholder="http://localhost:1234" />
-                                <button onclick="testConnection('lmstudio')">Test</button>
-                            </div>
-                            <div id="lmstudio-test" class="test-result"></div>
-                        </div>
+            <!-- Day Strip -->
+            <div class="day-strip" id="dayStrip">
+                <button class="day-pill active" data-day="0">Mon</button>
+                <button class="day-pill" data-day="1">Tue</button>
+                <button class="day-pill" data-day="2">Wed</button>
+                <button class="day-pill" data-day="3">Thu</button>
+                <button class="day-pill" data-day="4">Fri</button>
+                <button class="day-pill" data-day="5">Sat</button>
+                <button class="day-pill" data-day="6">Sun</button>
+            </div>
 
-                        <div class="settings-input-group">
-                            <label>Claude API Key</label>
-                            <input type="password" id="claudeApiKeyInput" placeholder="sk-ant-..." />
-                            <div class="helper-text">Get key at <a class="settings-link" href="https://console.anthropic.com/account/api-keys" target="_blank">console.anthropic.com</a></div>
-                        </div>
+            <!-- Calorie Ring & Macros -->
+            <div class="calorie-section" id="calorieSection">
+                <div class="calorie-ring-container">
+                    <svg class="calorie-ring" viewBox="0 0 180 180" width="180" height="180">
+                        <!-- Track -->
+                        <circle cx="90" cy="90" r="70" fill="none" stroke="var(--border)" stroke-width="12" stroke-linecap="round" />
+                        <!-- Progress -->
+                        <circle id="calorieProgress" cx="90" cy="90" r="70" fill="none" stroke="var(--accent)" stroke-width="12" 
+                                stroke-linecap="round" stroke-dasharray="0 439.82" transform="rotate(-90 90 90)"
+                                style="transition: stroke-dasharray 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);" />
+                    </svg>
+                    <div class="calorie-ring-center">
+                        <div class="calorie-value" id="calorieValue">2,400</div>
+                        <div class="calorie-label">calories today</div>
+                    </div>
+                </div>
 
-                        <div class="settings-input-group">
-                            <label>Claude Model</label>
-                            <select id="claudeModelSelect">
-                                <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
-                                <option value="claude-sonnet-4-5">Claude Sonnet 4.5 (balanced)</option>
-                                <option value="claude-opus-4-5">Claude Opus 4.5 (best)</option>
-                            </select>
+                <!-- Macro Bars -->
+                <div class="macro-bars" id="macroBars">
+                    <div class="macro-bar">
+                        <div class="macro-label">Protein</div>
+                        <div class="macro-track">
+                            <div class="macro-fill" style="background: var(--protein); width: 35%;"></div>
                         </div>
-
-                        <div class="settings-input-group">
-                            <label>OpenAI API Key</label>
-                            <input type="password" id="openaiApiKeyInput" placeholder="sk-..." />
-                            <div class="helper-text">Get key at <a class="settings-link" href="https://platform.openai.com/account/api-keys" target="_blank">platform.openai.com</a></div>
+                        <div class="macro-value" id="proteinValue">65g</div>
+                    </div>
+                    <div class="macro-bar">
+                        <div class="macro-label">Carbs</div>
+                        <div class="macro-track">
+                            <div class="macro-fill" style="background: var(--carbs); width: 45%;"></div>
                         </div>
-
-                        <div class="settings-input-group">
-                            <label>OpenAI Model</label>
-                            <select id="openaiModelSelect">
-                                <option value="gpt-4o">GPT-4o (recommended)</option>
-                                <option value="gpt-4o-mini">GPT-4o Mini (faster)</option>
-                                <option value="gpt-3.5-turbo">GPT-3.5 Turbo (legacy)</option>
-                            </select>
+                        <div class="macro-value" id="carbsValue">300g</div>
+                    </div>
+                    <div class="macro-bar">
+                        <div class="macro-label">Fat</div>
+                        <div class="macro-track">
+                            <div class="macro-fill" style="background: var(--fat); width: 28%;"></div>
                         </div>
+                        <div class="macro-value" id="fatValue">80g</div>
+                    </div>
+                </div>
+            </div>
 
-                        <div class="settings-input-group">
-                            <label>Ollama URL</label>
-                            <div class="input-with-button">
-                                <input type="text" id="ollamaUrlInput" placeholder="http://localhost:11434" />
-                                <button onclick="testConnection('ollama')">Test</button>
-                            </div>
-                            <div id="ollama-test" class="test-result"></div>
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Active AI Provider</label>
-                            <div class="radio-group">
-                                <div class="radio-item">
-                                    <input type="radio" id="provider-lmstudio" name="activeProvider" value="lmstudio" onchange="saveSettingsAuto()" />
-                                    <label for="provider-lmstudio">LM Studio</label>
-                                </div>
-                                <div class="radio-item">
-                                    <input type="radio" id="provider-claude" name="activeProvider" value="claude" onchange="saveSettingsAuto()" />
-                                    <label for="provider-claude">Claude (Anthropic)</label>
-                                </div>
-                                <div class="radio-item">
-                                    <input type="radio" id="provider-openai" name="activeProvider" value="openai" onchange="saveSettingsAuto()" />
-                                    <label for="provider-openai">OpenAI</label>
-                                </div>
-                                <div class="radio-item">
-                                    <input type="radio" id="provider-ollama" name="activeProvider" value="ollama" onchange="saveSettingsAuto()" />
-                                    <label for="provider-ollama">Ollama</label>
-                                </div>
-                            </div>
+            <!-- Meal Cards -->
+            <div class="meal-cards" id="mealCards">
+                <!-- Breakfast Card -->
+                <div class="meal-card" data-meal="breakfast">
+                    <div class="meal-image" style="background: linear-gradient(135deg, rgba(255,200,124,0.2), rgba(255,160,64,0.2));">
+                        <span class="meal-emoji">🍳</span>
+                    </div>
+                    <div class="meal-content">
+                        <div class="meal-type">Breakfast</div>
+                        <div class="meal-name" id="breakfastName">Oatmeal with Berries</div>
+                        <div class="meal-badges">
+                            <span class="meal-badge">⏱ 15 min</span>
+                            <span class="meal-badge">520 cal</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Recipe Sources Tab -->
-                <div id="sources-tab" class="settings-tab-content">
-                    <div class="settings-group">
-                        <div class="settings-input-group">
-                            <label>TheMealDB <span class="badge badge-free">FREE</span></label>
-                            <div class="toggle-group">
-                                <div class="toggle-switch" id="themealdb-toggle" onclick="toggleTheMealDB()"></div>
-                                <span style="color: #ddd;">No API key required · Free recipe database</span>
-                            </div>
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Spoonacular API Key</label>
-                            <input type="password" id="spoonacularApiKeyInput" placeholder="DEMO" />
-                            <div class="helper-text">Get free key at <a class="settings-link" href="https://spoonacular.com/food-api" target="_blank">spoonacular.com</a></div>
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Edamam Recipe Search - App ID</label>
-                            <input type="text" id="edamamAppIdInput" placeholder="Edamam App ID" />
-                            <div class="helper-text">Get at <a class="settings-link" href="https://developer.edamam.com" target="_blank">developer.edamam.com</a></div>
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Edamam Recipe Search - App Key</label>
-                            <input type="password" id="edamamAppKeyInput" placeholder="Edamam App Key" />
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Tasty API Key (RapidAPI)</label>
-                            <input type="password" id="tastyApiKeyInput" placeholder="RapidAPI Key" />
-                            <div class="helper-text">Get at <a class="settings-link" href="https://rapidapi.com/apidojo/api/tasty" target="_blank">rapidapi.com/tasty</a></div>
+                <!-- Lunch Card -->
+                <div class="meal-card" data-meal="lunch">
+                    <div class="meal-image" style="background: linear-gradient(135deg, rgba(100,200,100,0.2), rgba(80,180,80,0.2));">
+                        <span class="meal-emoji">🥗</span>
+                    </div>
+                    <div class="meal-content">
+                        <div class="meal-type">Lunch</div>
+                        <div class="meal-name" id="lunchName">Grilled Chicken Salad</div>
+                        <div class="meal-badges">
+                            <span class="meal-badge">⏱ 30 min</span>
+                            <span class="meal-badge">680 cal</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Nutrition Tab -->
-                <div id="nutrition-tab" class="settings-tab-content">
-                    <div class="settings-group">
-                        <div class="settings-input-group">
-                            <label>USDA FoodData Central API Key</label>
-                            <input type="password" id="usdaApiKeyInput" placeholder="DEMO_KEY" />
-                            <div class="helper-text">Free key at <a class="settings-link" href="https://fdc.nal.usda.gov/api-key-signup" target="_blank">fdc.nal.usda.gov</a></div>
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Auto-fetch USDA Nutrition</label>
-                            <div class="toggle-group">
-                                <div class="toggle-switch on" id="autofetch-toggle" onclick="toggleAutoFetch()"></div>
-                                <span style="color: #ddd;">Automatically fetch real nutrition data after generating meals</span>
-                            </div>
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Show Nutrition Badges</label>
-                            <div class="toggle-group">
-                                <div class="toggle-switch on" id="badges-toggle" onclick="toggleNutritionBadges()"></div>
-                                <span style="color: #ddd;">Display nutrition info on meal cards</span>
-                            </div>
+                <!-- Dinner Card -->
+                <div class="meal-card" data-meal="dinner">
+                    <div class="meal-image" style="background: linear-gradient(135deg, rgba(200,100,50,0.2), rgba(180,80,40,0.2));">
+                        <span class="meal-emoji">🍝</span>
+                    </div>
+                    <div class="meal-content">
+                        <div class="meal-type">Dinner</div>
+                        <div class="meal-name" id="dinnerName">Salmon with Vegetables</div>
+                        <div class="meal-badges">
+                            <span class="meal-badge">⏱ 35 min</span>
+                            <span class="meal-badge">750 cal</span>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- Knowledge Base Tab -->
-                <div id="kb-tab" class="settings-tab-content">
-                    <div class="settings-group">
-                        <div class="settings-input-group">
-                            <label>Use Knowledge Base</label>
-                            <div class="toggle-group">
-                                <div class="toggle-switch" id="use-kb-toggle" onclick="toggleUseKB()"></div>
-                                <span style="color: #ddd;">Inject KB content into meal generation prompts</span>
-                            </div>
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Knowledge Base Name</label>
-                            <input type="text" id="kbNameInput" placeholder="e.g., My Recipes, Dietary Guidelines" />
-                        </div>
-
-                        <div class="settings-input-group">
-                            <label>Add Knowledge Content</label>
-                            <p style="font-size: 0.8em; color: #888; margin-bottom: 12px;">Upload .txt or .pdf files, or paste text directly:</p>
-                            <div style="display: flex; gap: 12px; margin-bottom: 12px;">
-                                <input type="file" id="kbFileInput" accept=".txt,.pdf" placeholder="Select .txt or .pdf file" style="flex: 1; background-color: #3c3c3c; color: #fff; border: 2px solid #444; padding: 10px 12px; border-radius: 6px; font-size: 0.9em; cursor: pointer;" />
-                                <button onclick="uploadKBFile()" style="padding: 10px 16px; border-radius: 6px; border: 2px solid #ff6b35; background: rgba(255, 107, 53, 0.1); color: #ff6b35; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 0.85em; white-space: nowrap;">📤 Upload File</button>
-                            </div>
-                            <div id="fileUploadStatus" style="font-size: 0.8em; display: none; margin-bottom: 12px; padding: 8px; border-radius: 4px;"></div>
-                            <textarea id="kbContentInput" placeholder="Or paste recipes, cookbooks, nutrition facts, dietary guidelines, or any text you want the AI to use..." style="min-height: 150px; background-color: #2c2c2c; color: #fff; border: 2px solid #444; padding: 10px 12px; border-radius: 6px; font-size: 0.9em; font-family: monospace; resize: vertical;"></textarea>
-                        </div>
-
-                        <button onclick="addKBEntry()" style="padding: 12px 24px; border-radius: 8px; border: none; background: linear-gradient(135deg, #ff6b35, #ff8555); color: #fff; font-size: 0.95em; font-weight: 600; cursor: pointer; transition: all 0.2s;">Add to Knowledge Base</button>
-
-                        <div class="settings-input-group">
-                            <label>Saved Knowledge Base Entries</label>
-                            <div id="kbEntriesList" style="display: flex; flex-direction: column; gap: 12px; max-height: 300px; overflow-y: auto; border: 2px solid #444; border-radius: 6px; padding: 12px; background: #2c2c2c;">
-                                <p style="color: #888; text-align: center; padding: 20px; margin: 0;">No knowledge base entries yet</p>
-                            </div>
-                        </div>
-
-                        <button onclick="clearAllKBEntries()" style="margin-top: 12px; padding: 10px 16px; border-radius: 6px; border: 2px solid #f44336; background: rgba(244, 67, 54, 0.1); color: #ef5350; font-size: 0.9em; font-weight: 600; cursor: pointer; transition: all 0.2s;">Clear All Entries</button>
-                    </div>
-                </div>
-
-                <!-- Logs Tab -->
-                <div id="logs-tab" class="settings-tab-content">
-                    <div class="settings-group">
-                        <div class="settings-input-group">
-                            <div style="display: flex; gap: 12px; margin-bottom: 12px;">
-                                <button onclick="refreshLogs()" style="padding: 10px 16px; border-radius: 6px; border: 2px solid #ff6b35; background: rgba(255, 107, 53, 0.1); color: #ff6b35; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 0.85em;">🔄 Refresh</button>
-                                <button onclick="clearLogs()" style="padding: 10px 16px; border-radius: 6px; border: 2px solid #f44336; background: rgba(244, 67, 54, 0.1); color: #ef5350; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 0.85em;">🗑️ Clear Logs</button>
-                                <span id="logsAutoRefreshStatus" style="color: #888; font-size: 0.9em; padding: 10px 12px; margin-left: auto;">Auto-refreshing...</span>
-                            </div>
-                            <div id="logsPanel" style="background: #1a1a1a; border: 2px solid #444; border-radius: 6px; padding: 12px; height: 400px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.4; color: #ddd;">
-                                <div style="color: #888; text-align: center; padding: 20px;">Loading logs...</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- About Tab -->
-                <div id="about-tab" class="settings-tab-content">
-                    <div class="about-content">
-                        <div class="about-section">
-                            <div class="about-title">Nourish v0.3.0</div>
-                            <div class="about-text">Your AI-powered meal planner with real nutrition data</div>
-                        </div>
-
-                        <div class="about-section">
-                            <div class="about-title">Open Source</div>
-                            <div class="about-text">
-                                <a class="settings-link" href="https://github.com/stonys-mind/nourish" target="_blank">View on GitHub</a>
-                                <br />Licensed under AGPL v3
-                            </div>
-                        </div>
-
-                        <div class="about-section">
-                            <div class="about-title">Built With</div>
-                            <div class="about-text">
-                                • LM Studio for local AI<br />
-                                • USDA FoodData Central for nutrition<br />
-                                • TheMealDB & Spoonacular for recipes<br />
-                                • Anthropic Claude & OpenAI APIs
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="settings-save-area">
-                    <span id="settingsSavedMsg">✅ Saved to device</span>
-                    <button id="saveSettingsBtn" onclick="saveSettings()">Save All Settings</button>
-                </div>
+            <!-- Generate Plan Button (when no plan exists) -->
+            <div class="empty-state" id="emptyState" style="display: none; text-align: center; padding: 60px 20px;">
+                <div style="font-size: 48px; margin-bottom: 16px;">📋</div>
+                <div class="title" style="margin-bottom: 8px;">No meal plan yet</div>
+                <div class="text-dim" style="margin-bottom: 24px;">Generate a personalized 7-day plan</div>
+                <button class="btn btn-primary" onclick="showGenerateSheet()">Generate Meal Plan</button>
             </div>
         </div>
 
-        <label for="likes">Foods you like</label>
-        <input type="text" id="likes" placeholder="e.g. chicken, pasta, avocado" />
-
-        <label for="hates">Foods you hate or can't eat</label>
-        <input type="text" id="hates" placeholder="e.g. mushrooms, shellfish, dairy" />
-
-        <p class="goal-label">Your goal</p>
-        <div class="goal-buttons">
-            <button class="goal-btn" onclick="setGoal('Cut', this)">Cut</button>
-            <button class="goal-btn" onclick="setGoal('Maintain', this)">Maintain</button>
-            <button class="goal-btn" onclick="setGoal('Gain', this)">Gain</button>
+        <!-- Plan Screen -->
+        <div class="screen screen-plan" id="screenPlan">
+            <div class="screen-header">
+                <h1 class="large-title">Plan</h1>
+            </div>
+            <div class="accordions" id="planAccordions"></div>
         </div>
 
-        <p class="source-label">Recipe source</p>
-        <div class="source-buttons">
-            <button class="source-btn active" onclick="setSource('aiChef', this)">AI Chef</button>
-            <button class="source-btn" onclick="setSource('spoonacular', this)">Spoonacular</button>
-            <button class="source-btn" onclick="setSource('themealdb', this)">The Meal DB</button>
+        <!-- Grocery Screen -->
+        <div class="screen screen-grocery" id="screenGrocery">
+            <div class="screen-header">
+                <h1 class="large-title">Grocery</h1>
+            </div>
+            <div id="groceryContainer"></div>
         </div>
 
-        <button id="generateBtn" onclick="generateMealPlan()">Generate 7-Day Meal Plan</button>
-
-        <div class="control-messages">
-            <div id="loading">🍳 Generating your cooked meal plan...</div>
-            <div id="nutritionUpdate">📊 Updating nutrition data...</div>
-            <div id="error"></div>
+        <!-- Settings Screen -->
+        <div class="screen screen-settings" id="screenSettings">
+            <div class="screen-header">
+                <h1 class="large-title">Settings</h1>
+            </div>
+            <div class="settings-list" id="settingsList"></div>
         </div>
     </div>
 
-    <!-- MEAL PLAN DISPLAY -->
-    <div class="meal-plan-container" id="mealPlanContainer">
-        <div class="days-panel" id="daysPanel"></div>
-        <div class="right-panel" id="rightPanel"></div>
+    <!-- Bottom Tab Bar -->
+    <div class="tab-bar">
+        <button class="tab" data-tab="today" title="Today">
+            <div class="tab-icon">📊</div>
+            <div class="tab-label">Today</div>
+        </button>
+        <button class="tab" data-tab="plan" title="Plan">
+            <div class="tab-icon">📅</div>
+            <div class="tab-label">Plan</div>
+        </button>
+        <button class="tab" data-tab="grocery" title="Grocery">
+            <div class="tab-icon">🛒</div>
+            <div class="tab-label">Grocery</div>
+        </button>
+        <button class="tab" data-tab="settings" title="Settings">
+            <div class="tab-icon">⚙️</div>
+            <div class="tab-label">Settings</div>
+        </button>
+    </div>
+
+    <!-- Recipe Sheet (Bottom Sheet) -->
+    <div class="recipe-sheet" id="recipeSheet">
+        <div class="recipe-sheet-backdrop" id="recipeSheetBackdrop"></div>
+        <div class="recipe-sheet-content" id="recipeSheetContent">
+            <div class="recipe-sheet-handle"></div>
+        </div>
+    </div>
+
+    <!-- Generate Plan Sheet -->
+    <div class="generate-sheet" id="generateSheet">
+        <div class="sheet-backdrop" id="generateSheetBackdrop"></div>
+        <div class="sheet-content" id="generateSheetContent">
+            <div class="sheet-header">
+                <h2 class="title">Generate Meal Plan</h2>
+                <button class="btn-close" onclick="closeGenerateSheet()">✕</button>
+            </div>
+            <div class="sheet-body">
+                <div class="input-group">
+                    <label class="label">Foods you like</label>
+                    <input type="text" id="inputLikes" placeholder="e.g. chicken, pasta, avocado" />
+                </div>
+
+                <div class="input-group">
+                    <label class="label">Foods you hate</label>
+                    <input type="text" id="inputHates" placeholder="e.g. mushrooms, shellfish, dairy" />
+                </div>
+
+                <div class="input-group">
+                    <label class="label caption">Your goal</label>
+                    <div class="segment-buttons" id="goalSegments">
+                        <button class="segment-btn" data-goal="Cut">Cut</button>
+                        <button class="segment-btn" data-goal="Maintain">Maintain</button>
+                        <button class="segment-btn" data-goal="Gain">Gain</button>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label class="label caption">Recipe source</label>
+                    <div class="source-buttons" id="sourceButtons">
+                        <button class="source-btn active" data-source="aiChef">AI Chef</button>
+                        <button class="source-btn" data-source="themealdb">TheMealDB</button>
+                        <button class="source-btn" data-source="spoonacular">Spoonacular</button>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" id="generateBtn" onclick="generateMealPlan()">Generate Plan</button>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>
 </body>
 </html>
-
