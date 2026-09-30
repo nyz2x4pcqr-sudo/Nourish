@@ -58,7 +58,7 @@ Tests added: `backend/main_test.py` (12 tests, pass) and `tests/json-repair.test
 - **C2 — No plan could be generated on first load.** `app.js:24-29` never rendered the empty state, `index.html:121` hid the only Generate button, and `styles.css:490/505` let the fixed backdrop paint over the sheet. **FIXED:** everything renders on load, the sheet content is `position:relative` and pinned to the bottom, and there's a "New plan" button in the header.
 - **C3 — Settings screen was empty.** `index.html:150` `#settingsList` was never filled in, so there was no way to choose a provider or enter a key. `saveSettings()` existed but nothing called it. **FIXED:** the Settings screen is built in `renderSettings()`.
 - **C4 — TheMealDB and Spoonacular called endpoints that never existed.** `app.js:616`, `app.js:657` → `/api/recipes/*` were not defined in any version of `main.py` in history. **FIXED:** both added to the backend. The Spoonacular key is sent in a header, not the URL. Tested with faked upstream responses; live calls are **UNVERIFIED**.
-- **C5 — There is no chat feature.** The requested walkthrough ends with "send a chat message", but no chat has ever existed in this repo. **FLAG / OPEN:** not built. It's a new feature, not a fix. `/api/generate` would support it with a small UI addition.
+- **C5 — There is no chat feature.** The requested walkthrough ends with "send a chat message", but no chat has ever existed in this repo. **FIXED (follow-up, at the owner's request):** a Chat tab that can turn the conversation into the plan ("Make plan"). See the follow-up section.
 - **C6 — XSS through recipe text.** `app.js:236,266,281,295,342,374,378,423-428` put LLM/TheMealDB/Spoonacular strings into `innerHTML`. `renderPlanMeal` (`app.js:374`) also put the whole meal JSON into an inline `onclick`. **Reproduced** script execution on the original code. **FIXED:** all dynamic content is built with `textContent` through the `h()` helper. The only `innerHTML` left in the codebase: none.
 - **C7 — The plan was lost on reload and the placeholder data came back.** **FIXED:** `nourish_plan` and `nourish_grocery_checked` are saved in localStorage.
 
@@ -196,7 +196,7 @@ Goal: *one file to install on the PC, one app on the iPhone, zero configuration.
 - "Add to Home Screen" gives a full-screen app icon.
 
 **Still blocking the goal:**
-1. **No installer.** The user must install Python 3.12 exactly, create a venv, and download about 3 GB (PyTorch, which comes with the knowledge base) — or install Docker. Removing or making optional the knowledge base (M7) is the biggest single step. After that, a PyInstaller build or a small Windows installer becomes realistic.
+1. **Installer — mostly solved (follow-up).** The knowledge base is now optional (`requirements-core.txt`). GitHub Actions builds a single ~22 MB `Nourish.exe` that needs no Python. It's unsigned, so Windows SmartScreen warns on first run.
 2. **The LLM still needs manual setup:** install LM Studio, download a model, start its server. Or paste a Claude/OpenAI key.
 3. **The phone needs the PC's IP address,** which can change (DHCP), and a Windows Firewall prompt must be accepted. mDNS (`http://<pcname>.local:8000`) usually works on iPhone and is allowed by CORS, but isn't documented as reliable.
 4. **No offline iPhone app.** Plain `http://` on the LAN isn't a secure context, so iOS won't run a service worker. The home-screen icon won't open anything unless the PC is on and reachable. Fixing this needs HTTPS (a local certificate the phone trusts) or a native wrapper.
@@ -204,6 +204,23 @@ Goal: *one file to install on the PC, one app on the iPhone, zero configuration.
 6. **The PC must stay on** while you generate plans. After that, the plan is stored on the phone, but only as long as Safari doesn't clear site data (iOS can remove it after about 7 days without a visit to the site).
 
 ---
+
+## Follow-up round (after the first push)
+
+What the owner reported, and what was done:
+
+- **Plan generation couldn't reach LM Studio.** The owner was running an older, never-committed local version in Docker, with `http://localhost:1234` in Settings. Inside Docker, `localhost` is the container itself. Diagnosed with `docker compose exec backend python -c "…httpx.get(…)"`: `host.docker.internal:1234` returned 200 and `localhost:1234` was refused. **Resolved** by the owner's configuration (the owner then switched to the version on GitHub).
+- **"Nothing was made" even though LM Studio returned a full plan.** **Not reproducible here.** LM Studio's exact output shape (a code fence, a `// Repeat…` comment line, 7 days, a 73-second wait) was replayed against the app, and the plan appeared. The most likely causes on a phone are a dropped long request, or an error toast that vanished after 6 seconds. **FIXED both ways:** generation now runs as a server-side job (`/api/jobs`) that the app polls and resumes after a reload. Tested by reloading mid-generation: the plan still arrived. Errors now stay in a status bar until dismissed. There's also a Cancel button. **UNVERIFIED** on the owner's machine.
+- **Chat tab** (C5): multi-turn chat using the profile and the current plan; "Make plan" turns the conversation into the 7-day plan; "Ask the chef about this meal" from any recipe; history is saved; formatting is safe (lists and bold built as DOM nodes, and an XSS payload was tested and not executed).
+- **Detailed Settings**:
+  - AI: a model picker (lists from LM Studio/Ollama, which also fixes the silent "first model in the list" choice), creativity, response length, and a Test-the-AI button.
+  - A full profile — calories, protein, diet, allergies, cuisines, cook time, servings, skill, budget, units — injected into every plan and chat prompt. Diet, allergies and cook time are also passed to Spoonacular; allergies to TheMealDB.
+  - The phone address from `/api/info`, and export/clear/reset.
+  - Everything saves automatically, with a visible "Saved ✓".
+- **Windows .exe**: `backend/nourish_app.py` is the launcher. It prints the phone address, opens the browser, and handles "already running". `.github/workflows/build-exe.yml` builds, tests and smoke-tests it on `windows-latest`. **Verified here:** the same PyInstaller build on Linux (22 MB) ran from an empty folder: page served, `.env` blocked, plan and chat work, second launch detected. **UNVERIFIED:** the Windows build itself, until the workflow runs on GitHub.
+- **Bug found and fixed during testing:** `replaceChildren(null)` printed the word "null" in Settings (and could in the recipe sheet). Replaced with a null-safe `setChildren` helper, and checked that no "null" text appears on any screen.
+- AI time limit raised from 5 to 15 minutes (a 14B model writing 12k tokens can take longer than 5).
+- Core dependencies tested on Python 3.12 and 3.13 (19/19 backend tests pass). They also resolve on 3.14 (not run).
 
 ## UNVERIFIED (and why)
 

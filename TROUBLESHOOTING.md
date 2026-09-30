@@ -80,6 +80,26 @@ Want to use LM Studio from Docker, or from another PC? In LM Studio's server set
 
 ---
 
+## Nourish.exe
+
+| Problem | What to do |
+|---|---|
+| "Windows protected your PC" | The app isn't code-signed (signing costs money). Click **More info → Run anyway**. |
+| The window flashes and closes | Open PowerShell in that folder and run `.\Nourish.exe` to read the message. |
+| "Something is already using port 8000" | Nourish is already running. Look for its other window. Or run it on another port: `$env:NOURISH_PORT=8001; .\Nourish.exe` |
+| Antivirus deletes or quarantines it | False positives are common for PyInstaller apps. Allow it in your antivirus, or run from Python instead (README, Option 1). |
+| Phone can't connect | Allow Nourish on **Private networks** in the Windows Firewall prompt, or add it under Windows Defender Firewall → "Allow an app". |
+
+---
+
+## The plan never shows up
+
+- Look at the bar at the top of the app. While a plan is cooking it shows a timer and **Cancel**. If something fails, the reason stays there until you tap **Dismiss**.
+- Settings → **Test the AI** checks the whole path: app → Nourish server → your AI.
+- The reply is broken or cut short: try **Response length: Long**, a lower **Creativity**, or a larger or non-"coder" model.
+
+---
+
 ## Other messages
 
 | Message | What to do |
