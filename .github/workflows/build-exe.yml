@@ -2,7 +2,8 @@ name: Build Windows app
 
 # Builds Nourish.exe on a Windows machine.
 # - Every push to main: the .exe is attached to the workflow run (Actions tab → run → "Nourish-windows").
-# - Pushing a tag like v0.3.0: the .exe is also published as a GitHub Release download.
+# - Pushing a tag like v0.1.0-pre-alpha: the .exe is also published as a GitHub Release download.
+#   Tags with a dash (-pre-alpha, -beta, ...) are marked as pre-releases.
 on:
   push:
     branches: [main]
@@ -83,8 +84,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: Nourish ${{ github.ref_name }}
           files: dist/Nourish.exe
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
+            **Pre-release — expect rough edges.** Please report problems in Issues.
+
             Download **Nourish.exe**, double-click it, and keep the window open.
             Your browser opens the app. Use the "On your phone" address it prints on your iPhone (same Wi-Fi).
             Windows may warn that the app is unrecognized: click "More info" → "Run anyway".
