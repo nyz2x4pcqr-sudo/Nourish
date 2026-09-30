@@ -1,0 +1,17 @@
+# Secrets and local data
+backend/.env
+.env
+backend/chroma_data/
+chroma_data/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editor / OS
+*.bak
+.DS_Store
+Thumbs.db
