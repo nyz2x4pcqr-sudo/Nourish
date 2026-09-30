@@ -8,7 +8,18 @@ services:
     volumes:
       - ./backend:/app
       - chroma_data:/app/chroma_data
+      # The backend serves the web app too; mount only the frontend files, read-only.
+      - ./index.html:/frontend/index.html:ro
+      - ./app.js:/frontend/app.js:ro
+      - ./json-repair.js:/frontend/json-repair.js:ro
+      - ./styles.css:/frontend/styles.css:ro
+    environment:
+      FRONTEND_DIR: /frontend
+      # Inside Docker, "localhost" is the container itself; reach LM Studio / Ollama on the PC.
+      LMSTUDIO_URL: http://host.docker.internal:1234
+      OLLAMA_URL: http://host.docker.internal:11434
     env_file:
-      - ./backend/.env
+      - path: ./backend/.env
+        required: false
 volumes:
   chroma_data:
