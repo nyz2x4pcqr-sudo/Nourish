@@ -13,6 +13,7 @@
 </head>
 <body>
     <div class="offline-banner" id="offlineBanner" role="status" hidden></div>
+    <div class="job-bar" id="jobBar" role="status" aria-live="polite" hidden></div>
 
     <!-- App Container -->
     <div class="app-container">
@@ -79,6 +80,19 @@
             <div class="accordions" id="planAccordions"></div>
         </div>
 
+        <!-- Chat Screen -->
+        <div class="screen screen-chat" id="screenChat">
+            <div class="screen-header">
+                <h1 class="large-title">Chat</h1>
+                <button type="button" class="btn-header" id="chatPlanBtn">Make plan</button>
+            </div>
+            <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
+            <form class="chat-composer" id="chatForm">
+                <textarea id="chatInput" rows="1" placeholder="Ask the chef…" enterkeyhint="send" aria-label="Message"></textarea>
+                <button type="submit" class="chat-send" id="chatSend" aria-label="Send">↑</button>
+            </form>
+        </div>
+
         <!-- Grocery Screen -->
         <div class="screen screen-grocery" id="screenGrocery">
             <div class="screen-header">
@@ -105,6 +119,10 @@
         <button type="button" class="tab" data-tab="plan" role="tab">
             <span class="tab-icon" aria-hidden="true">📅</span>
             <span class="tab-label">Plan</span>
+        </button>
+        <button type="button" class="tab" data-tab="chat" role="tab">
+            <span class="tab-icon" aria-hidden="true">💬</span>
+            <span class="tab-label">Chat</span>
         </button>
         <button type="button" class="tab" data-tab="grocery" role="tab">
             <span class="tab-icon" aria-hidden="true">🛒</span>
@@ -158,6 +176,9 @@
                         <button type="button" class="source-btn" data-source="spoonacular">Spoonacular</button>
                     </div>
                 </div>
+
+                <p class="sheet-hint">Also uses your profile: calories, diet, allergies, cooking time and more.
+                    <button type="button" class="link-btn" id="editProfileBtn">Edit profile</button></p>
 
                 <button type="button" class="btn btn-primary" id="generateBtn">Generate Plan</button>
             </div>

@@ -9,26 +9,60 @@ const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
 const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
 const MEAL_EMOJI = { breakfast: '🍳', lunch: '🥗', dinner: '🍝' };
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const CALORIE_TARGET = 2400;
 const PROVIDERS = { lmstudio: 'LM Studio (local)', ollama: 'Ollama (local)', claude: 'Claude', openai: 'OpenAI' };
+const MODEL_SUGGESTIONS = {
+    claude: ['claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'],
+    openai: ['gpt-4o-mini', 'gpt-4o'],
+};
+const DIETS = ['No restriction', 'Vegetarian', 'Vegan', 'Pescatarian', 'Keto', 'Low-carb', 'Paleo',
+    'Mediterranean', 'Gluten-free', 'Dairy-free', 'Halal', 'Kosher'];
+const SPOONACULAR_DIETS = { Vegetarian: 'vegetarian', Vegan: 'vegan', Pescatarian: 'pescetarian', Keto: 'ketogenic', Paleo: 'paleo', 'Gluten-free': 'gluten free' };
+const CHAT_HISTORY_LIMIT = 20;
+const CHAT_SUGGESTIONS = [
+    'I want high-protein meals that take under 30 minutes',
+    'Plan a week of cheap meals I can batch-cook on Sunday',
+    'What can I cook with chicken, rice and broccoli?',
+    'Swap anything spicy in my plan for milder dishes',
+];
+
+// Every setting, with its default. Stored in localStorage under the same key, as a string.
+const SETTINGS_DEFAULTS = {
+    active_provider: 'lmstudio',
+    lmstudio_model: '',
+    ollama_model: '',
+    claude_api_key: '',
+    claude_model: 'claude-haiku-4-5-20251001',
+    openai_api_key: '',
+    openai_model: 'gpt-4o-mini',
+    temperature: '0.7',
+    max_tokens: '8000',
+    calorie_target: '2400',
+    protein_target: '150',
+    diet: 'No restriction',
+    allergies: '',
+    cuisines: '',
+    max_cook_time: '',
+    servings: '1',
+    skill: 'Intermediate',
+    budget: 'Any',
+    units: 'US',
+    spoonacular_api_key: '',
+};
 
 // === STATE ===
 let goal = 'Maintain';
 let source = 'aiChef';
-let activeModel = '';
 let daysData = [];
 let selectedDay = 0;
 let checkedGrocery = new Set();
 let backendOnline = null;
-const settings = {
-    active_provider: 'lmstudio',
-    ollama_model: 'llama3.2',
-    claude_api_key: '',
-    claude_model: 'claude-haiku-4-5',
-    openai_api_key: '',
-    openai_model: 'gpt-4o',
-    spoonacular_api_key: '',
-};
+let serverInfo = null;
+const modelLists = {};         // provider -> { models: [], error: '' }
+const settings = { ...SETTINGS_DEFAULTS };
+let chatHistory = [];          // [{ role: 'user' | 'assistant', content }]
+let chatBusy = false;
+let chatError = '';
+let planJob = null;            // { id, started } while an AI plan is cooking
 
 // === STORAGE (localStorage can throw in private browsing) ===
 function store(key, value) {
@@ -40,6 +74,9 @@ function load(key, fallback = null) {
 function loadJSON(key, fallback) {
     try { return JSON.parse(load(key)) ?? fallback; } catch (e) { return fallback; }
 }
+function unstore(key) {
+    try { localStorage.removeItem(key); } catch (e) { /* ignore */ }
+}
 
 // === DOM HELPER: builds elements with textContent, never parses strings as HTML ===
 function h(tag, props = {}, ...children) {
@@ -48,6 +85,7 @@ function h(tag, props = {}, ...children) {
         if (v == null || v === false) continue;
         if (k === 'class') el.className = v;
         else if (k === 'text') el.textContent = v;
+        else if (k === 'value') el.value = v;
         else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
         else el.setAttribute(k, v === true ? '' : v);
     }
@@ -58,18 +96,28 @@ function h(tag, props = {}, ...children) {
     return el;
 }
 
+// Like el.replaceChildren(), but skips null/false (replaceChildren would print them as text).
+function setChildren(el, ...children) {
+    el.replaceChildren(...children.flat().filter(c => c != null && c !== false));
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const formatElapsed = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
 // === INITIALIZATION ===
 document.addEventListener('DOMContentLoaded', () => {
     loadSettings();
     daysData = normalizePlan(loadJSON('nourish_plan', null), false);
     checkedGrocery = new Set(loadJSON('nourish_grocery_checked', []));
+    chatHistory = loadJSON('nourish_chat', []).filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
     initTabs();
     initSheets();
+    initChat();
     renderAll();
     if (location.protocol === 'file:') {
         showBanner('Opened as a file. Start the server and open http://localhost:8000 instead.');
     }
-    checkBackend().then(ok => { if (ok) loadModel(); });
+    checkBackend().then(ok => { if (ok) { loadServerInfo(); resumePendingJobs(); } });
     window.addEventListener('online', checkBackend);
     document.addEventListener('visibilitychange', () => { if (!document.hidden && backendOnline === false) checkBackend(); });
 });
@@ -78,6 +126,7 @@ function renderAll() {
     updateTodayScreen();
     updatePlanScreen();
     updateGroceryScreen();
+    renderChat();
     renderSettings();
 }
 
@@ -90,14 +139,16 @@ function initTabs() {
 }
 
 function switchTab(tabName) {
-    const screenMap = { today: 'screenToday', plan: 'screenPlan', grocery: 'screenGrocery', settings: 'screenSettings' };
+    const screenMap = { today: 'screenToday', plan: 'screenPlan', chat: 'screenChat', grocery: 'screenGrocery', settings: 'screenSettings' };
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => {
         t.classList.toggle('active', t.dataset.tab === tabName);
         t.setAttribute('aria-selected', t.dataset.tab === tabName);
     });
     document.getElementById(screenMap[tabName])?.classList.add('active');
-    window.scrollTo(0, 0);
+    document.body.dataset.tab = tabName;
+    if (tabName === 'chat') scrollChatToEnd();
+    else window.scrollTo(0, 0);
 }
 
 // === FEEDBACK ===
@@ -108,13 +159,34 @@ function showToast(message, isError = true) {
     toast.classList.toggle('error', isError);
     toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('show'), isError ? 6000 : 2500);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), isError ? 6000 : 1800);
 }
 
 function showBanner(message) {
     const banner = document.getElementById('offlineBanner');
     banner.textContent = message || '';
     banner.hidden = !message;
+}
+
+// Status bar for meal-plan generation. Errors stay until dismissed so they can't be missed.
+let jobBarTimer;
+function showJobBar(state, message) {
+    const bar = document.getElementById('jobBar');
+    clearInterval(jobBarTimer);
+    bar.hidden = !state;
+    bar.className = 'job-bar' + (state === 'error' ? ' error' : '');
+    if (!state) return;
+    const text = h('span', { class: 'job-bar-text', text: message });
+    if (state === 'busy') {
+        const started = planJob?.started || Date.now();
+        const tick = () => { text.textContent = `${message} ${formatElapsed((Date.now() - started) / 1000)}`; };
+        tick();
+        jobBarTimer = setInterval(tick, 1000);
+        setChildren(bar, h('span', { class: 'job-bar-spinner', 'aria-hidden': 'true' }), text,
+            planJob ? h('button', { type: 'button', class: 'job-bar-btn', onclick: cancelPlan }, 'Cancel') : null);
+    } else {
+        setChildren(bar, text, h('button', { type: 'button', class: 'job-bar-btn', onclick: () => showJobBar(null) }, 'Dismiss'));
+    }
 }
 
 // === API ===
@@ -137,11 +209,13 @@ async function api(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
     } finally {
         clearTimeout(timer);
     }
+    if (backendOnline === false) { backendOnline = true; updateBackendStatus(); }
     let data = null;
     try { data = await res.json(); } catch (e) { /* non-JSON body */ }
     if (!res.ok) {
-        const detail = typeof data?.detail === 'string' ? data.detail : `Server error ${res.status}`;
-        throw new Error(detail);
+        const err = new Error(typeof data?.detail === 'string' ? data.detail : `Server error ${res.status}`);
+        err.status = res.status;
+        throw err;
     }
     return data;
 }
@@ -159,14 +233,140 @@ async function checkBackend() {
 
 function updateBackendStatus() {
     if (location.protocol === 'file:') return;
-    showBanner(backendOnline === false ? "Can't reach the Nourish server. Your saved plan still works; generating needs the server." : '');
+    showBanner(backendOnline === false ? "Can't reach the Nourish server. Your saved plan still works; the AI needs the server." : '');
     const status = document.getElementById('serverStatus');
     if (status) status.textContent = backendOnline ? 'Connected' : backendOnline === false ? 'Not reachable' : 'Checking…';
 }
 
+async function loadServerInfo() {
+    try { serverInfo = await api('/api/info', { timeoutMs: 5000 }); } catch (e) { serverInfo = null; }
+    renderServerInfo();
+    renderModelHint();
+}
+
+// === AI REQUESTS (run as server-side jobs so a locked phone or a slow model can't lose them) ===
+async function startJob(body) {
+    const { job_id } = await api('/api/jobs', { method: 'POST', body });
+    return job_id;
+}
+
+async function waitForJob(id) {
+    const deadline = Date.now() + 20 * 60 * 1000;
+    let misses = 0;
+    while (Date.now() < deadline) {
+        await sleep(1500);
+        let job;
+        try {
+            job = await api(`/api/jobs/${id}`, { timeoutMs: 10000 });
+            misses = 0;
+        } catch (e) {
+            if (e.status === 404 || ++misses > 60) throw e; // server restarted, or ~2+ minutes without contact
+            continue;
+        }
+        if (job?.status === 'done') return job.result;
+        if (job?.status === 'error') {
+            const err = new Error(job.detail || 'The AI request failed');
+            err.cancelled = job.status_code === 499;
+            throw err;
+        }
+    }
+    throw new Error('Gave up after waiting 20 minutes for the AI.');
+}
+
+async function fetchModels(provider) {
+    try {
+        const data = await api(`/api/models?provider=${provider}`, { timeoutMs: 8000 });
+        const models = (data?.data || []).map(m => m?.id).filter(id => id && !/embed/i.test(id));
+        modelLists[provider] = { models, error: '' };
+    } catch (e) {
+        modelLists[provider] = { models: [], error: e.message };
+    }
+    return modelLists[provider];
+}
+
+async function buildAIRequest(messages, { maxTokens } = {}) {
+    const p = settings.active_provider;
+    let model = settings[`${p}_model`];
+    if (!model && (p === 'lmstudio' || p === 'ollama')) {
+        const list = await fetchModels(p);
+        if (list.error) throw new Error(list.error);
+        model = list.models[0];
+        if (!model) throw new Error(p === 'lmstudio'
+            ? 'No model loaded in LM Studio. Open LM Studio, load a model and start the server.'
+            : 'Ollama has no models. Run "ollama pull llama3.2" on your PC.');
+    }
+    if (!model) throw new Error('Pick a model in Settings first.');
+    return {
+        provider: p,
+        model,
+        api_key: p === 'claude' ? settings.claude_api_key : p === 'openai' ? settings.openai_api_key : undefined,
+        messages,
+        max_tokens: maxTokens ?? (Number(settings.max_tokens) || 8000),
+        temperature: Number(settings.temperature),
+    };
+}
+
+function extractText(provider, data) {
+    return provider === 'claude'
+        ? (data?.content || []).filter(b => b?.type === 'text').map(b => b.text).join('')
+        : data?.choices?.[0]?.message?.content || '';
+}
+
+// === PROFILE → PROMPTS ===
+function profileText() {
+    const s = settings;
+    const lines = [`Goal: ${goal}.`, `Daily targets: about ${s.calorie_target} kcal and ${s.protein_target} g protein.`];
+    if (s.diet && s.diet !== 'No restriction') lines.push(`Diet: ${s.diet}.`);
+    if (s.allergies) lines.push(`Allergies/intolerances (NEVER include these): ${s.allergies}.`);
+    const likes = load('saved_likes', ''), hates = load('saved_hates', '');
+    if (likes) lines.push(`Foods they like: ${likes}.`);
+    if (hates) lines.push(`Foods they avoid: ${hates}.`);
+    if (s.cuisines) lines.push(`Favourite cuisines: ${s.cuisines}.`);
+    if (s.max_cook_time) lines.push(`Every meal must be ready in ${s.max_cook_time} minutes or less.`);
+    if (Number(s.servings) > 1) lines.push(`Cooking for ${s.servings} people: ingredient quantities for ${s.servings} servings; nutrition per person.`);
+    lines.push(`Cooking skill: ${s.skill}.`);
+    if (s.budget !== 'Any') lines.push(`Budget: ${s.budget}.`);
+    lines.push(`Use ${s.units === 'Metric' ? 'metric units (g, ml)' : 'US units (cups, oz, lb)'}.`);
+    return lines.join('\n');
+}
+
+function planSummary() {
+    if (!daysData.length) return 'They have no meal plan yet.';
+    return 'Their current meal plan:\n' + daysData.map((d, i) =>
+        `Day ${i + 1}: ` + MEAL_TYPES.filter(t => d[t]).map(t => `${MEAL_LABELS[t]}: ${d[t].name}`).join('; ')).join('\n');
+}
+
+function planSystemPrompt() {
+    return 'You are a meal-planning chef. Return ONLY raw JSON, no markdown, no comments. ' +
+        'Write out all 7 days in full, with varied meals (do not repeat a dish more than twice in the week). ' +
+        'Keep each meal to at most 8 ingredients (with quantities) and 5 short steps. ' +
+        'Format: {"days":[{"day":1,"breakfast":{"name":"","time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"ingredients":[""],"steps":[""]},"lunch":{same},"dinner":{same}}]}' +
+        '\n\nThe person you are planning for:\n' + profileText();
+}
+
+function chatSystemPrompt() {
+    return 'You are Nourish, a friendly, practical chef and nutrition coach inside a meal-planning app. ' +
+        'Help the person shape a meal plan that suits them: ask a short follow-up question when something important is unclear, ' +
+        'suggest specific dishes, and keep answers concise (short paragraphs or bullet lists). Do not output JSON. ' +
+        'When they are happy, tell them they can tap "Make plan" to turn this conversation into their 7-day plan. ' +
+        'You are not a doctor; for medical conditions suggest they check with a professional.\n\n' +
+        'About them:\n' + profileText() + '\n\n' + planSummary();
+}
+
+// Claude needs strictly alternating user/assistant turns that start with the user.
+function cleanHistory(messages) {
+    const out = [];
+    for (const m of messages) {
+        if (!out.length && m.role !== 'user') continue;
+        if (out.length && out[out.length - 1].role === m.role) out[out.length - 1].content += '\n\n' + m.content;
+        else out.push({ role: m.role, content: m.content });
+    }
+    return out;
+}
+
 // === SETTINGS ===
 function loadSettings() {
-    for (const key of Object.keys(settings)) settings[key] = load(key, settings[key]);
+    for (const key of Object.keys(SETTINGS_DEFAULTS)) settings[key] = load(key, SETTINGS_DEFAULTS[key]);
     if (!PROVIDERS[settings.active_provider]) settings.active_provider = 'lmstudio';
     goal = load('saved_goal', goal);
     source = load('saved_source', source);
@@ -174,81 +374,215 @@ function loadSettings() {
     document.getElementById('inputHates').value = load('saved_hates', '');
 }
 
-function setSetting(key, value) {
-    settings[key] = value;
-    store(key, value);
+function setSetting(key, value, { quiet = false } = {}) {
+    settings[key] = String(value);
+    store(key, String(value));
+    if (!quiet) showToast('Saved ✓', false);
+    if (key === 'calorie_target' || key === 'protein_target') updateTodayScreen();
 }
 
-// Picks the first chat model LM Studio has loaded. Throws if the server or LM Studio is unreachable.
-async function fetchLMStudioModel() {
-    const data = await api('/api/models', { timeoutMs: 6000 });
-    const models = (data?.data || []).map(m => m?.id).filter(id => id && !/embed/i.test(id));
-    return models[0] || '';
+function settingsRow(label, control, { hint } = {}) {
+    return h('label', { class: 'settings-row' },
+        h('span', { class: 'settings-label' }, label, hint ? h('span', { class: 'settings-hint', text: hint }) : null),
+        control);
 }
 
-async function loadModel() {
-    if (settings.active_provider !== 'lmstudio') return;
-    let status;
-    try {
-        activeModel = await fetchLMStudioModel();
-        status = activeModel || 'No model loaded in LM Studio';
-    } catch (e) {
-        activeModel = '';
-        status = e.message;
-    }
-    const el = document.getElementById('lmstudioModel');
-    if (el) el.textContent = status;
-}
-
-function settingsRow(label, control) {
-    return h('label', { class: 'settings-row' }, h('span', { class: 'settings-label', text: label }), control);
-}
-
-function settingsInput(key, { type = 'text', placeholder = '' } = {}) {
+function settingsInput(key, { type = 'text', placeholder = '', inputmode, min, max, list } = {}) {
     return h('input', {
-        type, placeholder, value: settings[key], autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
-        class: 'settings-input',
-        onchange: e => setSetting(key, e.target.value.trim()),
+        type, placeholder, value: settings[key], inputmode, min, max, list,
+        autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', class: 'settings-input',
+        onchange: e => {
+            let v = e.target.value.trim();
+            if (type === 'number' && v !== '') {
+                v = String(Math.min(Math.max(Number(v) || Number(min) || 0, Number(min ?? -Infinity)), Number(max ?? Infinity)));
+                e.target.value = v;
+            }
+            setSetting(key, v);
+        },
     });
+}
+
+function settingsSelect(key, options, { onchange } = {}) {
+    const entries = Array.isArray(options) ? options.map(o => [o, o]) : Object.entries(options);
+    return h('select', {
+        class: 'settings-input',
+        onchange: e => { setSetting(key, e.target.value); onchange?.(e.target.value); },
+    }, entries.map(([value, label]) => h('option', { value, selected: value === settings[key] }, label)));
+}
+
+function settingsButton(text, onclick, cls = '') {
+    return h('button', { type: 'button', class: `settings-row settings-button ${cls}`, onclick }, text);
+}
+
+function temperatureLabel(t) {
+    return `${Number(t).toFixed(1)} · ${t <= 0.3 ? 'focused' : t <= 0.8 ? 'balanced' : 'adventurous'}`;
 }
 
 function renderSettings() {
     const list = document.getElementById('settingsList');
     const p = settings.active_provider;
+    const cloud = p === 'claude' || p === 'openai';
 
-    const providerSelect = h('select', {
-        class: 'settings-input',
-        onchange: e => { setSetting('active_provider', e.target.value); renderSettings(); loadModel(); },
-    }, Object.entries(PROVIDERS).map(([value, label]) => h('option', { value, selected: value === p }, label)));
+    const tempValue = h('span', { class: 'settings-value', text: temperatureLabel(settings.temperature) });
+    const tempSlider = h('input', {
+        type: 'range', min: '0', max: '1.2', step: '0.1', value: settings.temperature, class: 'settings-range',
+        'aria-label': 'Creativity',
+        oninput: e => { tempValue.textContent = temperatureLabel(e.target.value); },
+        onchange: e => setSetting('temperature', e.target.value),
+    });
 
-    const providerRows = [];
-    if (p === 'lmstudio') providerRows.push(settingsRow('Model', h('span', { id: 'lmstudioModel', class: 'settings-value', text: activeModel || 'Detecting…' })));
-    if (p === 'ollama') providerRows.push(settingsRow('Model', settingsInput('ollama_model', { placeholder: 'llama3.2' })));
-    if (p === 'claude') providerRows.push(
-        settingsRow('API key', settingsInput('claude_api_key', { type: 'password', placeholder: 'sk-ant-…' })),
-        settingsRow('Model', settingsInput('claude_model', { placeholder: 'claude-haiku-4-5' })));
-    if (p === 'openai') providerRows.push(
-        settingsRow('API key', settingsInput('openai_api_key', { type: 'password', placeholder: 'sk-…' })),
-        settingsRow('Model', settingsInput('openai_model', { placeholder: 'gpt-4o' })));
+    const group = (title, rows, note) => [
+        h('div', { class: 'settings-group-label', text: title }),
+        h('div', { class: 'settings-group' }, rows),
+        note ? h('p', { class: 'settings-note', ...(typeof note === 'string' ? { text: note } : {}) }, typeof note === 'string' ? null : note) : null,
+    ];
 
-    list.replaceChildren(
-        h('div', { class: 'settings-group-label', text: 'Server' }),
-        h('div', { class: 'settings-group' },
+    setChildren(list, 
+        h('p', { class: 'settings-note', text: 'Changes save automatically.' }),
+
+        ...group('AI model', [
+            settingsRow('Provider', settingsSelect('active_provider', PROVIDERS, { onchange: () => renderSettings() })),
+            h('div', { id: 'modelControl' }),
+            cloud ? settingsRow('API key', settingsInput(`${p}_api_key`, { type: 'password', placeholder: p === 'claude' ? 'sk-ant-…' : 'sk-…' })) : null,
+            h('div', { class: 'settings-row settings-row-stack' },
+                h('div', { class: 'settings-row-top' }, h('span', { class: 'settings-label', text: 'Creativity' }), tempValue),
+                tempSlider),
+            settingsRow('Response length', settingsSelect('max_tokens', { 4000: 'Short (faster)', 8000: 'Standard', 12000: 'Long' })),
+            settingsButton('Test the AI', testAI),
+            h('div', { id: 'testResult', class: 'settings-row settings-result', hidden: true }),
+        ], h('span', { id: 'modelHint' })),
+
+        ...group('Your profile', [
+            settingsRow('Daily calories', settingsInput('calorie_target', { type: 'number', inputmode: 'numeric', min: '1000', max: '6000' })),
+            settingsRow('Protein (g/day)', settingsInput('protein_target', { type: 'number', inputmode: 'numeric', min: '20', max: '400' })),
+            settingsRow('Diet', settingsSelect('diet', DIETS)),
+            settingsRow('Allergies', settingsInput('allergies', { placeholder: 'e.g. peanuts, shellfish' })),
+            settingsRow('Cuisines', settingsInput('cuisines', { placeholder: 'e.g. Mexican, Thai' })),
+            settingsRow('Max cook time', settingsSelect('max_cook_time', { '': 'Any', 15: '15 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour' })),
+            settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6'])),
+            settingsRow('Cooking skill', settingsSelect('skill', ['Beginner', 'Intermediate', 'Advanced'])),
+            settingsRow('Budget', settingsSelect('budget', { Any: 'Any', 'Budget-friendly': 'Budget-friendly', Moderate: 'Moderate', 'No limit': 'No limit' })),
+            settingsRow('Units', settingsSelect('units', { US: 'US (cups, oz)', Metric: 'Metric (g, ml)' })),
+        ], 'Used for every AI meal plan and chat. Allergies are also filtered out of recipe searches.'),
+
+        ...group('Recipe sources', [
+            settingsRow('Spoonacular key', settingsInput('spoonacular_api_key', { type: 'password', placeholder: 'free key' })),
+        ], 'TheMealDB needs no key. Spoonacular needs a free key from spoonacular.com/food-api.'),
+
+        ...group('Server & phone', [
             h('div', { class: 'settings-row' },
                 h('span', { class: 'settings-label', text: 'Status' }),
                 h('span', { id: 'serverStatus', class: 'settings-value' })),
-            h('button', { type: 'button', class: 'settings-row settings-button', onclick: () => checkBackend().then(ok => { if (ok) loadModel(); }) }, 'Check again')),
-        h('div', { class: 'settings-group-label', text: 'AI provider' }),
-        h('div', { class: 'settings-group' }, settingsRow('Provider', providerSelect), providerRows),
-        h('div', { class: 'settings-group-label', text: 'Recipe sources' }),
-        h('div', { class: 'settings-group' },
-            settingsRow('Spoonacular key', settingsInput('spoonacular_api_key', { type: 'password', placeholder: 'free key' }))),
-        h('div', { class: 'settings-group-label', text: 'Data' }),
-        h('div', { class: 'settings-group' },
-            h('button', { type: 'button', class: 'settings-row settings-button danger', onclick: clearPlan }, 'Clear meal plan')),
-        h('p', { class: 'settings-note', text: 'Keys are stored only on this device and sent only to your Nourish server.' }),
+            h('div', { id: 'serverInfo' }),
+            settingsButton('Check again', () => checkBackend().then(ok => { if (ok) { loadServerInfo(); renderModelControl(true); } })),
+        ]),
+
+        ...group('Data', [
+            settingsButton('Export meal plan', exportPlan),
+            settingsButton('Clear chat history', clearChat),
+            settingsButton('Clear meal plan', clearPlan, 'danger'),
+            settingsButton('Reset all settings', resetSettings, 'danger'),
+        ], 'Keys and data are stored only on this device and sent only to your Nourish server.'),
     );
     updateBackendStatus();
+    renderModelControl();
+    renderServerInfo();
+    renderModelHint();
+}
+
+function renderModelControl(refresh = false) {
+    const box = document.getElementById('modelControl');
+    if (!box) return;
+    const p = settings.active_provider;
+    if (p === 'claude' || p === 'openai') {
+        setChildren(box, 
+            settingsRow('Model', settingsInput(`${p}_model`, { list: `${p}-models`, placeholder: SETTINGS_DEFAULTS[`${p}_model`] })),
+            h('datalist', { id: `${p}-models` }, MODEL_SUGGESTIONS[p].map(m => h('option', { value: m }))));
+        return;
+    }
+    const cached = modelLists[p];
+    if (!cached || refresh) {
+        setChildren(box, settingsRow('Model', h('span', { class: 'settings-value', text: 'Loading models…' })));
+        fetchModels(p).then(() => { if (settings.active_provider === p) renderModelControl(); });
+        return;
+    }
+    const key = `${p}_model`;
+    const options = [['', p === 'lmstudio' ? 'Automatic (first loaded)' : 'Automatic (first installed)'], ...cached.models.map(m => [m, m])];
+    if (settings[key] && !cached.models.includes(settings[key])) options.push([settings[key], `${settings[key]} (not found)`]);
+    setChildren(box, 
+        settingsRow('Model', settingsSelect(key, Object.fromEntries(options))),
+        cached.error ? h('div', { class: 'settings-row settings-result error', text: cached.error }) : null,
+        settingsButton('Refresh model list', () => renderModelControl(true)));
+}
+
+function renderModelHint() {
+    const el = document.getElementById('modelHint');
+    if (!el) return;
+    const p = settings.active_provider;
+    if (p === 'lmstudio' || p === 'ollama') {
+        const url = serverInfo?.[`${p}_url`];
+        el.textContent = `The Nourish server reaches ${PROVIDERS[p].replace(' (local)', '')} at ${url || '…'}. ` +
+            `To change it, set ${p === 'lmstudio' ? 'LMSTUDIO_URL' : 'OLLAMA_URL'} in backend/.env and restart the server.`;
+    } else {
+        el.textContent = 'Cloud models cost money per use on your own account. Creativity is capped at 1.0 for Claude.';
+    }
+}
+
+function renderServerInfo() {
+    const box = document.getElementById('serverInfo');
+    if (!box) return;
+    if (!serverInfo) { setChildren(box, ); return; }
+    const phone = serverInfo.in_docker
+        ? "Use your PC's IP address with :8000 (running in Docker, so it can't be detected)"
+        : serverInfo.lan_urls?.length ? serverInfo.lan_urls.join('\n') : 'No home-network address found';
+    setChildren(box, 
+        h('div', { class: 'settings-row settings-row-stack' },
+            h('span', { class: 'settings-label', text: 'Open on your phone' }),
+            h('span', { class: 'settings-value settings-mono', text: phone })),
+        h('div', { class: 'settings-row' },
+            h('span', { class: 'settings-label', text: 'Version' }),
+            h('span', { class: 'settings-value', text: serverInfo.version || '' })));
+}
+
+async function testAI(e) {
+    const btn = e.currentTarget;
+    const out = document.getElementById('testResult');
+    btn.disabled = true;
+    btn.textContent = 'Testing…';
+    out.hidden = false;
+    out.className = 'settings-row settings-result';
+    out.textContent = 'Sending a tiny test message…';
+    const started = Date.now();
+    try {
+        const req = await buildAIRequest([{ role: 'user', content: 'Reply with just the word: ready' }], { maxTokens: 20 });
+        const data = await waitForJob(await startJob(req));
+        const reply = extractText(req.provider, data).trim().slice(0, 40) || '(empty reply)';
+        out.textContent = `✓ ${req.model} replied "${reply}" in ${((Date.now() - started) / 1000).toFixed(1)} s`;
+    } catch (err) {
+        out.classList.add('error');
+        out.textContent = `✗ ${err.message}`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Test the AI';
+    }
+}
+
+function exportPlan() {
+    if (!daysData.length) { showToast('There is no meal plan to export yet'); return; }
+    const blob = new Blob([JSON.stringify({ days: daysData }, null, 2)], { type: 'application/json' });
+    const a = h('a', { href: URL.createObjectURL(blob), download: 'nourish-meal-plan.json' });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function resetSettings() {
+    if (!confirm('Reset every setting (including API keys) to its default? Your meal plan and chat are kept.')) return;
+    for (const key of Object.keys(SETTINGS_DEFAULTS)) unstore(key);
+    Object.assign(settings, SETTINGS_DEFAULTS);
+    renderAll();
+    showToast('Settings reset', false);
 }
 
 function clearPlan() {
@@ -269,6 +603,7 @@ function initSheets() {
     document.querySelectorAll('[data-action="new-plan"]').forEach(b => b.addEventListener('click', showGenerateSheet));
     document.getElementById('closeGenerateBtn').addEventListener('click', closeGenerateSheet);
     document.getElementById('generateBtn').addEventListener('click', generateMealPlan);
+    document.getElementById('editProfileBtn').addEventListener('click', () => { closeGenerateSheet(); switchTab('settings'); });
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') { closeRecipeSheet(); closeGenerateSheet(); }
     });
@@ -294,6 +629,9 @@ function syncChoiceButtons() {
 
 function showGenerateSheet() {
     syncChoiceButtons();
+    const btn = document.getElementById('generateBtn');
+    btn.disabled = !!planJob;
+    btn.textContent = planJob ? 'A plan is already cooking…' : 'Generate Plan';
     document.getElementById('generateSheet').classList.add('active');
 }
 
@@ -309,7 +647,7 @@ function openRecipeSheet(mealType, meal) {
     if (n?.carbs_g != null) chips.push(`C: ${Math.round(n.carbs_g)}g`);
     if (n?.fat_g != null) chips.push(`F: ${Math.round(n.fat_g)}g`);
 
-    content.replaceChildren(
+    setChildren(content, 
         h('div', { class: 'recipe-sheet-top' },
             h('div', { class: 'recipe-sheet-handle' }),
             h('button', { type: 'button', class: 'btn-close', 'aria-label': 'Close', onclick: closeRecipeSheet }, '✕')),
@@ -326,6 +664,8 @@ function openRecipeSheet(mealType, meal) {
             h('div', { class: 'recipe-steps' }, meal.steps.map((s, idx) => h('div', { class: 'recipe-step' },
                 h('div', { class: 'recipe-step-number', text: idx + 1 }),
                 h('div', { class: 'recipe-step-text', text: s }))))) : null,
+        h('div', { class: 'recipe-section' },
+            h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => askAboutMeal(meal) }, '💬 Ask the chef about this meal')),
     );
     content.scrollTop = 0;
     document.getElementById('recipeSheet').classList.add('active');
@@ -333,6 +673,15 @@ function openRecipeSheet(mealType, meal) {
 
 function closeRecipeSheet() {
     document.getElementById('recipeSheet').classList.remove('active');
+}
+
+function askAboutMeal(meal) {
+    closeRecipeSheet();
+    switchTab('chat');
+    const input = document.getElementById('chatInput');
+    input.value = `About "${meal.name}": `;
+    autoGrow(input);
+    input.focus();
 }
 
 // === FORMATTING ===
@@ -364,7 +713,7 @@ function updateTodayScreen() {
     if (selectedDay >= daysData.length) selectedDay = 0;
 
     const strip = document.getElementById('dayStrip');
-    strip.replaceChildren(...daysData.map((d, idx) => h('button', {
+    setChildren(strip, ...daysData.map((d, idx) => h('button', {
         type: 'button',
         class: 'day-pill' + (idx === selectedDay ? ' active' : ''),
         'aria-pressed': idx === selectedDay,
@@ -374,13 +723,16 @@ function updateTodayScreen() {
     const day = daysData[selectedDay];
     document.getElementById('todayTitle').textContent = `Day ${selectedDay + 1} · ${DAY_NAMES[selectedDay % 7]}`;
 
+    const calTarget = Number(settings.calorie_target) || 2400;
     const known = hasNutrition(day);
     const totalCal = sumNutrient(day, 'calories');
     document.getElementById('calorieValue').textContent = known ? formatCalories(totalCal) : '—';
-    document.getElementById('calorieLabel').textContent = known ? 'calories this day' : 'no nutrition data for these recipes';
-    updateCalorieRing(known ? totalCal : 0, CALORIE_TARGET);
+    document.getElementById('calorieLabel').textContent = known ? `of ${calTarget.toLocaleString()} calories` : 'no nutrition data for these recipes';
+    updateCalorieRing(known ? totalCal : 0, calTarget);
 
-    const macros = [['protein_g', 'proteinValue', 200], ['carbs_g', 'carbsValue', 400], ['fat_g', 'fatValue', 120]];
+    // Protein from Settings; carbs ~50% and fat ~30% of the calorie target.
+    const macros = [['protein_g', 'proteinValue', Number(settings.protein_target) || 150],
+        ['carbs_g', 'carbsValue', calTarget * 0.5 / 4], ['fat_g', 'fatValue', calTarget * 0.3 / 9]];
     const fills = document.querySelectorAll('.macro-fill');
     macros.forEach(([key, id, max], i) => {
         const total = sumNutrient(day, key);
@@ -388,7 +740,7 @@ function updateTodayScreen() {
         fills[i].style.width = Math.min(total / max * 100, 100) + '%';
     });
 
-    document.getElementById('mealCards').replaceChildren(...MEAL_TYPES.filter(t => day[t]).map(t => mealCard(t, day[t])));
+    setChildren(document.getElementById('mealCards'), ...MEAL_TYPES.filter(t => day[t]).map(t => mealCard(t, day[t])));
 }
 
 function mealCard(type, meal) {
@@ -412,12 +764,12 @@ function updateCalorieRing(consumed, target) {
 function updatePlanScreen() {
     const container = document.getElementById('planAccordions');
     if (!daysData.length) {
-        container.replaceChildren(h('div', { class: 'empty-note' },
+        setChildren(container, h('div', { class: 'empty-note' },
             h('p', { text: 'No meal plan yet' }),
             h('button', { type: 'button', class: 'btn btn-primary', onclick: showGenerateSheet }, 'Generate Meal Plan')));
         return;
     }
-    container.replaceChildren(...daysData.map((day, idx) => {
+    setChildren(container, ...daysData.map((day, idx) => {
         const content = h('div', { class: 'accordion-content', hidden: true },
             MEAL_TYPES.filter(t => day[t]).map(t => h('button', {
                 type: 'button', class: 'plan-meal', 'data-meal-type': t, onclick: () => openRecipeSheet(t, day[t]),
@@ -458,16 +810,16 @@ function groceryItems() {
 function updateGroceryScreen() {
     const container = document.getElementById('groceryContainer');
     if (!daysData.length) {
-        container.replaceChildren(h('div', { class: 'empty-note', text: 'No grocery list yet. Generate a meal plan first.' }));
+        setChildren(container, h('div', { class: 'empty-note', text: 'No grocery list yet. Generate a meal plan first.' }));
         return;
     }
     const items = groceryItems();
     const categories = Object.keys(items).sort();
     if (!categories.length) {
-        container.replaceChildren(h('div', { class: 'empty-note', text: 'This plan has no ingredient lists.' }));
+        setChildren(container, h('div', { class: 'empty-note', text: 'This plan has no ingredient lists.' }));
         return;
     }
-    container.replaceChildren(
+    setChildren(container, 
         h('div', {},
             h('div', { class: 'progress-label', id: 'progressLabel' }),
             h('div', { class: 'progress-bar' }, h('div', { class: 'progress-fill', id: 'progressFill' }))),
@@ -534,8 +886,19 @@ function normalizePlan(data, strict = true) {
         .map(d => Object.fromEntries(MEAL_TYPES.map(t => [t, normalizeMeal(d[t])])))
         .filter(d => MEAL_TYPES.some(t => d[t]))
         .slice(0, 7);
-    if (strict && !days.length) throw new Error("The response didn't contain any meals. Try again, or try another provider.");
+    if (strict && !days.length) throw new Error("The response didn't contain any meals. Try again, or try another model.");
     return days;
+}
+
+function applyPlan(raw) {
+    daysData = normalizePlan(raw);
+    selectedDay = 0;
+    checkedGrocery.clear();
+    store('nourish_plan', daysData);
+    store('nourish_grocery_checked', []);
+    renderAll();
+    switchTab('today');
+    showToast(daysData.length < 7 ? `Got ${daysData.length} of 7 days (the response was cut short).` : 'Your meal plan is ready 🎉', daysData.length < 7);
 }
 
 // === GENERATE MEAL PLAN ===
@@ -544,71 +907,73 @@ async function generateMealPlan() {
     const hates = document.getElementById('inputHates').value.trim();
     if (!goal) { showToast('Pick a goal first'); return; }
     if (!likes && !hates) { showToast('Enter at least one food you like or avoid'); return; }
+    if (planJob) { showToast('A plan is already cooking'); return; }
     store('saved_likes', likes);
     store('saved_hates', hates);
+    closeGenerateSheet();
 
-    const btn = document.getElementById('generateBtn');
-    const inputs = document.querySelectorAll('#generateSheet input, #generateSheet .segment-btn, #generateSheet .source-btn');
-    btn.disabled = true;
-    inputs.forEach(i => { i.disabled = true; });
-    btn.textContent = 'Cooking… this can take a few minutes';
+    if (source !== 'aiChef') {
+        showJobBar('busy', `Searching ${source === 'themealdb' ? 'TheMealDB' : 'Spoonacular'}…`);
+        try {
+            applyPlan(source === 'themealdb' ? await generateWithTheMealDB(likes, hates) : await generateWithSpoonacular(likes, hates));
+            showJobBar(null);
+        } catch (err) {
+            showJobBar('error', err?.message || 'Something went wrong');
+        }
+        return;
+    }
+    await runPlanJob([
+        { role: 'system', content: planSystemPrompt() },
+        { role: 'user', content: `Goal: ${goal}. Likes: ${likes || 'anything'}. Avoids: ${hates || 'nothing'}. Generate the 7-day meal plan JSON.` },
+    ]);
+}
+
+async function generatePlanFromChat() {
+    if (planJob) { showToast('A plan is already cooking'); return; }
+    if (!chatHistory.some(m => m.role === 'user')) { showToast('Chat with the chef first, then make a plan'); return; }
+    await runPlanJob([
+        { role: 'system', content: planSystemPrompt() },
+        ...cleanHistory([...chatHistory.slice(-CHAT_HISTORY_LIMIT),
+            { role: 'user', content: 'Using everything we discussed above, create my 7-day meal plan now. Return only the JSON.' }]),
+    ]);
+}
+
+// Starts (or, after a reload, resumes) an AI plan job and applies the result.
+async function runPlanJob(messages, resume = null) {
     try {
-        let raw;
-        if (source === 'themealdb') raw = await generateWithTheMealDB(likes, hates);
-        else if (source === 'spoonacular') raw = await generateWithSpoonacular(likes, hates);
-        else raw = await generateWithAI(likes, hates);
-
-        daysData = normalizePlan(raw);
-        selectedDay = 0;
-        checkedGrocery.clear();
-        store('nourish_plan', daysData);
-        store('nourish_grocery_checked', []);
-        closeGenerateSheet();
-        renderAll();
-        switchTab('today');
-        if (daysData.length < 7) showToast(`Got ${daysData.length} of 7 days (the response was cut short).`);
+        if (resume) {
+            planJob = resume;
+        } else {
+            showJobBar('busy', 'Preparing…');
+            const req = await buildAIRequest(messages);
+            planJob = { id: await startJob(req), started: Date.now(), provider: req.provider };
+            store('nourish_pending_plan', planJob);
+        }
+        renderChat();
+        showJobBar('busy', 'Cooking your meal plan…');
+        const data = await waitForJob(planJob.id);
+        applyPlan(parseLLMJSON(extractText(planJob.provider, data)));
+        showJobBar(null);
     } catch (err) {
-        showToast(err?.message || 'Something went wrong');
+        if (err?.cancelled) { showJobBar(null); showToast('Meal plan cancelled', false); }
+        else showJobBar('error', `Couldn't make the plan: ${err?.message || 'unknown error'}`);
     } finally {
-        btn.disabled = false;
-        inputs.forEach(i => { i.disabled = false; });
-        btn.textContent = 'Generate Plan';
+        planJob = null;
+        unstore('nourish_pending_plan');
+        renderChat();
     }
 }
 
-const PLAN_SYSTEM_PROMPT = 'You are a meal-planning chef. Return ONLY raw JSON, no markdown, no comments. ' +
-    'Write out all 7 days in full. Keep each meal to at most 8 ingredients (with quantities) and 5 short steps. ' +
-    'Format: {"days":[{"day":1,"breakfast":{"name":"","time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"ingredients":[""],"steps":[""]},"lunch":{same},"dinner":{same}}]}';
+async function cancelPlan() {
+    if (!planJob) return;
+    try { await api(`/api/jobs/${planJob.id}`, { method: 'DELETE' }); } catch (e) { /* the poll will report it */ }
+}
 
-async function generateWithAI(likes, hates) {
-    const p = settings.active_provider;
-    let model;
-    if (p === 'lmstudio') {
-        if (!activeModel) activeModel = await fetchLMStudioModel();
-        if (!activeModel) throw new Error('No model loaded in LM Studio. Open LM Studio, load a model and start the server.');
-        model = activeModel;
-    } else if (p === 'ollama') model = settings.ollama_model || 'llama3.2';
-    else if (p === 'claude') model = settings.claude_model || 'claude-haiku-4-5';
-    else model = settings.openai_model || 'gpt-4o';
-
-    const data = await api('/api/generate', {
-        method: 'POST',
-        timeoutMs: 6 * 60 * 1000,
-        body: {
-            provider: p,
-            model,
-            api_key: p === 'claude' ? settings.claude_api_key : p === 'openai' ? settings.openai_api_key : undefined,
-            max_tokens: 8000,
-            messages: [
-                { role: 'system', content: PLAN_SYSTEM_PROMPT },
-                { role: 'user', content: `Goal: ${goal}. Likes: ${likes || 'anything'}. Avoids: ${hates || 'nothing'}. Generate the 7-day meal plan JSON.` },
-            ],
-        },
-    });
-    const text = p === 'claude'
-        ? (data?.content || []).filter(b => b?.type === 'text').map(b => b.text).join('')
-        : data?.choices?.[0]?.message?.content;
-    return parseLLMJSON(text);
+function resumePendingJobs() {
+    const plan = loadJSON('nourish_pending_plan', null);
+    if (plan?.id && !planJob) runPlanJob(null, plan);
+    const chat = loadJSON('nourish_pending_chat', null);
+    if (chat?.id && !chatBusy) requestChatReply(chat);
 }
 
 function spreadOverWeek(meals, toMeal) {
@@ -619,8 +984,15 @@ function spreadOverWeek(meals, toMeal) {
     };
 }
 
+function joinList(...parts) {
+    return parts.filter(Boolean).join(', ');
+}
+
 async function generateWithTheMealDB(likes, hates) {
-    const data = await api('/api/recipes/themealdb', { method: 'POST', timeoutMs: 45000, body: { query: likes || 'chicken', exclude: hates } });
+    const data = await api('/api/recipes/themealdb', {
+        method: 'POST', timeoutMs: 45000,
+        body: { query: likes || 'chicken', exclude: joinList(hates, settings.allergies) },
+    });
     return spreadOverWeek(data?.meals || [], r => {
         const ingredients = [];
         for (let i = 1; i <= 20; i++) {
@@ -637,7 +1009,11 @@ async function generateWithSpoonacular(likes, hates) {
     if (!settings.spoonacular_api_key) throw new Error('Spoonacular needs a free API key. Add it in Settings.');
     const data = await api('/api/recipes/spoonacular', {
         method: 'POST', timeoutMs: 45000,
-        body: { api_key: settings.spoonacular_api_key, query: likes || 'chicken', exclude: hates, number: 21 },
+        body: {
+            api_key: settings.spoonacular_api_key, query: likes || 'chicken', exclude: hates, number: 21,
+            diet: SPOONACULAR_DIETS[settings.diet], intolerances: settings.allergies || undefined,
+            max_ready_time: Number(settings.max_cook_time) || undefined,
+        },
     });
     return spreadOverWeek(data?.results || [], r => {
         const nutrient = name => (r?.nutrition?.nutrients || []).find(n => n?.name === name)?.amount;
@@ -649,4 +1025,138 @@ async function generateWithSpoonacular(likes, hates) {
             steps: (r?.analyzedInstructions?.[0]?.steps || []).map(s => s?.step).slice(0, 12),
         };
     });
+}
+
+// === CHAT ===
+function initChat() {
+    const form = document.getElementById('chatForm');
+    const input = document.getElementById('chatInput');
+    form.addEventListener('submit', e => { e.preventDefault(); sendChat(input.value); });
+    input.addEventListener('input', () => autoGrow(input));
+    input.addEventListener('keydown', e => {
+        // Enter sends on a computer keyboard; Shift+Enter makes a new line. The send button works everywhere.
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(input.value); }
+    });
+    document.getElementById('chatPlanBtn').addEventListener('click', generatePlanFromChat);
+}
+
+function autoGrow(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+}
+
+function saveChat() {
+    chatHistory = chatHistory.slice(-100);
+    store('nourish_chat', chatHistory);
+}
+
+function clearChat() {
+    if (!chatHistory.length) return;
+    if (!confirm('Delete the whole chat history?')) return;
+    chatHistory = [];
+    chatError = '';
+    saveChat();
+    renderChat();
+    showToast('Chat cleared', false);
+}
+
+async function sendChat(text) {
+    text = (text || '').trim();
+    if (!text || chatBusy) return;
+    const input = document.getElementById('chatInput');
+    input.value = '';
+    autoGrow(input);
+    chatHistory.push({ role: 'user', content: text });
+    saveChat();
+    await requestChatReply();
+}
+
+async function requestChatReply(resume = null) {
+    chatBusy = true;
+    chatError = '';
+    renderChat();
+    try {
+        let pending = resume;
+        if (!pending) {
+            const req = await buildAIRequest(
+                [{ role: 'system', content: chatSystemPrompt() }, ...cleanHistory(chatHistory.slice(-CHAT_HISTORY_LIMIT))],
+                { maxTokens: Math.min(Number(settings.max_tokens) || 8000, 2000) });
+            pending = { id: await startJob(req), provider: req.provider };
+            store('nourish_pending_chat', pending);
+        }
+        const data = await waitForJob(pending.id);
+        chatHistory.push({ role: 'assistant', content: extractText(pending.provider, data).trim() || '(The AI sent an empty reply.)' });
+        saveChat();
+    } catch (err) {
+        chatError = err?.message || 'Something went wrong';
+    } finally {
+        unstore('nourish_pending_chat');
+        chatBusy = false;
+        renderChat();
+    }
+}
+
+// Minimal, safe formatting for chat replies: paragraphs, bullet/numbered lists and **bold**.
+// Built with DOM nodes only, so model output can never inject HTML.
+function formatInline(text) {
+    return text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map(part =>
+        part.startsWith('**') && part.endsWith('**') ? h('strong', { text: part.slice(2, -2) }) : document.createTextNode(part));
+}
+
+function formatMessage(text) {
+    const blocks = [];
+    let list = null;
+    for (const raw of text.split('\n')) {
+        const line = raw.trimEnd();
+        const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
+        const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+        const heading = line.match(/^\s*#{1,6}\s+(.*)$/);
+        if (bullet || numbered) {
+            const type = bullet ? 'ul' : 'ol';
+            if (!list || list.tagName.toLowerCase() !== type) { list = h(type); blocks.push(list); }
+            list.append(h('li', {}, formatInline((bullet || numbered)[1])));
+        } else {
+            list = null;
+            if (heading) blocks.push(h('p', {}, h('strong', { text: heading[1] })));
+            else if (line.trim()) blocks.push(h('p', {}, formatInline(line)));
+        }
+    }
+    return blocks;
+}
+
+function renderChat() {
+    const box = document.getElementById('chatMessages');
+    const planBtn = document.getElementById('chatPlanBtn');
+    if (!box) return;
+    planBtn.disabled = !!planJob || !chatHistory.some(m => m.role === 'user');
+    planBtn.textContent = planJob ? 'Cooking…' : 'Make plan';
+    document.getElementById('chatSend').disabled = chatBusy;
+
+    const items = [];
+    if (!chatHistory.length) {
+        items.push(h('div', { class: 'chat-welcome' },
+            h('div', { class: 'empty-icon', text: '👩‍🍳' }),
+            h('div', { class: 'title', text: 'Chat with the chef' }),
+            h('p', { class: 'text-dim', text: 'Tell it what you like, what you need, and how you cook. When it sounds right, tap "Make plan" to turn the chat into your 7-day plan.' }),
+            h('div', { class: 'chat-suggestions' }, CHAT_SUGGESTIONS.map(s =>
+                h('button', { type: 'button', class: 'chat-suggestion', onclick: () => sendChat(s) }, s)))));
+    }
+    for (const m of chatHistory) {
+        items.push(h('div', { class: `chat-bubble chat-${m.role}` },
+            m.role === 'assistant' ? formatMessage(m.content) : h('p', { text: m.content })));
+    }
+    if (chatBusy) items.push(h('div', { class: 'chat-bubble chat-assistant chat-typing', 'aria-label': 'The chef is typing' },
+        h('span'), h('span'), h('span')));
+    if (chatError) items.push(h('div', { class: 'chat-error', role: 'alert' },
+        h('p', { text: chatError }),
+        chatHistory[chatHistory.length - 1]?.role === 'user'
+            ? h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => requestChatReply() }, 'Try again') : null));
+    setChildren(box, ...items);
+    scrollChatToEnd();
+}
+
+function scrollChatToEnd() {
+    if (document.getElementById('screenChat')?.classList.contains('active')) {
+        requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));
+    }
 }

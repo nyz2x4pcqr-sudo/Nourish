@@ -2,9 +2,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 import asyncio
+import importlib.util
 import logging
 import os
+import socket
 import sys
+import time
 import uuid
 
 from dotenv import load_dotenv
@@ -32,6 +35,8 @@ logger = logging.getLogger("nourish")
 # httpx logs full request URLs at INFO, which can include query-string API keys.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+VERSION = "0.3.0"
+PORT = int(os.getenv("NOURISH_PORT", "8000"))
 LMSTUDIO_URL = os.getenv("LMSTUDIO_URL", "http://localhost:1234").rstrip("/")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 THEMEALDB_URL = os.getenv("THEMEALDB_URL", "https://www.themealdb.com/api/json/v1/1").rstrip("/")
@@ -66,6 +71,8 @@ async def require_kb(need_embedder: bool = True):
         if collection is None or (need_embedder and embedder is None):
             try:
                 await asyncio.to_thread(_init_kb)
+            except ImportError:
+                raise HTTPException(status_code=503, detail="Knowledge base is not included in this build of Nourish")
             except Exception as e:
                 logger.error(f"Knowledge base init failed: {type(e).__name__}: {e}")
                 raise HTTPException(status_code=503, detail="Knowledge base unavailable (see server log)")
@@ -103,6 +110,7 @@ class GenerateRequest(BaseModel):
     messages: list
     api_key: Optional[str] = None
     max_tokens: Optional[int] = 8000
+    temperature: Optional[float] = None
 
 
 class KnowledgeTextRequest(BaseModel):
@@ -120,6 +128,9 @@ class RecipeSearchRequest(BaseModel):
     exclude: Optional[str] = ""
     number: Optional[int] = 21
     api_key: Optional[str] = None
+    diet: Optional[str] = None
+    intolerances: Optional[str] = None
+    max_ready_time: Optional[int] = None
 
 
 def upstream_error(res: httpx.Response, who: str) -> HTTPException:
@@ -152,27 +163,70 @@ def frontend_file(name: str):
     return FileResponse(FRONTEND_DIR / name)
 
 
+def lan_urls() -> list:
+    """Addresses a phone on the same Wi-Fi can use to open the app."""
+    if os.path.exists("/.dockerenv"):
+        return []  # inside Docker we only see the container's own address
+    ips = set()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))  # no packet is sent; this just picks the LAN interface
+            ips.add(sock.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
+    except OSError:
+        pass
+    private = [ip for ip in ips if ip.startswith(("192.168.", "10.")) or
+               (ip.startswith("172.") and 16 <= int(ip.split(".")[1]) <= 31)]
+    return [f"http://{ip}:{PORT}" for ip in sorted(private)]
+
+
+@app.get("/api/info")
+def info():
+    return {
+        "version": VERSION,
+        "lmstudio_url": LMSTUDIO_URL,
+        "ollama_url": OLLAMA_URL,
+        "in_docker": os.path.exists("/.dockerenv"),
+        "lan_urls": lan_urls(),
+        "knowledge_base": importlib.util.find_spec("chromadb") is not None,
+    }
+
+
 @app.get("/api/models")
-async def get_models():
+async def get_models(provider: str = "lmstudio"):
+    """Models the local AI app has available, as {"data": [{"id": ...}]}."""
+    if provider not in ("lmstudio", "ollama"):
+        raise HTTPException(status_code=400, detail="Model lists are only available for LM Studio and Ollama")
+    who, url = ("LM Studio", f"{LMSTUDIO_URL}/v1/models") if provider == "lmstudio" else ("Ollama", f"{OLLAMA_URL}/api/tags")
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            res = await client.get(f"{LMSTUDIO_URL}/v1/models")
+            res = await client.get(url)
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=503, detail=f"LM Studio not reachable at {LMSTUDIO_URL} ({type(e).__name__})")
+        raise HTTPException(status_code=503, detail=f"{who} not reachable at {url.rsplit('/', 2)[0]} ({type(e).__name__})")
     if res.status_code >= 400:
-        raise upstream_error(res, "LM Studio")
-    return res.json()
+        raise upstream_error(res, who)
+    data = res.json()
+    if provider == "ollama":
+        data = {"data": [{"id": m.get("name")} for m in data.get("models") or [] if m.get("name")]}
+    return data
 
 
 @app.post("/api/generate")
 async def generate(req: GenerateRequest):
+    return await call_provider(req)
+
+
+async def call_provider(req: GenerateRequest) -> dict:
     logger.info(f"Generate request - provider: {req.provider}, model: {req.model}, messages: {len(req.messages)}")
     if req.provider in ("lmstudio", "ollama"):
         base = LMSTUDIO_URL if req.provider == "lmstudio" else OLLAMA_URL
         who = "LM Studio" if req.provider == "lmstudio" else "Ollama"
         url = f"{base}/v1/chat/completions"
         headers = {"Content-Type": "application/json"}
-        body = {"model": req.model, "messages": req.messages, "max_tokens": req.max_tokens, "temperature": 0.7}
+        body = {"model": req.model, "messages": req.messages, "max_tokens": req.max_tokens}
     elif req.provider == "openai":
         key = req.api_key or os.getenv("OPENAI_API_KEY")
         if not key:
@@ -194,9 +248,11 @@ async def generate(req: GenerateRequest):
             body["system"] = system
     else:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}")
+    body["temperature"] = 0.7 if req.temperature is None else max(0.0, min(req.temperature, 1.0 if req.provider == "claude" else 2.0))
 
     try:
-        async with httpx.AsyncClient(timeout=300) as client:
+        # Local models can take many minutes for a full week of recipes.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(900, connect=10)) as client:
             res = await client.post(url, json=body, headers=headers)
     except httpx.HTTPError as e:
         # Never include headers here; the message can end up in the UI.
@@ -207,6 +263,63 @@ async def generate(req: GenerateRequest):
         raise upstream_error(res, who)
     logger.info(f"Generate successful - provider: {req.provider}")
     return res.json()
+
+
+# Background jobs: generation can take minutes with a local model, longer than a phone
+# keeps a single request alive when the screen locks. The app starts a job, then polls.
+JOBS: dict = {}
+JOB_TTL_SECONDS = 3600
+
+
+def _prune_jobs():
+    now = time.time()
+    for job_id in [j for j, job in JOBS.items() if job.get("finished") and now - job["finished"] > JOB_TTL_SECONDS]:
+        JOBS.pop(job_id, None)
+
+
+@app.post("/api/jobs")
+async def start_job(req: GenerateRequest):
+    _prune_jobs()
+    job_id = uuid.uuid4().hex
+    job = {"status": "running", "started": time.time()}
+    JOBS[job_id] = job
+
+    async def run():
+        try:
+            job["result"] = await call_provider(req)
+            job["status"] = "done"
+        except HTTPException as e:
+            job.update(status="error", status_code=e.status_code, detail=e.detail)
+        except asyncio.CancelledError:
+            job.update(status="error", status_code=499, detail="Cancelled")
+        except Exception as e:
+            logger.error(f"Job {job_id} failed: {type(e).__name__}: {e}")
+            job.update(status="error", status_code=500, detail="Unexpected server error (see server log)")
+        finally:
+            job["finished"] = time.time()
+
+    job["task"] = asyncio.create_task(run())  # keep a reference so it isn't garbage-collected
+    return {"job_id": job_id}
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str):
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="That request is no longer on the server (was it restarted?). Please try again.")
+    out = {"status": job["status"], "elapsed": round((job.get("finished") or time.time()) - job["started"], 1)}
+    for key in ("result", "detail", "status_code"):
+        if key in job:
+            out[key] = job[key]
+    return out
+
+
+@app.delete("/api/jobs/{job_id}")
+def cancel_job(job_id: str):
+    job = JOBS.get(job_id)
+    if job and job["status"] == "running":
+        job["task"].cancel()
+    return {"cancelled": job_id}
 
 
 @app.post("/api/recipes/themealdb")
@@ -244,6 +357,12 @@ async def recipes_spoonacular(req: RecipeSearchRequest):
         "addRecipeNutrition": "true",
         "fillIngredients": "true",
     }
+    if req.diet:
+        params["diet"] = req.diet
+    if req.intolerances:
+        params["intolerances"] = req.intolerances
+    if req.max_ready_time:
+        params["maxReadyTime"] = req.max_ready_time
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             # Key goes in a header, not the URL, so it never appears in access logs.

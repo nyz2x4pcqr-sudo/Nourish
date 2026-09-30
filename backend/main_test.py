@@ -35,6 +35,8 @@ class FakeUpstream:
             return httpx.Response(200, json={"content": [{"type": "text", "text": "{}"}]})
         if path.endswith("/v1/models"):
             return httpx.Response(200, json={"data": [{"id": "local-model"}]})
+        if path.endswith("/api/tags"):
+            return httpx.Response(200, json={"models": [{"name": "llama3.2:latest"}, {"name": "qwen2.5:7b"}]})
         return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
 
 
@@ -151,6 +153,59 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(req.headers["x-api-key"], SECRET)
         main.os.environ.pop("SPOONACULAR_API_KEY", None)
         self.assertEqual(self.client.post("/api/recipes/spoonacular", json={"query": "x"}).status_code, 400)
+
+    def test_temperature_passed_and_clamped(self):
+        self.client.post("/api/generate", json={"provider": "lmstudio", "model": "m", "messages": [], "temperature": 0.3})
+        self.assertEqual(json.loads(self.up.requests[-1].content)["temperature"], 0.3)
+        self.client.post("/api/generate", json={"provider": "claude", "model": "m", "api_key": "k", "messages": [], "temperature": 1.5})
+        self.assertEqual(json.loads(self.up.requests[-1].content)["temperature"], 1.0)  # Claude's maximum
+        self.client.post("/api/generate", json={"provider": "lmstudio", "model": "m", "messages": []})
+        self.assertEqual(json.loads(self.up.requests[-1].content)["temperature"], 0.7)
+
+    def test_model_lists(self):
+        self.assertEqual(self.client.get("/api/models").json()["data"][0]["id"], "local-model")
+        ids = [m["id"] for m in self.client.get("/api/models?provider=ollama").json()["data"]]
+        self.assertEqual(ids, ["llama3.2:latest", "qwen2.5:7b"])
+        self.assertEqual(self.client.get("/api/models?provider=claude").status_code, 400)
+
+    def test_info(self):
+        data = self.client.get("/api/info").json()
+        self.assertEqual(data["lmstudio_url"], main.LMSTUDIO_URL)
+        self.assertIn("version", data)
+        for url in data["lan_urls"]:
+            self.assertRegex(url, r"^http://(192\.168|10\.|172\.)")
+
+    def _wait_job(self, job_id):
+        for _ in range(100):
+            job = self.client.get(f"/api/jobs/{job_id}").json()
+            if job["status"] != "running":
+                return job
+        self.fail("job never finished")
+
+    def test_job_success(self):
+        job_id = self.client.post("/api/jobs", json={"provider": "lmstudio", "model": "m", "messages": []}).json()["job_id"]
+        job = self._wait_job(job_id)
+        self.assertEqual(job["status"], "done")
+        self.assertEqual(job["result"]["choices"][0]["message"]["content"], "{}")
+
+    def test_job_error_keeps_message_and_hides_key(self):
+        self.up.fail = 401
+        job_id = self.client.post("/api/jobs", json={"provider": "openai", "model": "m", "api_key": SECRET, "messages": []}).json()["job_id"]
+        job = self._wait_job(job_id)
+        self.assertEqual((job["status"], job["status_code"]), ("error", 401))
+        self.assertIn("invalid x-api-key", job["detail"])
+        self.assertNotIn(SECRET, json.dumps(job))
+
+    def test_unknown_job(self):
+        r = self.client.get("/api/jobs/nope")
+        self.assertEqual(r.status_code, 404)
+        self.assertIn("try again", r.json()["detail"])
+
+    def test_spoonacular_profile_filters(self):
+        self.client.post("/api/recipes/spoonacular", json={"query": "x", "api_key": "k", "diet": "vegetarian",
+                                                           "intolerances": "peanut", "max_ready_time": 30})
+        params = self.up.requests[-1].url.params
+        self.assertEqual((params["diet"], params["intolerances"], params["maxReadyTime"]), ("vegetarian", "peanut", "30"))
 
 
 if __name__ == "__main__":
