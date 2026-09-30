@@ -6,4 +6,4 @@
 # chromadb 1.x, a breaking change: see AUDIT.md. Skip these with requirements-core.txt.
 chromadb==0.5.23
 sentence-transformers==3.0.1
-numpy==1.26.4
+numpy==2.5.3
