@@ -5,5 +5,5 @@
 # tokenizers<=0.20.3, which holds transformers at 4.46.x (known CVEs). Upgrading means
 # chromadb 1.x, a breaking change: see AUDIT.md. Skip these with requirements-core.txt.
 chromadb==0.5.23
-sentence-transformers==3.0.1
+sentence-transformers==6.1.0
 numpy==1.26.4
