@@ -310,11 +310,50 @@ All of these pass.
 
 **Not verified:** real phones (performance, heat, memory limits, LiveContainer); Metal on a device (the simulator runs on the CPU); downloads of multi-GB files on a phone; the live Hugging Face ranking from inside the app on a phone (CI checks the same code with Node against the real API).
 
+## Round 6 (v0.4.1–v0.4.6): downloads on a real iPhone, plan quality, interruptions
+
+Driven by activity logs from a real iPhone 16 Pro (iOS 26.6, Nourish running inside LiveContainer).
+
+**Downloads (one problem at a time, each found in the phone's log):**
+- 0.4.0 "HTTP 302": redirects to Hugging Face's download server were refused. **FIXED** in 0.4.1: https redirects are followed, and the token stays with huggingface.co.
+- 0.4.1 "bad URL" right after the redirect. CI showed the real redirect address has no invalid characters, so the cause is still **UNKNOWN**. Superseded by the rebuilt downloader.
+- 0.4.2 stuck at 0%: iOS's background download session accepted the task and never started it, with no callback (the simulator failed it at once instead). **FIXED** in 0.4.3: normal download session, a 30 s watchdog, and the task's state logged at 2/10/30 s.
+- 0.4.3 "waiting for an internet connection" with 0 bytes, while API calls to huggingface.co worked. **ADDRESSED** in 0.4.4:
+  - waitsForConnectivity is off, so iOS reports its real error;
+  - a download check (network, VPN/proxy, DNS of the download server, plain HEAD and 1 MB GET) runs automatically;
+  - the fallback is step-by-step 16 MB Range requests (resumable, size and GGUF header checked).
+  - 0.4.5 then made a full plan on the phone, so a model did download. Which path it used isn't known yet.
+
+**Plan quality (from the phone's 7-day Qwen3.5-2B run, 477 s):**
+- Junk inside valid JSON ("ingredients" as an item, "use 1 cup" filler, whole lists in one line cut at 90 characters). **FIXED**:
+  - the format now allows one short item per ingredient (no commas, <= 48 chars, 3–10 per meal);
+  - each day is checked, made again once, then any remaining junk is dropped.
+  - Checked with the pinned llama.cpp grammar engine, in unit tests, and in CI (0 junk lines in 144 for Qwen3.5-2B and LFM2.5-2.6B).
+- The prompt grew every day (676 → 1,478 characters) and days slowed down. **FIXED**: fixed-size prompt (last 3 dish names only). CI: 754–789 characters on days 3–7.
+- Repeated dishes. **FIXED** in code: word-overlap check, and that one meal is remade with another cuisine. Each day also gets its own cuisine.
+- Thermal: checked before each day. Serious → 20 s pause; critical → stop and resume when cool. **UNVERIFIED** on a phone.
+- Model choice: on the same prompt in CI, Qwen3.5-2B took 1,445 s for 3 days vs 1,704 s for LFM2.5-2.6B, with 0 junk for both, and Qwen's file is 0.4 GB smaller. Qwen3.5-2B gets a ranking lift (PLAN_TESTED). Simulator CPU only, so the times are for comparing the two models, not for phone speed.
+
+**Interruptions:**
+- Each day is saved as it finishes and the plan resumes on the next launch. **VERIFIED** in CI: app killed after day 2 → resumed at day 3, days 1–2 unchanged.
+- Generation runs inside an iOS background task. The time left is logged when it changes; on expiry the step pauses and continues when the app is back; notifications are sent.
+  - The simulator never limited background time, so how much a real iPhone gives is **UNVERIFIED**.
+  - There is no way for this app to run unbounded background inference on iOS.
+- keepAwake is set once per plan.
+- Error -3 is llama.cpp's GGML_STATUS_FAILED (a Metal command failure). iOS forbids GPU work in the background. It's now treated as a pause when off screen, and on screen it's retried once on the CPU. **UNVERIFIED** on a phone.
+
+**Grocery list:** grocery.js merges lines into one row per item, sums amounts per unit, and drops junk. Browser test: 25 rows, 0 junk for a 7-day plan. Aisle exceptions: nut butters and plant milks → Pantry.
+
+**Headers under the status bar:** --safe-* = max(env(), safe areas passed in from iOS), plus an opaque strip behind the status bar. **VERIFIED** in CI on all 5 tabs (status bar 62 px, headers at 90–96 px).
+
+**Security:** Dependabot's 4 alerts were in the unused knowledge base (chromadb has no fixed version). **FIXED**: the knowledge base is removed; pip-audit finds no known vulnerabilities. The CodeQL workflow file was removed because default code scanning was already on and every run was rejected.
+
+**Left as is:** the old `ModelDownload` class in NativeBridge.swift is unused. Deleting it was blocked by a safety check; remove it when convenient.
+
 ## UNVERIFIED (and why)
 
 - **Live TheMealDB, Spoonacular and USDA calls** — those hosts are blocked by this sandbox's network policy. The endpoints were tested against faked responses in the documented format.
 - **Real LM Studio, Ollama and OpenAI generation** — none are available here. LM Studio was stood in for by a fake OpenAI-compatible server. A real Claude call was tested only with an invalid key (401 path).
-- **Knowledge base** — huggingface.co is blocked, so the embedding model can't download. The endpoints return a clean 503 here.
 - **Docker** — no Docker daemon in this environment. `Dockerfile` and `docker-compose.yml` were edited but not built.
 - **Actual iPhone Safari** — tested with Chromium in mobile emulation (390×844, touch) only. Safe-area insets are zero in emulation.
 - **Phone apps on real devices** — tested only in GitHub's Android emulator and iOS simulator (see the workflow's screenshots). Sideloading, the Local Network prompt and Wi-Fi scanning on a real phone are untested.

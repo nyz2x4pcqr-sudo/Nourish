@@ -102,8 +102,15 @@
         ['Pantry', ['oil', 'salt', 'pepper', 'spice', 'sauce', 'vinegar', 'soy', 'honey', 'sugar', 'stock', 'broth', 'paprika', 'cumin', 'mustard', 'nut', 'seed', 'syrup']],
     ];
 
+    // Names that contain another aisle's word ("almond butter" isn't dairy, "eggplant" isn't protein).
+    const EXCEPTIONS = [
+        [/\b(almond|peanut|cashew|nut|seed|sunflower|apple) butter\b|\b(coconut|almond|oat|soy|rice) milk\b|coconut cream|cream of tartar/, 'Pantry'],
+        [/eggplant|bean sprout|green bean|butternut|butter lettuce|pea shoot/, 'Produce'],
+    ];
+
     function categorize(name) {
         const lower = String(name).toLowerCase();
+        for (const [re, cat] of EXCEPTIONS) if (re.test(lower)) return cat;
         for (const [cat, words] of CATEGORIES) if (words.some(w => lower.indexOf(w) !== -1)) return cat;
         return 'Other';
     }

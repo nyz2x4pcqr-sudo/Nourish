@@ -35,3 +35,9 @@ test('a week of meals becomes one merged list without junk', () => {
     assert.ok(!text.some(t => /ingredients|use |description|, 1$/i.test(t)), text.join(' | '));
     assert.equal(rows.find(r => r.key === 'egg').category, 'Protein');
 });
+
+test('aisles: words inside other names don\'t pick the wrong aisle', () => {
+    const cases = { 'almond butter': 'Pantry', 'peanut butter': 'Pantry', 'coconut milk': 'Pantry', 'oat milk': 'Pantry', 'eggplant': 'Produce',
+        'green bean': 'Produce', 'butternut squash': 'Produce', 'butter': 'Dairy', 'milk': 'Dairy', 'egg': 'Protein', 'black bean': 'Protein' };
+    for (const [name, aisle] of Object.entries(cases)) assert.equal(g.categorize(name), aisle, name);
+});
