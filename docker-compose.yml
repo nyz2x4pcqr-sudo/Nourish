@@ -7,7 +7,6 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
-      - chroma_data:/app/chroma_data
       # The backend serves the web app too. Read-only; the server only hands out a fixed list
       # of named files (index.html, app.js, icons...), never anything else in this folder.
       - .:/frontend:ro
@@ -19,5 +18,3 @@ services:
     env_file:
       - path: ./backend/.env
         required: false
-volumes:
-  chroma_data:

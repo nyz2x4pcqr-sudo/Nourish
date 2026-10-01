@@ -17,21 +17,11 @@ If you don't need Docker, skip it and use the Python setup in the README instead
 
 ---
 
-## Wrong Python version: numpy build errors, "Microsoft Visual C++ 14.0 is required", "metadata-generation-failed", "Could not build wheels for numpy"
+## numpy build errors, "Microsoft Visual C++ 14.0 is required", "Could not build wheels for numpy"
 
-**Cause:** You're on Python 3.13 or newer. Nourish pins `numpy==1.26.4` (the knowledge-base library needs it), and numpy 1.26 has no ready-made download for 3.13+. pip tries to compile it and fails.
+**Cause:** You're installing an older copy of Nourish (before 0.4.2). It included an optional knowledge base that needed `numpy` 1.26, which only installs easily on Python 3.12.
 
-**Fix:** Install **Python 3.12** from https://www.python.org/downloads/ (you can keep other versions installed alongside it). Then create the environment with 3.12 explicitly:
-
-```powershell
-cd backend
-py -3.12 -m venv .venv          # macOS/Linux: python3.12 -m venv .venv
-.venv\Scripts\Activate.ps1      # macOS/Linux: source .venv/bin/activate
-python --version                # must say 3.12.x
-pip install -r requirements.txt
-```
-
-If `py -3.12` says it can't find 3.12, the installer didn't finish. Run it again.
+**Fix:** Get the latest Nourish (`git pull`) and run `pip install -r requirements.txt` again. It no longer needs numpy and works on Python 3.11 or newer.
 
 ---
 
@@ -163,4 +153,3 @@ Since 0.3.0, everything is kept on the PC and synced, usually within a few secon
 | "Claude returned 401: API key is invalid." | Re-copy the key into Settings. Claude keys start with `sk-ant-`. |
 | "Spoonacular needs a free API key" | Get one at https://spoonacular.com/food-api and paste it in Settings → Recipe sources. |
 | "Ollama not reachable at http://localhost:11434" | Start Ollama, and download the model named in Settings (e.g. `ollama pull llama3.2`). |
-| "Knowledge base unavailable" | The embedding model is downloaded from huggingface.co the first time the knowledge base is used. That needs internet access once. |

@@ -1,9 +1,4 @@
-# Python 3.12 required: numpy 1.26.x (needed by chromadb 0.5.x) has no prebuilt wheels for 3.13+.
+# Same as requirements-core.txt (kept so older instructions and the Docker image still work).
+# The optional knowledge base (chromadb, sentence-transformers, PyTorch) was removed in 0.4.2:
+# nothing in the app used it, and chromadb 0.5.x has security advisories with no fixed version.
 -r requirements-core.txt
-
-# Knowledge base (optional, not used by the app's screens yet). chromadb 0.5.x caps
-# tokenizers<=0.20.3, which holds transformers at 4.46.x (known CVEs). Upgrading means
-# chromadb 1.x, a breaking change: see AUDIT.md. Skip these with requirements-core.txt.
-chromadb==0.5.23
-sentence-transformers==3.0.1
-numpy==1.26.4

@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 import asyncio
-import importlib.util
 import logging
 import os
 import socket
@@ -11,7 +10,7 @@ import time
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -22,9 +21,6 @@ import updater
 import web_recipes
 
 load_dotenv()
-
-# Chroma sends anonymous usage telemetry by default; this app promises nothing leaves the machine.
-os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -50,38 +46,6 @@ FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", Path(__file__).resolve().parent.pa
 # it would expose backend/.env and .git to anyone on the network.
 FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "styles.css",
                   "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"}
-
-# Knowledge base (optional). Heavy imports and the embedding-model download happen
-# lazily so the rest of the app starts instantly and works offline.
-collection = None
-embedder = None
-_kb_lock = asyncio.Lock()
-
-
-def _init_kb():
-    global collection, embedder
-    import chromadb
-    from chromadb.config import Settings
-    from sentence_transformers import SentenceTransformer
-
-    if collection is None:
-        client = chromadb.PersistentClient(path="./chroma_data", settings=Settings(anonymized_telemetry=False))
-        collection = client.get_or_create_collection("nourish_knowledge")
-    if embedder is None:
-        embedder = SentenceTransformer("all-MiniLM-L6-v2")
-
-
-async def require_kb(need_embedder: bool = True):
-    async with _kb_lock:
-        if collection is None or (need_embedder and embedder is None):
-            try:
-                await asyncio.to_thread(_init_kb)
-            except ImportError:
-                raise HTTPException(status_code=503, detail="Knowledge base is not included in this build of Nourish")
-            except Exception as e:
-                logger.error(f"Knowledge base init failed: {type(e).__name__}: {e}")
-                raise HTTPException(status_code=503, detail="Knowledge base unavailable (see server log)")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -129,16 +93,6 @@ class WebRecipeRequest(BaseModel):
 
 class ImportRequest(BaseModel):
     url: str
-
-
-class KnowledgeTextRequest(BaseModel):
-    name: str
-    content: str
-
-
-class QueryRequest(BaseModel):
-    query: str
-    n_results: Optional[int] = 5
 
 
 class RecipeSearchRequest(BaseModel):
@@ -222,7 +176,6 @@ def info():
         "in_docker": os.path.exists("/.dockerenv"),
         "can_self_update": updater.INSTALL_SUPPORTED,
         "lan_urls": lan_urls(),
-        "knowledge_base": importlib.util.find_spec("chromadb") is not None,
     }
 
 
@@ -488,68 +441,3 @@ async def update_install():
 
     asyncio.get_running_loop().call_later(1.0, restart_and_exit)
     return {"status": "restarting", "version": info.get("latest")}
-
-
-@app.post("/api/knowledge/add-text")
-async def add_knowledge_text(req: KnowledgeTextRequest):
-    logger.info(f"Add knowledge text - name: {req.name}, content length: {len(req.content)}")
-    await require_kb()
-    chunks = [req.content[i:i+500] for i in range(0, len(req.content), 450)]
-    if not chunks:
-        raise HTTPException(status_code=400, detail="Content is empty")
-    embeddings = embedder.encode(chunks).tolist()
-    ids = [str(uuid.uuid4()) for _ in chunks]
-    metadatas = [{"name": req.name} for _ in chunks]
-    collection.add(documents=chunks, embeddings=embeddings, ids=ids, metadatas=metadatas)
-    logger.info(f"Knowledge text added - name: {req.name}, chunks: {len(chunks)}")
-    return {"added": len(chunks), "name": req.name, "chunks_created": len(chunks), "total_content_length": len(req.content)}
-
-
-@app.post("/api/knowledge/add")
-async def add_knowledge_file(file: UploadFile = File(...)):
-    logger.info(f"Add knowledge file - name: {file.filename}")
-    await require_kb()
-    content = await file.read()
-    text = content.decode("utf-8", errors="ignore")
-    name = file.filename
-    chunks = [text[i:i+500] for i in range(0, len(text), 450)]
-    if not chunks:
-        raise HTTPException(status_code=400, detail="File is empty")
-    embeddings = embedder.encode(chunks).tolist()
-    ids = [str(uuid.uuid4()) for _ in chunks]
-    metadatas = [{"name": name} for _ in chunks]
-    collection.add(documents=chunks, embeddings=embeddings, ids=ids, metadatas=metadatas)
-    logger.info(f"Knowledge file added - name: {name}, chunks: {len(chunks)}")
-    return {"added": len(chunks), "name": name, "chunks_created": len(chunks), "total_content_length": len(text)}
-
-
-@app.post("/api/knowledge/query")
-async def query_knowledge(req: QueryRequest):
-    logger.info(f"Knowledge query - query length: {len(req.query)}")
-    await require_kb()
-    embedding = embedder.encode([req.query]).tolist()
-    results = collection.query(query_embeddings=embedding, n_results=req.n_results)
-    docs = (results.get("documents") or [[]])[0]
-    logger.info(f"Knowledge query successful - returned {len(docs)} results")
-    return {"context": "\n\n".join(docs)}
-
-
-@app.get("/api/knowledge")
-async def list_knowledge():
-    await require_kb(need_embedder=False)
-    results = collection.get()
-    names = sorted({(m or {}).get("name") for m in results.get("metadatas") or []} - {None})
-    return {"entries": names}
-
-
-@app.delete("/api/knowledge/{name}")
-async def delete_knowledge(name: str):
-    logger.info(f"Delete knowledge - name: {name}")
-    await require_kb(need_embedder=False)
-    results = collection.get(where={"name": name})
-    if results["ids"]:
-        collection.delete(ids=results["ids"])
-        logger.info(f"Knowledge deleted - name: {name}, ids: {len(results['ids'])}")
-    else:
-        logger.warning(f"Delete knowledge - no entries found for: {name}")
-    return {"deleted": name}

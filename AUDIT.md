@@ -82,7 +82,7 @@ Tests added: `backend/main_test.py` (12 tests, pass) and `tests/json-repair.test
 - **M4 — No error handling on fetch; UI not re-enabled on every path.** **FIXED:** one `api()` helper with a timeout, readable messages, and a server-status update. The generate path disables all sheet inputs and re-enables them in `finally`. Verified for the server-down, bad-key and LLM-down paths.
 - **M5 — Chroma telemetry.** Chroma sent anonymous telemetry (and logged errors about it), which contradicts the README's "no data leaves your machine". **FIXED:** disabled.
 - **M6 — Startup blocked for about 25 seconds without internet.** The embedding model downloaded at startup, retrying against huggingface.co. **FIXED:** the knowledge base loads lazily, on first use.
-- **M7 — Knowledge base has no UI.** `/api/knowledge/*` isn't used by the current frontend (the redesign in `2438113` removed that UI). It's also why the install pulls in PyTorch (about 3 GB) and the only reason Python is pinned to 3.12. **FLAG:** not deleted, because the README advertises it. Recommendation: remove it, or make it an optional extra (`requirements-kb.txt`), for the iPhone/zero-config goal.
+- **M7 — Knowledge base has no UI.** **FIXED in 0.4.2: removed**, together with its security advisories (see Dependencies). `/api/knowledge/*` isn't used by the current frontend (the redesign in `2438113` removed that UI). It's also why the install pulls in PyTorch (about 3 GB) and the only reason Python is pinned to 3.12. **FLAG:** not deleted, because the README advertises it. Recommendation: remove it, or make it an optional extra (`requirements-kb.txt`), for the iPhone/zero-config goal.
 - **M8 — API keys in plain text in localStorage.** This is the nature of a client-side settings screen. Mitigations: the keys go only to your own server, and the server can hold them instead (`backend/.env` fallback added). **OPEN** (by design).
 - **M9 — No authentication on the backend.** Anyone on the same Wi-Fi can use the server, including any keys stored in `.env`. **OPEN.** This is acceptable for a home network; don't expose port 8000 to the internet.
 - **M10 — `nourish.log` was never ignored.** The commit "add gitignore, untrack nourish.log" deleted the file but never added a gitignore. **FIXED:** root `.gitignore` covers `*.log`, `.env`, `chroma_data`, `.venv` and `*.bak`.
@@ -149,12 +149,20 @@ GitHub's Dependabot alert list isn't readable with the tools in this session, so
 | python-dotenv | 1.0.0 | 1.2.2 | CVE-2026-28684 | **FIXED** |
 | starlette (transitive) | 0.27.0 | 1.7.0 | 7 (CVE-2024-47874, CVE-2025-54121, …) | **FIXED** (now pinned) |
 | anyio (transitive) | 3.7.1 | 4.15.1 | 2 | **FIXED** (now pinned) |
-| chromadb | 0.5.23 | 0.5.23 | 3 (CVE-2026-45830, -45831, -45833) — **no fixed version listed** | **OPEN** |
-| transformers (transitive) | 4.46.3 | 4.46.3 | 26 (fixed in ≥4.48 … 5.10) | **OPEN — needs a breaking change** |
+| chromadb | 0.5.23 | removed | 3 (CVE-2026-45830, -45831, -45833) — **no fixed version listed** | **FIXED in 0.4.2: removed** (see below) |
+| transformers (transitive) | 4.46.3 | removed | 26 (fixed in ≥4.48 … 5.10) | **FIXED in 0.4.2: removed** |
+| sentence-transformers | 3.0.1 | removed | CVE-2026-68770 (fixed in 5.6.0) | **FIXED in 0.4.2: removed** |
 
 **Why transformers can't move:** `chromadb 0.5.23` requires `tokenizers<=0.20.3`, which caps `transformers` at 4.46.x. Fixing it means `chromadb` 1.x, a rewrite with a different on-disk format and client API. Existing `chroma_data` would need migrating, and the knowledge-base code retesting. Per the rules, this is documented rather than forced. If the knowledge base is removed (M7), both problems go away, along with the Python 3.12 pin and PyTorch.
 
-**Likely mapping to Dependabot's "12":** Dependabot reports on packages listed directly in `requirements.txt`. fastapi 1 + python-multipart 7 + python-dotenv 1 + chromadb 3 = 12, which matches the reported count. 9 of those are fixed; chromadb's 3 have no upstream fix. **UNVERIFIED:** the alert page itself couldn't be read, so severities weren't cross-checked.
+**0.4.2: knowledge base removed.** GitHub reported 4 open alerts (2 critical, 2 high), and `pip-audit -r backend/requirements.txt` found 47 advisories, all in `chromadb` 0.5.23 (3, with no fixed version), `sentence-transformers` 3.0.1 (1) and `transformers` 4.46.3 (pulled in by sentence-transformers). The 4 alerts most likely map to chromadb's 3 plus sentence-transformers' 1 (the alert page itself still can't be read here). Nothing in the app, the `.exe` or the phone apps used the knowledge base. The fix: remove `/api/knowledge/*`, chromadb, sentence-transformers and numpy. `requirements.txt` now equals `requirements-core.txt`, and `python-multipart` was dropped too, since only file upload used it. Results:
+- `pip-audit` on the new `requirements.txt`: no known vulnerabilities;
+- a fresh install on Python 3.11 works, and the backend tests pass;
+- the Python 3.12 pin and the PyTorch download are gone.
+
+Any existing `chroma_data` folder is left on disk, unused.
+
+**Earlier, likely mapping to Dependabot's "12":** Dependabot reports on packages listed directly in `requirements.txt`. fastapi 1 + python-multipart 7 + python-dotenv 1 + chromadb 3 = 12, which matches the reported count. 9 of those are fixed; chromadb's 3 have no upstream fix. **UNVERIFIED:** the alert page itself couldn't be read, so severities weren't cross-checked.
 
 **Testing after the upgrade:** the backend test suite (12 tests) passes, and the full browser walkthrough passes on the upgraded versions. The upgrades were installed as one set rather than one at a time: FastAPI, Starlette and anyio must move together, and the other packages are independent. A knowledge-base smoke test was **UNVERIFIED** (huggingface.co is blocked here, so the embedding model can't download).
 
