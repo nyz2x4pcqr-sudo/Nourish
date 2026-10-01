@@ -39,7 +39,7 @@ logger = logging.getLogger("nourish")
 # httpx logs full request URLs at INFO, which can include query-string API keys.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-VERSION = "0.2.0-pre-alpha"
+VERSION = "0.3.0-pre-alpha"
 PORT = int(os.getenv("NOURISH_PORT", "8000"))
 LMSTUDIO_URL = os.getenv("LMSTUDIO_URL", "http://localhost:1234").rstrip("/")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
@@ -124,6 +124,7 @@ class WebRecipeRequest(BaseModel):
     exclude: Optional[str] = ""
     number: Optional[int] = 7
     brave_key: Optional[str] = None
+    engine: Optional[str] = None  # "duckduckgo" skips a Brave key saved on the PC
 
 
 class ImportRequest(BaseModel):
@@ -410,6 +411,7 @@ async def recipes_web(req: WebRecipeRequest):
     exclude = [w.strip().lower() for w in (req.exclude or "").split(",") if w.strip()]
     try:
         return await web_recipes.search_recipes(req.query, exclude, max(1, min(req.number or 7, 21)),
+                                                None if req.engine == "duckduckgo" else
                                                 req.brave_key or store.secret("brave_api_key") or os.getenv("BRAVE_API_KEY"))
     except web_recipes.WebRecipeError as e:
         raise HTTPException(status_code=502, detail=str(e))
