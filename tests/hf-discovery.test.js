@@ -96,9 +96,46 @@ test('names and sizes are read from model names', () => {
     assert.equal(paramsFromName('Mistral-Instruct'), null);
     assert.equal(prettyModelName('bartowski/google_gemma-3-4b-it-GGUF'), 'gemma-3-4b-it');
     assert.equal(prettyModelName('unsloth/Qwen3.5-2B-GGUF'), 'Qwen3.5-2B');
-    assert.equal(baseKey({ id: 'x/A-GGUF', tags: ['base_model:quantized:Org/A'] }), 'org/a');
+    assert.equal(paramsFromName('LFM2.5-230M-GGUF'), 0.23);
+    // Copies of one model from different publishers count as one.
+    assert.equal(baseKey({ id: 'x/A-GGUF', tags: ['base_model:quantized:Org/A'] }), 'a');
+    assert.equal(baseKey({ id: 'unsloth/Ornith-1.0-9B-GGUF', tags: ['base_model:quantized:ornith-ai/Ornith-1.0-9B'] }),
+        baseKey({ id: 'ornith-ai/Ornith-1.0-9B-GGUF', tags: [] }));
 });
 
 test('if Hugging Face fails, the error comes back so the app can show its built-in list', async () => {
     await assert.rejects(discoverModels(phones.iphoneLiveContainer, { fetchJSON: () => Promise.reject(new Error('offline')), force: true }), /offline/);
+});
+
+// What the first live run against Hugging Face showed: the most-downloaded models are big, and a
+// ranking that only looks at those leaves small phones with almost nothing and big phones with
+// models that barely fit.
+const bigPopular = Array.from({ length: 30 }, (_, i) => ({ id: `pub${i}/Popular-${9 + (i % 3)}B-Instruct-GGUF`, downloads: 5e6 - i, tags: [], createdAt: recent }));
+const agents = [{ id: 'bartowski/tencent_UI-Mate-9B-GGUF', downloads: 9e6, tags: [], createdAt: recent }, { id: 'bartowski/Fara1.5-4B-GGUF', downloads: 9e6, tags: [], createdAt: recent }];
+const smallOnes = ['unsloth/gemma-3-1b-it-GGUF', 'bartowski/SmolLM2-360M-Instruct-GGUF', 'LiquidAI/LFM2.5-350M-GGUF', 'Qwen/Qwen2.5-0.5B-Instruct-GGUF']
+    .map((id, i) => ({ id, downloads: 50000 - i, tags: [], createdAt: recent }));
+function fakeHF2(url) {
+    const tree = url.match(/\/api\/models\/(.+)\/tree\/main$/);
+    if (!tree) return Promise.resolve(bigPopular.concat(agents, repos, smallOnes));
+    const base = tree[1].split('/')[1].replace(/-GGUF$/, '');
+    const p = paramsFromName(base) || 3;
+    return Promise.resolve(['Q4_K_M', 'Q3_K_M'].map((q, i) => ({ type: 'file', path: `${base}-${q}.gguf`, lfs: { size: Math.round(p * (i ? 0.48 : 0.6) * GB) } })));
+}
+
+test('small phones still get several models when the popular ones are all big', async () => {
+    const live = await discoverModels(phones.oldAndroid, { fetchJSON: fakeHF2, force: true });
+    const top = rankModels(phones.oldAndroid, live.models).top;
+    assert.ok(top.length >= 3, top.map(m => m.name).join());
+});
+
+test('the top pick fits comfortably rather than barely', async () => {
+    const live = await discoverModels(phones.iphoneLiveContainer, { fetchJSON: fakeHF2, force: true });
+    const top = rankModels(phones.iphoneLiveContainer, live.models).top;
+    assert.equal(top[0].a.fit, 'good', top.map(m => `${m.name} ${m.a.fit}`).join());
+    assert.ok(top.filter(m => m.a.fit === 'tight').length <= 2, 'most of the list fits comfortably');
+});
+
+test('agent / computer-use models are not offered for meal planning', async () => {
+    const live = await discoverModels(phones.bigAndroid, { fetchJSON: fakeHF2, force: true });
+    assert.ok(!live.models.some(m => /UI-Mate|Fara/.test(m.repo)));
 });

@@ -485,7 +485,8 @@ function assessModel(model, specs) {
     const noDisk = specs.disk_free != null && model.size * 1.05 > specs.disk_free && !isDownloaded(model.file);
     // A 7-day plan is about 7 × 800 words of output, plus reading each request.
     const planMinutes = Math.max(1, Math.round((5600 / tokPerSec + 7 * 600 / (tokPerSec * 6)) / 60));
-    const score = (model.quality || 4) - (fit === 'tight' ? 2 : 0) - (warm ? 0.8 : 0) + Math.min(tokPerSec, 30) / 30;
+    // Comfort matters: a model that barely fits or runs hot is ranked well below one that fits easily.
+    const score = (model.quality || 4) - (fit === 'tight' ? 3 : 0) - (warm ? 1.5 : 0) + Math.min(tokPerSec, 30) / 15;
     return { fit, need, budget, tokPerSec, warm, noDisk, planMinutes, score };
 }
 
@@ -501,8 +502,8 @@ function rankModels(specs, models = MODEL_CATALOG) {
         top.forEach(m => {
             m.tags = [];
             if (m === top[0]) m.tags.push(['Recommended', 'accent']);
-            if (m === best && m !== top[0]) m.tags.push(['Best quality', 'accent']);
-            if (m === fastest) m.tags.push(['Fastest', '']);
+            if (m === best && m !== top[0] && m.quality > top[0].quality + 0.5) m.tags.push(['Best quality', 'accent']);
+            if (m === fastest && m.a.tokPerSec > top[0].a.tokPerSec * 1.3) m.tags.push(['Fastest', '']);
             if (m.a.fit === 'tight') m.tags.push(['Uses most memory', 'warn']);
             if (m.a.warm) m.tags.push(['May get warm', 'warn']);
             else if (m.size < 1.3 * GB) m.tags.push(['Runs cool', '']);
@@ -519,15 +520,18 @@ function rankModels(specs, models = MODEL_CATALOG) {
 // 4. Score by capability (size), how new and how popular it is, speed on this phone and heat.
 const HF_API = 'https://huggingface.co/api/models';
 const HF_PUBLISHERS = ['unsloth', 'bartowski', 'lmstudio-community', 'ggml-org', 'Qwen'];
-const HF_SKIP = /coder|code-|embed|rerank|guard|abliterat|uncensor|nsfw|roleplay|\brp\b|[-_]base\b|base-gguf|\bmtp\b|draft|math|ocr|tts|audio|speech|whisper|[-_]vl\b|[-_]vl[-_]|vision|reward|heretic|merge|test|tiny-random|\d{2,}b-a\d/i;
+const HF_SKIP = /agent|computer-?use|\bgui\b|ui-mate|ui-tars|fara\d|tool-?call|function-?call|coder|code-|embed|rerank|guard|abliterat|uncensor|nsfw|roleplay|\brp\b|[-_]base\b|base-gguf|\bmtp\b|draft|math|ocr|tts|audio|speech|whisper|[-_]vl\b|[-_]vl[-_]|vision|reward|heretic|merge|test|tiny-random|\d{2,}b-a\d/i;
 const QUANT_ORDER = ['Q4_K_M', 'Q4_K_S', 'IQ4_XS', 'IQ4_NL', 'Q4_0', 'Q3_K_L', 'Q3_K_M', 'IQ3_M', 'Q3_K_S'];
-const KNOWN_GOOD = /qwen3|gemma-?[34]|llama-?3\.[123]|phi-?4|smollm3|granite-?4|ling/i;
+const KNOWN_GOOD = /qwen-?3|qwen2\.5|gemma-?[34]|llama-?3\.[123]|phi-?4|smollm|granite-?4|lfm2|mistral|ministral/i;
+// Reasoning-style models "think" at length before answering: slow and hot on a phone.
+const THINKERS = /distill|reason|thinking|\br1\b|mimo/i;
 const LIVE_CACHE_KEY = 'nourish_hf_top';
 const LIVE_CACHE_MS = 12 * 60 * 60 * 1000;
 
 function paramsFromName(name) {
-    const m = String(name).match(/(?:^|[-_ ])e?(\d+(?:\.\d+)?)\s*b(?![a-z])/i);
-    return m ? Number(m[1]) : null;
+    const m = String(name).match(/(?:^|[-_ ])e?(\d+(?:\.\d+)?)\s*([bm])(?![a-z])/i);
+    if (!m) return null;
+    return m[2].toLowerCase() === 'm' ? Number(m[1]) / 1000 : Number(m[1]);
 }
 
 // Rough "how capable" from size: 0.5B ≈ 1, 1B ≈ 3, 2B ≈ 5, 4B ≈ 7.4, 8B ≈ 9.6 (capped).
@@ -544,7 +548,7 @@ function recencyBonus(date) {
 
 function baseKey(r) {
     const tag = (r.tags || []).filter(t => /^base_model:/.test(t)).map(t => t.replace(/^base_model:(quantized:|finetune:)?/, ''))[0];
-    const name = (tag || r.id.split('/').pop()).toLowerCase();
+    const name = (tag || r.id).split('/').pop().toLowerCase();
     return name.replace(/[-_.]?gguf$/, '').replace(/[-_.](q\d.*|i?mat.*)$/, '');
 }
 
@@ -607,9 +611,18 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
         const entry = { id: r.id, params, downloads: r.downloads || 0, likes: r.likes || 0, created: r.lastModified || r.createdAt, key };
         if (!seen[key] || entry.downloads > seen[key].downloads) seen[key] = entry;
     }));
-    const pre = Object.keys(seen).map(k => seen[k]).map(r => Object.assign(r, {
-        pre: capability(r.params || 3) + recencyBonus(r.created) + Math.log10(r.downloads + 10) / 3 + (KNOWN_GOOD.test(r.id) ? 0.5 : 0),
-    })).sort((a, b) => b.pre - a.pre).slice(0, 14);
+    const scored = Object.keys(seen).map(k => seen[k]).map(r => Object.assign(r, {
+        pre: recencyBonus(r.created) + Math.log10(r.downloads + 10) / 2 + (KNOWN_GOOD.test(r.id) ? 1.5 : 0) - (THINKERS.test(r.id) ? 1 : 0),
+    })).sort((a, b) => b.pre - a.pre);
+    // Look at every size band, not just the biggest models: small phones need small models, and
+    // a model that only barely fits is rarely the best choice.
+    const bands = [0.3, 0.55, 0.8, 1.15].map(() => []);
+    scored.forEach(r => {
+        const est = (r.params || 3) * 0.62 * GB / budget;
+        const band = est <= 0.3 ? 0 : est <= 0.55 ? 1 : est <= 0.8 ? 2 : 3;
+        if (bands[band].length < [5, 5, 4, 3][band]) bands[band].push(r);
+    });
+    const pre = bands.reduce((a, b) => a.concat(b), []);
     if (!pre.length) throw new Error('Hugging Face returned no suitable models.');
 
     const picked = await mapLimit(pre, 4, async r => {
@@ -619,12 +632,21 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
         const params = r.params || Math.max(0.3, f.size / (0.6 * GB));
         return {
             id: 'hf:' + r.id + '/' + f.file, name: prettyModelName(r.id), repo: r.id, file: f.file, size: f.size, params,
-            quality: Math.min(10, capability(params) + recencyBonus(r.created) + (KNOWN_GOOD.test(r.id) ? 0.5 : 0) + Math.log10(r.downloads + 10) / 6),
+            // Squeezed versions (3-bit) lose quality; proven chat families and newer models gain.
+            quality: Math.min(10, capability(params) + recencyBonus(r.created) + (KNOWN_GOOD.test(r.id) ? 1 : -0.5)
+                - (THINKERS.test(r.id) ? 1 : 0) - ({ Q4_K_S: 0.2, IQ4_XS: 0.3, IQ4_NL: 0.3, Q4_0: 0.4, Q3_K_L: 1, Q3_K_M: 1.2, IQ3_M: 1.3, Q3_K_S: 1.5 }[f.quant] || 0)
+                + Math.log10(r.downloads + 10) / 6),
             blurb: `${compactCount(r.downloads)} downloads${r.created ? ' · ' + new Date(r.created).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : ''} · ${f.quant}`,
             live: true,
         };
     });
     const models = picked.filter(Boolean);
+    // Hugging Face's lists change daily; if few fit this phone, add Nourish's tested picks that do.
+    const fitting = models.filter(m => assessModel(m, specs).fit !== 'too-big');
+    if (fitting.length < 5) {
+        MODEL_CATALOG.filter(c => assessModel(c, specs).fit !== 'too-big' && !models.some(m => baseKey({ id: m.repo }) === baseKey({ id: c.repo })))
+            .slice(0, 5 - fitting.length).forEach(c => models.push(Object.assign({}, c, { blurb: c.blurb + ' (Nourish pick)' })));
+    }
     if (!models.length) throw new Error('None of the models found on Hugging Face fit this phone.');
     const result = { at: Date.now(), bucket, models };
     try { localStorage.setItem(LIVE_CACHE_KEY, JSON.stringify(result)); } catch (e) { /* not cached */ }
