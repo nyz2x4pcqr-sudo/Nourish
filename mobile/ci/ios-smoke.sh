@@ -3,7 +3,9 @@
 #  1. first launch runs the built-in app on the phone (no PC), with the native bridge working;
 #  2. what the app saves survives a restart;
 #  3. connecting to a Nourish server shows the PC's copy;
-#  4. a real model runs through the app's JavaScript → bridge → llama.cpp and writes a valid day of meals.
+#  4. a real model downloads from Hugging Face through the app (stopped part-way and continued), byte-checked;
+#  5. it runs through the app's JavaScript → bridge → llama.cpp and writes a valid day of meals;
+#  6. the app's own Generate Plan makes a whole 7-day plan with it.
 set -eux
 mkdir -p shots
 LOG="$GITHUB_WORKSPACE/server.log"
@@ -62,18 +64,40 @@ NEW=$(tail -n +"$((BEFORE + 1))" "$LOG"); echo "Server saw:"; echo "$NEW" | grep
 echo "$NEW" | grep -q '"GET /app.js' || fail "app.js never loaded"
 echo "$NEW" | grep -q '"GET /api/info' || fail "the app's JavaScript never called the server"
 
-echo "== 4. Download a real model from Hugging Face through the app (following its redirects)"
-probe "const done = new Promise((ok, bad) => nativeOn('download', e => {
-    if (e.file !== 'test-model.gguf') return;
-    if (e.state === 'done') ok(e); else if (e.state === 'error' || e.state === 'cancelled') bad(new Error(e.error || e.state));
+echo "== 4. Download a real model from Hugging Face through the app: stop it part-way, continue, check the file"
+probe "const file = 'test-model.gguf', want = 105454432;
+  const url = 'https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf';
+  const next = pred => new Promise((ok, bad) => nativeOn('download', e => {
+    if (e.file !== file) return;
+    if (pred(e)) ok(e); else if (e.state === 'error') bad(new Error(e.error));
   }));
-  await nativeCall('download', { url: 'https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf',
-    file: 'test-model.gguf', size: 105454432, auth: 'hf' });
-  const e = await done; return JSON.stringify(e);" 300
-python3 -c "
-import json; r = json.load(open('$PROBE')); assert r['ok'], r; e = json.loads(r['value'])
-assert e['state'] == 'done' and e['received'] == 105454432, e
-print('Downloaded through the app:', e['received'], 'bytes')" || fail "model download through the app failed"
+  const first = next(e => (e.state === 'running' && e.received > 0) || e.state === 'done');
+  await nativeCall('download', { url, file, size: want, auth: 'hf' });
+  let final = await first, stoppedAt = null;
+  if (final.state !== 'done') {
+    const stopped = next(e => e.state === 'cancelled');
+    await nativeCall('cancelDownload', { file });
+    stoppedAt = (await stopped).received;
+    const done = next(e => e.state === 'done');
+    await nativeCall('download', { url, file, size: want, auth: 'hf' });
+    final = await done;
+  }
+  const models = (await nativeCall('models', {})).files;
+  const log = activityLog.filter(l => l.msg.includes(file)).map(l => l.level + ' ' + l.msg);
+  return JSON.stringify({ final, stoppedAt, models, log });" 600
+python3 - "$PROBE" <<'PY' || fail "model download through the app failed"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"])
+print("\n".join(v["log"]))
+want = 105454432
+assert v["final"]["state"] == "done" and v["final"]["received"] == want, v["final"]
+on_disk = [m["size"] for m in v["models"] if m["file"] == "test-model.gguf"]
+assert on_disk == [want], ("file on disk", on_disk)
+assert v["stoppedAt"] and 0 < v["stoppedAt"] < want, ("never stopped part-way", v["stoppedAt"])
+assert any("continuing from" in l for l in v["log"]), "the second download did not continue from where it stopped"
+print(f"Stopped at {v['stoppedAt']} bytes, continued, and the file on disk is exactly {on_disk[0]} bytes")
+PY
 
 echo "== 5. On-device AI through the app's own code"
 probe "const r = await nativeCall('generate', { model: 'test-model.gguf', grammar: GBNF_DAY, temperature: 0.7, max_tokens: 900, n_ctx: 2048, gpu: false,
@@ -89,5 +113,25 @@ assert any(f["file"] == "test-model.gguf" for f in v["models"]), v["models"]
 print("Valid day of meals:", [day[m]["name"] for m in ("breakfast", "lunch", "dinner")])
 PY
 cp "$PROBE" shots/ios-ai-probe.json
+
+echo "== 6. A whole 7-day meal plan made on the phone, through the app's own Generate Plan code"
+probe "Object.assign(settings, { active_provider: 'local', local_model: 'test-model.gguf', local_ctx: '2048', local_gpu: 'off' });
+  await runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
+    { role: 'user', content: 'Goal: eat balanced. Likes: anything. Avoids: nothing. Generate the 7-day meal plan JSON.' }] });
+  return JSON.stringify({ days: daysData, log: activityLog.filter(l => l.area === 'plan').map(l => l.level + ' ' + l.msg) });" 2400
+python3 - "$PROBE" <<'PY' || fail "the on-device 7-day plan is not valid"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"])
+print("\n".join(v["log"]))
+assert len(v["days"]) == 7, ("days", len(v["days"]))
+for i, day in enumerate(v["days"]):
+    for meal in ("breakfast", "lunch", "dinner"):
+        m = day[meal]; assert m["name"] and m["ingredients"] and m["steps"] and "calories" in m["nutrition"], (i, meal)
+for i, day in enumerate(v["days"]):
+    print(f"Day {i + 1}:", " | ".join(day[m]["name"] for m in ("breakfast", "lunch", "dinner")))
+PY
+cp "$PROBE" shots/ios-plan-probe.json
+xcrun simctl io "$UDID" screenshot shots/ios-4-plan.png
 xcrun simctl io "$UDID" screenshot shots/ios-3-after-ai.png
 echo "SMOKE TEST PASSED"

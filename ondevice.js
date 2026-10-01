@@ -471,6 +471,7 @@ async function getSpecs(refresh = false) {
 const GB = 1024 * 1024 * 1024;
 function formatBytes(n) {
     if (!Number.isFinite(n)) return '—';
+    if (n < 0) return '?';   // size not known (yet)
     if (n >= GB) return `${(n / GB).toFixed(n >= 10 * GB ? 0 : 1)} GB`;
     if (n >= 1048576) return `${Math.round(n / 1048576)} MB`;
     return n > 0 ? `${Math.max(1, Math.round(n / 1024))} KB` : '0 MB';

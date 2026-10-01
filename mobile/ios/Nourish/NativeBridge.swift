@@ -26,6 +26,17 @@ final class NativeBridge: NSObject {
         return dir
     }
 
+    override init() {
+        super.init()
+        // Downloads run in ModelDownloads (they can outlive this page, even the app); progress comes here.
+        ModelDownloads.shared.log = { [weak self] message, level in self?.log(message, level: level) }
+        ModelDownloads.shared.report = { [weak self] payload, _, active in
+            self?.event("download", payload)
+            DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = active > 0 }
+        }
+        ModelDownloads.shared.reconnect()
+    }
+
     // MARK: Plumbing
 
     func handle(id: String, cmd: String, args: [String: Any]) {
@@ -74,7 +85,7 @@ final class NativeBridge: NSObject {
         case "download": return try startDownload(a)
         case "cancelDownload":
             let file = a["file"] as? String ?? ""
-            DispatchQueue.main.sync { downloads[file]?.cancel() }
+            ModelDownloads.shared.cancel(file)
             return [String: Any]()
         case "models": return models()
         case "deleteModel": return try deleteModel(a)
@@ -323,22 +334,8 @@ final class NativeBridge: NSObject {
             throw BridgeError(message: "Models can only be downloaded from Hugging Face")
         }
         let expected = (a["size"] as? NSNumber)?.int64Value ?? -1
-        DispatchQueue.main.sync {
-            downloads[file]?.cancel()
-            let d = ModelDownload(url: url, file: file, expected: expected, token: UserDefaults.standard.string(forKey: Self.tokenKey),
-                                  log: { [weak self] msg, level in self?.log(msg, level: level) }) { [weak self] payload, finished in
-                self?.event("download", payload)
-                if finished {
-                    DispatchQueue.main.async {
-                        self?.downloads[file] = nil
-                        UIApplication.shared.isIdleTimerDisabled = !(self?.downloads.isEmpty ?? true)
-                    }
-                }
-            }
-            downloads[file] = d
-            UIApplication.shared.isIdleTimerDisabled = true   // iOS pauses downloads when the phone locks
-            d.start()
-        }
+        ModelDownloads.shared.start(url: url, file: file, expected: expected, token: UserDefaults.standard.string(forKey: Self.tokenKey))
+        DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = true }
         return ["started": true]
     }
 
