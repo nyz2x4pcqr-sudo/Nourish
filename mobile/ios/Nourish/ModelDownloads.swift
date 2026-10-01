@@ -31,7 +31,7 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         let token: String?
         var task: URLSessionDownloadTask?
         var foreground = false
-        var fromResumeData = false
+        var resumeData: Data?          // what this attempt continues from, if anything
         var resumeOffset: Int64 = 0
         var sinceStart: Int64 = 0
         var serverTotal: Int64 = -1
@@ -51,6 +51,14 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         return q
     }()
     private var jobs: [String: Job] = [:]
+    /// Set when a background download fails before any data arrives (seen in the iOS simulator:
+    /// NSURLErrorDomain -1 straight away). Remembered per app version; then normal downloads are used.
+    private static let backgroundBrokenKey = "downloads_background_broken"
+    private static var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?" }
+    private var backgroundBroken: Bool {
+        get { UserDefaults.standard.string(forKey: Self.backgroundBrokenKey) == Self.appVersion }
+        set { UserDefaults.standard.set(newValue ? Self.appVersion : nil, forKey: Self.backgroundBrokenKey) }
+    }
     private lazy var background: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: Self.sessionID)
         config.isDiscretionary = false          // start now, not when iOS finds it convenient
@@ -90,13 +98,18 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         queue.addOperation {
             if let old = self.jobs[file]?.task { old.cancel() }   // its callbacks are ignored from now on
             self.jobs[file] = Job(file: file, expected: expected, source: url, token: token)
+            if self.backgroundBroken {
+                self.jobs[file]?.foreground = true
+                self.log("Download \(file): using a normal download (background downloads didn't work on this phone)", "info")
+            }
             // A leftover partial file from Nourish 0.4.0–0.4.2 (they downloaded differently).
             try? FileManager.default.removeItem(at: NativeBridge.modelsDir.appendingPathComponent(file + ".part"))
             if let data = try? Data(contentsOf: Self.resumeURL(file)) {
                 try? FileManager.default.removeItem(at: Self.resumeURL(file))
                 self.log("Download \(file): continuing the earlier, unfinished download", "info")
-                self.jobs[file]?.fromResumeData = true
-                self.begin(file, self.background.downloadTask(withResumeData: data))
+                self.jobs[file]?.resumeData = data
+                let session = (self.jobs[file]?.foreground ?? false) ? self.foreground : self.background
+                self.begin(file, session.downloadTask(withResumeData: data))
             } else {
                 self.resolveAndBegin(file)
             }
@@ -295,15 +308,15 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
             if job.cancelled { return finish(file, "cancelled") }
             log("Download \(file): stopped after \(job.received) bytes: \(Self.describe(error))", "warn")
             if job.sinceStart == 0, job.source != nil {
-                if job.fromResumeData {
-                    // Old resume data (e.g. its signed address expired): start again from scratch.
-                    try? FileManager.default.removeItem(at: Self.resumeURL(file))
-                    log("Download \(file): couldn't continue the earlier download, starting again", "info")
-                    return retry(file, foreground: job.foreground)
-                }
-                if !job.foreground {
+                if session === background {
+                    if error.code != NSURLErrorNotConnectedToInternet { backgroundBroken = true }
                     log("Download \(file): trying once more as a normal (not background) download", "info")
-                    return retry(file, foreground: true)
+                    return retry(file, foreground: true, resumeData: job.resumeData)
+                }
+                if job.resumeData != nil {
+                    // The earlier download can't be continued (e.g. its signed address expired): start over.
+                    log("Download \(file): couldn't continue the earlier download, starting again", "info")
+                    return retry(file, foreground: true, resumeData: nil)
                 }
             }
             jobs[file]?.failure = job.received > 0
@@ -316,12 +329,17 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         finish(file, "error")
     }
 
-    private func retry(_ file: String, foreground: Bool) {
+    private func retry(_ file: String, foreground: Bool, resumeData: Data?) {
         guard let job = jobs[file] else { return }
         var fresh = Job(file: file, expected: job.expected, source: job.source, token: job.token)
         fresh.foreground = foreground
+        fresh.resumeData = resumeData
         jobs[file] = fresh
-        resolveAndBegin(file)
+        if let resumeData {
+            begin(file, (foreground ? self.foreground : background).downloadTask(withResumeData: resumeData))
+        } else {
+            resolveAndBegin(file)
+        }
     }
 
     /// Only for normal-session downloads (background sessions follow redirects on their own):
