@@ -62,6 +62,8 @@ const SETTINGS_DEFAULTS = {
     local_gpu: 'on',
     local_ctx: '4096',
     keep_awake: 'on',
+    // activity log
+    verbose_log: 'on',
     // chat
     chef_style: 'friendly',
     chat_length: 'normal',
@@ -165,6 +167,43 @@ function setChildren(el, ...children) {
 }
 
 const $ = id => document.getElementById(id);
+
+// === ACTIVITY LOG ===
+// Everything the app does, step by step, so people can see what's going on (Settings → Activity log)
+// and send it when something goes wrong. Secrets (API keys, tokens) are blanked out before saving.
+const LOG_KEY = 'nourish_log';
+const LOG_MAX = 1500;
+let activityLog = [];
+try { activityLog = JSON.parse(localStorage.getItem(LOG_KEY) || '[]') || []; } catch (e) { activityLog = []; }
+let logSaveTimer = null;
+
+function redactSecrets(text) {
+    return String(text)
+        .replace(/hf_[A-Za-z0-9]{6,}/g, 'hf_•••')
+        .replace(/sk-(ant-)?[A-Za-z0-9_-]{6,}/g, 'sk-•••')
+        .replace(/("?(api_key|apiKey|token|brave_key|x-api-key|authorization|x-subscription-token)"?\s*[:=]\s*"?)(Bearer\s+)?[^",}\s]{4,}/gi, '$1•••');
+}
+
+// level: 'info' (always kept), 'debug' (only with detailed logging on), 'warn', 'error'.
+function nlog(area, message, details, level = 'info') {
+    if (level === 'debug' && settings.verbose_log !== 'on') return;
+    let extra;
+    if (details !== undefined && details !== null) {
+        try { extra = typeof details === 'string' ? details : JSON.stringify(details); } catch (e) { extra = String(details); }
+        extra = redactSecrets(extra).slice(0, 3000);
+    }
+    const entry = { t: Date.now(), level, area, msg: redactSecrets(message) };
+    if (extra) entry.details = extra;
+    activityLog.push(entry);
+    if (activityLog.length > LOG_MAX) activityLog.splice(0, activityLog.length - LOG_MAX);
+    clearTimeout(logSaveTimer);
+    logSaveTimer = setTimeout(() => { try { localStorage.setItem(LOG_KEY, JSON.stringify(activityLog)); } catch (e) { /* full */ } }, 500);
+    try { (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)('[Nourish]', area, entry.msg, extra || ''); } catch (e) { /* no console */ }
+    if (typeof onLogEntry === 'function') onLogEntry(entry);
+}
+
+window.addEventListener('error', e => nlog('app', `Script error: ${e.message}`, `${e.filename || ''}:${e.lineno || ''}`, 'error'));
+window.addEventListener('unhandledrejection', e => nlog('app', `Unhandled error: ${(e.reason && e.reason.message) || e.reason}`, null, 'error'));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const formatElapsed = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const on = key => settings[key] === 'on';
@@ -172,6 +211,8 @@ const on = key => settings[key] === 'on';
 // === INITIALIZATION ===
 document.addEventListener('DOMContentLoaded', () => {
     loadLocalState();
+    nlog('app', `Nourish started (${isLocalMode() ? 'on this phone' : IN_PHONE_APP ? 'phone app, connected to a PC' : 'browser'})`,
+        { ua: navigator.userAgent, screen: `${screen.width}x${screen.height}`, provider: settings.active_provider, model: settings[`${settings.active_provider}_model`] || '' });
     applyAppearance();
     selectedDay = todayIndex();
     initTabs();
@@ -393,6 +434,7 @@ async function syncNow() {
         lastSynced = Date.now();
         syncFailed = false;
     } catch (e) {
+        if (!syncFailed) nlog('sync', `Sync with the PC failed: ${e.message}`, null, 'warn');
         syncFailed = true;
     } finally {
         syncing = false;
@@ -542,6 +584,7 @@ function showJobBar(state, message) {
 // === API ===
 async function api(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
     if (isLocalMode()) return localApi(path, { method, body });
+    const started = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res;
@@ -554,6 +597,7 @@ async function api(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
             signal: controller.signal,
         });
     } catch (e) {
+        nlog('server', `${method} ${path} failed: ${e.name === 'AbortError' ? 'timed out' : e.message}`, null, 'warn');
         if (e.name === 'AbortError') throw new Error('The server took too long to answer. Try again.');
         if (backendOnline !== false) { backendOnline = false; updateBackendStatus(); }
         throw new Error("Can't reach the Nourish server. Is it running on your PC?");
@@ -563,6 +607,7 @@ async function api(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
     if (backendOnline !== true) { backendOnline = true; updateBackendStatus(); }
     let data = null;
     try { data = await res.json(); } catch (e) { /* non-JSON body */ }
+    if (path.indexOf('/api/jobs/') !== 0 || !res.ok) nlog('server', `${method} ${path} → ${res.status} (${Date.now() - started} ms)`, res.ok ? null : data, res.ok ? 'debug' : 'warn');
     if (!res.ok) {
         const err = new Error(data && typeof data.detail === 'string' ? data.detail : `Server error ${res.status}`);
         err.status = res.status;
@@ -983,8 +1028,9 @@ const SETTINGS_PAGES = {
     server: { icon: 'i-server', color: '#8E8E93', title: 'Server & devices' },
     updates: { icon: 'i-update', color: '#007AFF', title: 'Updates' },
     data: { icon: 'i-shield', color: '#636366', title: 'Data & privacy' },
+    logs: { icon: 'i-list', color: '#48484A', title: 'Activity log' },
 };
-const SETTINGS_GROUPS = [['appearance', 'ai', 'chat'], ['profile', 'sources', 'grocery'], ['server', 'updates', 'data']];
+const SETTINGS_GROUPS = [['appearance', 'ai', 'chat'], ['profile', 'sources', 'grocery'], ['server', 'updates', 'data', 'logs']];
 
 function settingsSummary(page) {
     const s = settings;
@@ -997,6 +1043,10 @@ function settingsSummary(page) {
         case 'profile': return `${s.calorie_target} kcal · ${s.diet === 'No restriction' ? 'any diet' : s.diet}`;
         case 'sources': return s.web_engine === 'brave' ? 'Web: Brave' : 'Web: DuckDuckGo';
         case 'grocery': return grocery.custom.length ? `${grocery.custom.length} added by you` : '';
+        case 'logs': {
+            const errors = activityLog.filter(e => e.level === 'error' && Date.now() - e.t < 864e5).length;
+            return errors ? `${errors} error${errors === 1 ? '' : 's'} today` : `${activityLog.length} entries`;
+        }
         case 'server': return isLocalMode() ? 'This phone only' : backendOnline ? 'Connected' : backendOnline === false ? 'Not reachable' : '';
         case 'updates': return updateInfo && updateInfo.update_available ? `v${updateInfo.latest} available` : serverInfo ? `v${serverInfo.version}` : '';
         default: return '';
@@ -1217,6 +1267,25 @@ const SETTINGS_RENDERERS = {
             h('div', { id: 'updateResult' }),
         ];
     },
+    logs() {
+        const list = h('div', { class: 'log-list', id: 'logList' });
+        renderLogList(list);
+        return [
+            ...settingsGroup('', [
+                settingsToggle('verbose_log', 'Detailed logging', { hint: 'Every request, download step and timing' }),
+                settingsButton('Share log', () => shareLog(false)),
+                settingsButton('Copy log', () => shareLog(true)),
+                settingsButton('Clear log', () => {
+                    if (!confirm('Clear the activity log?')) return;
+                    activityLog = [];
+                    try { localStorage.removeItem(LOG_KEY); } catch (e) { /* ignore */ }
+                    renderSettings();
+                }, 'danger'),
+            ], 'Shows what Nourish is doing, step by step. If something goes wrong, tap Share log and send it. API keys and tokens are never included.'),
+            h('div', { class: 'settings-group-label', text: 'Latest first' }),
+            list,
+        ];
+    },
     data() {
         return [
             ...settingsGroup('Your data', [
@@ -1228,6 +1297,59 @@ const SETTINGS_RENDERERS = {
         ];
     },
 };
+
+// === ACTIVITY LOG PAGE ===
+const LOG_LEVEL_LABEL = { error: 'ERROR', warn: 'WARN', info: 'INFO', debug: 'DEBUG' };
+
+function logLine(e) {
+    const d = new Date(e.t);
+    const time = `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour12: false })}`;
+    return `${time} ${LOG_LEVEL_LABEL[e.level] || e.level} [${e.area}] ${e.msg}${e.details ? '\n    ' + e.details : ''}`;
+}
+
+function renderLogList(box) {
+    const recent = activityLog.slice(-400).reverse();
+    setChildren(box, recent.length ? recent.map(e => h('div', { class: `log-entry log-${e.level}` },
+        h('div', { class: 'log-head' },
+            h('span', { class: 'log-time', text: new Date(e.t).toLocaleTimeString(undefined, { hour12: false }) }),
+            h('span', { class: 'log-area', text: e.area }),
+            h('span', { class: 'log-level', text: LOG_LEVEL_LABEL[e.level] || e.level })),
+        h('div', { class: 'log-msg', text: e.msg }),
+        e.details ? h('div', { class: 'log-details', text: e.details }) : null))
+        : h('p', { class: 'settings-note', text: 'Nothing logged yet.' }));
+}
+
+// Called by nlog() for each new entry: keeps the open log page live.
+function onLogEntry() {
+    const box = document.getElementById('logList');
+    if (box && settingsPage === 'logs') {
+        clearTimeout(onLogEntry.timer);
+        onLogEntry.timer = setTimeout(() => renderLogList(box), 300);
+    }
+}
+
+async function logReport() {
+    const lines = [`Nourish activity log · ${new Date().toISOString()}`,
+        `App: ${(serverInfo && serverInfo.version) || '?'} · ${isLocalMode() ? 'phone-only mode' : IN_PHONE_APP ? 'phone app (PC mode)' : 'browser'}`,
+        `Device: ${navigator.userAgent}`,
+        `AI: ${PROVIDERS[settings.active_provider]} · ${settings[`${settings.active_provider}_model`] || 'auto'} · creativity ${settings.temperature}`];
+    if (isLocalMode() && typeof getSpecs === 'function') {
+        try {
+            const sp = await getSpecs();
+            lines.push(`Phone: ${sp.device} · RAM ${Math.round(sp.ram / 1048576)} MB · usable ${Math.round((sp.usable || 0) / 1048576)} MB · free ${Math.round((sp.disk_free || 0) / 1048576)} MB · ${sp.os || "OS ?"} · ${sp.thermal || "?"}`);
+        } catch (e) { lines.push(`Phone: unknown (${e.message})`); }
+    }
+    lines.push('', ...activityLog.map(logLine));
+    return redactSecrets(lines.join('\n'));
+}
+
+async function shareLog(copyOnly) {
+    const text = await logReport();
+    if (!copyOnly && navigator.share) {
+        try { await navigator.share({ title: 'Nourish activity log', text }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    copyText(text).then(() => showToast('Log copied — paste it into a message', false), () => showToast("Couldn't copy the log on this device"));
+}
 
 function renderModelControl(refresh = false) {
     const box = $('modelControl');
@@ -1914,6 +2036,8 @@ async function runPlanJob(job, resume = null) {
     const origin = resume ? resume.origin : job.origin;
     const kind = resume ? resume.kind || 'plan' : job.kind;
     const busyText = kind === 'edit' ? 'Updating your plan…' : 'Cooking your meal plan…';
+    const jobStarted = Date.now();
+    nlog('plan', `${kind === 'edit' ? 'Changing the plan' : 'Making a plan'} (from ${origin}) with ${PROVIDERS[settings.active_provider]} · ${settings[`${settings.active_provider}_model`] || 'auto'}`);
     try {
         let parsed;
         const onPhone = !resume && settings.active_provider === 'local';
@@ -1962,9 +2086,11 @@ async function runPlanJob(job, resume = null) {
         } else {
             applyPlan(parsed);
         }
+        nlog('plan', `Done in ${Math.round((Date.now() - jobStarted) / 1000)} s: ${daysData.length} days`);
         showJobBar(null);
     } catch (err) {
         const message = (err && err.message) || 'unknown error';
+        nlog('plan', err && err.cancelled ? 'Cancelled' : `Failed after ${Math.round((Date.now() - jobStarted) / 1000)} s: ${message}`, err && err.stack, err && err.cancelled ? 'info' : 'error');
         if (err && err.cancelled) { showJobBar(null); showToast(kind === 'edit' ? 'Change cancelled' : 'Meal plan cancelled', false); }
         else if (origin === 'chat') { showJobBar(null); chatError = kind === 'edit' ? `Couldn't change the plan: ${message}` : `Couldn't make the plan: ${message}`; }
         else showJobBar('error', kind === 'edit' ? `Couldn't swap the meal: ${message}` : `Couldn't make the plan: ${message}`);
@@ -2171,6 +2297,7 @@ async function sendChat(text) {
     if (!text || chatBusy) return;
     const intent = chatIntent(text);
     if (intent && planJob) { showToast('The chef is already working on your plan'); return; }
+    nlog('chat', `Message sent (${text.length} characters) → ${intent ? (intent === 'create' ? 'make a plan' : 'change the plan') : 'chat reply'}`);
     const input = $('chatInput');
     input.value = '';
     autoGrow(input);
@@ -2209,6 +2336,7 @@ async function requestChatReply(resume = null) {
         addAssistantMessage(extractText(pending.provider, data).trim() || '(The AI sent an empty reply.)');
     } catch (err) {
         chatError = (err && err.message) || 'Something went wrong';
+        nlog('chat', `Reply failed: ${chatError}`, null, 'error');
     } finally {
         unstore('nourish_pending_chat');
         chatBusy = false;

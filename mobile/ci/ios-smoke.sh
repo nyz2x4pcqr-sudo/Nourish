@@ -62,9 +62,20 @@ NEW=$(tail -n +"$((BEFORE + 1))" "$LOG"); echo "Server saw:"; echo "$NEW" | grep
 echo "$NEW" | grep -q '"GET /app.js' || fail "app.js never loaded"
 echo "$NEW" | grep -q '"GET /api/info' || fail "the app's JavaScript never called the server"
 
-echo "== 4. On-device AI through the app's own code"
-mkdir -p "$DATA/Library/Application Support/models"
-cp "$GITHUB_WORKSPACE/test-model.gguf" "$DATA/Library/Application Support/models/test-model.gguf"
+echo "== 4. Download a real model from Hugging Face through the app (following its redirects)"
+probe "const done = new Promise((ok, bad) => nativeOn('download', e => {
+    if (e.file !== 'test-model.gguf') return;
+    if (e.state === 'done') ok(e); else if (e.state === 'error' || e.state === 'cancelled') bad(new Error(e.error || e.state));
+  }));
+  await nativeCall('download', { url: 'https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf?download=true',
+    file: 'test-model.gguf', size: 105454432, auth: 'hf' });
+  const e = await done; return JSON.stringify(e);" 300
+python3 -c "
+import json; r = json.load(open('$PROBE')); assert r['ok'], r; e = json.loads(r['value'])
+assert e['state'] == 'done' and e['received'] == 105454432, e
+print('Downloaded through the app:', e['received'], 'bytes')" || fail "model download through the app failed"
+
+echo "== 5. On-device AI through the app's own code"
 probe "const r = await nativeCall('generate', { model: 'test-model.gguf', grammar: GBNF_DAY, temperature: 0.7, max_tokens: 900, n_ctx: 2048, gpu: false,
   messages: [{ role: 'system', content: 'You are a meal-planning chef. Reply with JSON only.' }, { role: 'user', content: 'Plan Day 1 (Monday): breakfast, lunch and dinner.' }] }, { timeoutMs: 0 });
   const models = await nativeCall('models', {}); return JSON.stringify({ text: r.text, models: models.files });" 300

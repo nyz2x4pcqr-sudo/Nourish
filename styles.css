@@ -801,3 +801,16 @@ a.settings-button { display: flex; text-decoration: none; }
 .live-note { display: flex; align-items: center; gap: 8px; margin: -4px 4px -10px; font-size: 0.85rem; color: var(--text-3); }
 .live-note > span:nth-child(2) { flex: 1; }
 .live-note svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+
+/* ---------- Activity log ---------- */
+.log-list { display: flex; flex-direction: column; gap: 6px; }
+.log-entry { padding: 8px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); font-size: 0.8rem; overflow-wrap: anywhere; }
+.log-head { display: flex; gap: 8px; color: var(--text-3); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.72rem; }
+.log-area { color: var(--accent); }
+.log-level { margin-left: auto; }
+.log-msg { margin-top: 2px; color: var(--text); }
+.log-details { margin-top: 4px; color: var(--text-3); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.72rem; white-space: pre-wrap; max-height: 9em; overflow: auto; }
+.log-error { border-color: rgba(255, 90, 95, 0.5); }
+.log-error .log-level { color: var(--danger); font-weight: 700; }
+.log-warn .log-level { color: #C98A12; font-weight: 700; }
+.log-debug { opacity: 0.85; }

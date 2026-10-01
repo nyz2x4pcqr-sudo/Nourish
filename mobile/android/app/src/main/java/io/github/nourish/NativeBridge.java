@@ -101,6 +101,15 @@ final class NativeBridge {
         main.post(() -> web.evaluateJavascript(js, null));
     }
 
+    /** A line for Settings → Activity log in the app (also written to logcat). */
+    void log(String message, String level) {
+        android.util.Log.i("Nourish", message);
+        String js = "window.__nourishNativeLog && window.__nourishNativeLog(" + JSONObject.quote(message) + "," + JSONObject.quote(level) + ")";
+        main.post(() -> web.evaluateJavascript(js, null));
+    }
+
+    private final Map<String, String> downloadErrors = new ConcurrentHashMap<>();
+
     private void event(String name, JSONObject payload) {
         String js = "window.__nourishNativeEvent && window.__nourishNativeEvent(" + JSONObject.quote(name) + "," + payload + ")";
         main.post(() -> web.evaluateJavascript(js, null));
@@ -298,6 +307,8 @@ final class NativeBridge {
         try {
             JSONObject o = new JSONObject().put("file", file).put("received", got).put("total", total).put("state", state);
             if (error != null) o.put("error", error);
+            if ("error".equals(state)) downloadErrors.put(file, error == null ? "error" : error);
+            if ("done".equals(state)) downloadErrors.remove(file);
             event("download", o);
         } catch (Exception ignored) {
         }
@@ -307,23 +318,32 @@ final class NativeBridge {
         File part = new File(modelsDir(), file + ".part");
         File done = new File(modelsDir(), file);
         long have = part.exists() ? part.length() : 0;   // resume where a previous try stopped
+        long startedAt = System.currentTimeMillis();
+        log("Download " + file + ": GET " + start.getHost() + start.getPath() + (have > 0 ? " (resuming from " + have + " bytes)" : "")
+                + (prefs().getString(KEY_HF_TOKEN, null) != null ? " with Hugging Face sign-in" : ""), "info");
         try {
             URL url = start;
             HttpURLConnection c = null;
             for (int hop = 0; hop < 6; hop++) {
-                c = open(url, "GET", null, "hf", true, 30000);
+                // Downloads only start at huggingface.co (checked above); its redirects go to its own
+                // download servers, which must stay https. The token is only ever sent to huggingface.co.
+                if (!"https".equals(url.getProtocol())) throw new Exception("The download was redirected to an insecure address (" + url.getHost() + ").");
+                c = open(url, "GET", null, "hf", false, 30000);
                 if (have > 0) c.setRequestProperty("Range", "bytes=" + have + "-");
                 int status = c.getResponseCode();
                 String location = c.getHeaderField("Location");
                 if (status >= 300 && status < 400 && location != null) {
-                    url = new URL(url, location);
+                    URL next = new URL(url, location);
+                    log("Download " + file + ": HTTP " + status + " → redirected to " + next.getHost(), "info");
+                    url = next;
                     c.disconnect();
                     c = null;
                     continue;
                 }
+                log("Download " + file + ": server answered HTTP " + status + " from " + url.getHost() + ", size " + c.getContentLengthLong() + " bytes", status >= 300 ? "warn" : "info");
                 if (status == 401 || status == 403) throw new Exception("Hugging Face refused the download. This model may need you to sign in and accept its licence.");
                 if (status == 416) { have = 0; part.delete(); c.disconnect(); c = null; url = start; continue; }
-                if (status >= 400) throw new Exception("Download failed (HTTP " + status + ")");
+                if (status >= 300) throw new Exception("Download failed (HTTP " + status + (location != null ? ", sent to " + new URL(url, location).getHost() : "") + ")");
                 if (status == 200) have = 0;   // server ignored the resume request
                 break;
             }
@@ -354,8 +374,11 @@ final class NativeBridge {
             if (expected > 0 && part.length() != expected) throw new Exception("The download was incomplete. Tap Download to continue it.");
             if (!isGguf(part)) { part.delete(); throw new Exception("That file isn't a GGUF model."); }
             if (!part.renameTo(done)) throw new Exception("Couldn't save the model.");
+            long secs = Math.max(1, (System.currentTimeMillis() - startedAt) / 1000);
+            log("Download " + file + ": finished, " + done.length() + " bytes in " + secs + " s (" + (done.length() / secs / 1048576) + " MB/s)", "info");
             progress(file, done.length(), done.length(), "done", null);
         } catch (Exception e) {
+            log("Download " + file + ": failed after " + part.length() + " bytes: " + e.getMessage(), "error");
             progress(file, part.length(), expected, "error", e.getMessage());
         }
     }
@@ -382,8 +405,28 @@ final class NativeBridge {
         if (engine != 0 && key.equals(loadedKey)) return;
         unload();
         int threads = Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() - 2));
-        engine = Llm.load(model.getAbsolutePath(), nCtx, 0, threads);
+        long t0 = System.currentTimeMillis();
+        try {
+            engine = Llm.load(model.getAbsolutePath(), nCtx, 0, threads);
+        } catch (RuntimeException e) {
+            log("Loading " + model.getName() + " failed: " + e.getMessage(), "error");
+            throw e;
+        }
         loadedKey = key;
+        log("Loaded " + model.getName() + " in " + (System.currentTimeMillis() - t0) + " ms (" + threads + " threads, context " + nCtx + ")", "info");
+    }
+
+    /** Downloads a model straight away (used by the automated build test). Returns null or an error. */
+    String downloadNow(String url, String file, long size) {
+        try {
+            URL u = new URL(url);
+            if (!isHuggingFace(u)) return "not a Hugging Face address";
+            runDownload(u, safeName(file), size);
+        } catch (Exception e) {
+            return e.getMessage();
+        }
+        if (downloadErrors.containsKey(file)) return downloadErrors.get(file);
+        return new File(modelsDir(), file).exists() ? null : "the file wasn't saved";
     }
 
     /** Runs a model directly (also used by the automated build test). */

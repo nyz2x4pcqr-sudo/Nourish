@@ -1,7 +1,23 @@
 // Model ranking for the phone apps: each phone gets its own top-5 list that fits its memory.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { rankModels, assessModel, compareVersions, MODEL_CATALOG, stripThinking } = require('../ondevice.js');
+const { rankModels: rank, assessModel, compareVersions, stripThinking } = require('../ondevice.js');
+
+// Sample models for the ranking tests (the app itself always builds its list live from Hugging Face).
+const MODEL_CATALOG = [
+    { id: 'qwen35-08b', name: 'Qwen 3.5 0.8B', repo: 'unsloth/Qwen3.5-0.8B-GGUF', file: 'Qwen3.5-0.8B-Q4_K_M.gguf', size: 532517120, params: 0.8, quality: 3, blurb: 'Tiny and quick. Simple meals; may repeat itself.' },
+    { id: 'llama32-1b', name: 'Llama 3.2 1B', repo: 'bartowski/Llama-3.2-1B-Instruct-GGUF', file: 'Llama-3.2-1B-Instruct-Q4_K_M.gguf', size: 807694464, params: 1.2, quality: 3.5, blurb: 'Small, fast, runs on almost any phone.' },
+    { id: 'qwen25-15b', name: 'Qwen 2.5 1.5B', repo: 'bartowski/Qwen2.5-1.5B-Instruct-GGUF', file: 'Qwen2.5-1.5B-Instruct-Q4_K_M.gguf', size: 986048768, params: 1.5, quality: 4.5, blurb: 'Good balance for older phones.' },
+    { id: 'qwen35-2b', name: 'Qwen 3.5 2B', repo: 'unsloth/Qwen3.5-2B-GGUF', file: 'Qwen3.5-2B-Q4_K_M.gguf', size: 1280835840, params: 2, quality: 5.5, blurb: 'Quick, with sensible, varied meals.' },
+    { id: 'llama32-3b', name: 'Llama 3.2 3B', repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF', file: 'Llama-3.2-3B-Instruct-Q4_K_M.gguf', size: 2019377696, params: 3.2, quality: 6, blurb: 'Reliable all-rounder.' },
+    { id: 'qwen3-4b-2507', name: 'Qwen 3 4B Instruct', repo: 'unsloth/Qwen3-4B-Instruct-2507-GGUF', file: 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf', size: 2497281120, params: 4, quality: 7.5, blurb: 'Great recipes and chat; answers straight away.' },
+    { id: 'qwen35-4b', name: 'Qwen 3.5 4B', repo: 'unsloth/Qwen3.5-4B-GGUF', file: 'Qwen3.5-4B-Q4_K_M.gguf', size: 2740937888, params: 4, quality: 7.5, blurb: 'Newer and smart; thinks before chat answers, so replies take longer.' },
+    { id: 'gemma4-e2b', name: 'Gemma 4 E2B', repo: 'unsloth/gemma-4-E2B-it-GGUF', file: 'gemma-4-E2B-it-Q4_K_M.gguf', size: 3106738272, params: 2.3, quality: 6.5, blurb: "Google's phone-sized model. Fast for its size." },
+    { id: 'gemma4-e4b', name: 'Gemma 4 E4B', repo: 'unsloth/gemma-4-E4B-it-GGUF', file: 'gemma-4-E4B-it-Q4_K_M.gguf', size: 4977171584, params: 4.5, quality: 8, blurb: "Google's best phone model. Excellent food knowledge." },
+    { id: 'qwen35-9b', name: 'Qwen 3.5 9B', repo: 'unsloth/Qwen3.5-9B-GGUF', file: 'Qwen3.5-9B-Q4_K_M.gguf', size: 5680522464, params: 9, quality: 9, blurb: 'Closest to a PC model. For phones with lots of memory.' },
+];
+
+const rankModels = specs => rank(specs, MODEL_CATALOG);
 
 const GB = 1024 ** 3;
 const phones = {

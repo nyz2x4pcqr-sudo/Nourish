@@ -43,6 +43,11 @@ final class NativeBridge: NSObject {
         call("window.__nourishNativeReply && window.__nourishNativeReply.apply(null, \(Self.json([id, ok, payload])))")
     }
 
+    /// A line for Settings → Activity log in the app.
+    func log(_ message: String, level: String = "info") {
+        call("window.__nourishNativeLog && window.__nourishNativeLog.apply(null, \(Self.json([message, level])))")
+    }
+
     func event(_ name: String, _ payload: [String: Any]) {
         call("window.__nourishNativeEvent && window.__nourishNativeEvent.apply(null, \(Self.json([name, payload])))")
     }
@@ -287,7 +292,8 @@ final class NativeBridge: NSObject {
         let expected = (a["size"] as? NSNumber)?.int64Value ?? -1
         DispatchQueue.main.sync {
             downloads[file]?.cancel()
-            let d = ModelDownload(url: url, file: file, expected: expected, token: UserDefaults.standard.string(forKey: Self.tokenKey)) { [weak self] payload, finished in
+            let d = ModelDownload(url: url, file: file, expected: expected, token: UserDefaults.standard.string(forKey: Self.tokenKey),
+                                  log: { [weak self] msg, level in self?.log(msg, level: level) }) { [weak self] payload, finished in
                 self?.event("download", payload)
                 if finished {
                     DispatchQueue.main.async {
@@ -311,7 +317,19 @@ final class NativeBridge: NSObject {
         let messages: [(role: String, content: String)] = (a["messages"] as? [[String: Any]] ?? []).map {
             (role: $0["role"] as? String ?? "user", content: $0["content"] as? String ?? "")
         }
-        try engine.ensureLoaded(path: model.path, nCtx: a["n_ctx"] as? Int ?? 4096, gpu: a["gpu"] as? Bool ?? true)
+        let loadStart = Date()
+        let wasLoaded = engine.isLoaded(path: model.path)
+        do {
+            try engine.ensureLoaded(path: model.path, nCtx: a["n_ctx"] as? Int ?? 4096, gpu: a["gpu"] as? Bool ?? true)
+        } catch {
+            log("Loading \(model.lastPathComponent) failed: \(error.localizedDescription) (memory available: \(os_proc_available_memory() / 1_048_576) MB)", level: "error")
+            throw error
+        }
+        if !wasLoaded {
+            log(String(format: "Loaded %@ in %.1f s (memory still available: %ld MB)", model.lastPathComponent, Date().timeIntervalSince(loadStart), os_proc_available_memory() / 1_048_576))
+        }
+        let genStart = Date()
+        defer { log(String(format: "Generated in %.1f s%@", Date().timeIntervalSince(genStart), engine.cancelRequested ? " (cancelled)" : ""), level: "debug") }
         let text = try engine.generate(messages: messages, grammar: a["grammar"] as? String,
                                        temperature: Float(a["temperature"] as? Double ?? 0.7), maxTokens: a["max_tokens"] as? Int ?? 1024)
         return ["text": text, "cancelled": engine.cancelRequested]
@@ -325,7 +343,9 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
     private let expected: Int64
     private let token: String?
     private let report: ([String: Any], Bool) -> Void
+    private let log: (String, String) -> Void
     private var session: URLSession?
+    private var startedAt = Date()
     private var handle: FileHandle?
     private var received: Int64 = 0
     private var total: Int64 = -1
@@ -336,11 +356,12 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
     private var partURL: URL { NativeBridge.modelsDir.appendingPathComponent(file + ".part") }
     private var finalURL: URL { NativeBridge.modelsDir.appendingPathComponent(file) }
 
-    init(url: URL, file: String, expected: Int64, token: String?, report: @escaping ([String: Any], Bool) -> Void) {
+    init(url: URL, file: String, expected: Int64, token: String?, log: @escaping (String, String) -> Void, report: @escaping ([String: Any], Bool) -> Void) {
         self.url = url
         self.file = file
         self.expected = expected
         self.token = token
+        self.log = log
         self.report = report
         super.init()
     }
@@ -350,6 +371,8 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
         var req = URLRequest(url: url)
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if received > 0 { req.setValue("bytes=\(received)-", forHTTPHeaderField: "Range") }
+        startedAt = Date()
+        log("Download \(file): GET \(url.host ?? "?")\(url.path)\(received > 0 ? " (resuming from \(received) bytes)" : "")\(token != nil ? " with Hugging Face sign-in" : "")", "info")
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 60
         session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
@@ -370,7 +393,13 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
     // Redirects (Hugging Face → its download servers): checked, and the token is never passed on.
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        guard let next = request.url, next.scheme == "https", NativeBridge.isPublicHost(next.host ?? "") else { return completionHandler(nil) }
+        // Downloads only start at huggingface.co, so follow its redirects to its download servers
+        // (they must stay https). The token is never passed on to them.
+        log("Download \(file): HTTP \(response.statusCode) → redirected to \(request.url?.host ?? "?")", "info")
+        guard let next = request.url, next.scheme == "https" else {
+            failure = "The download was redirected to an insecure address (\(request.url?.host ?? "?")), so it was stopped."
+            return completionHandler(nil)
+        }
         var req = request
         let host = next.host?.lowercased() ?? ""
         if !(host == "huggingface.co" || host.hasSuffix(".huggingface.co")) { req.setValue(nil, forHTTPHeaderField: "Authorization") }
@@ -380,6 +409,7 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        log("Download \(file): server answered HTTP \(status) from \(response.url?.host ?? "?"), size \(response.expectedContentLength) bytes", status >= 300 ? "warn" : "info")
         switch status {
         case 200, 206:
             if status == 200 { received = 0 }   // the server ignored the resume request: start over
@@ -399,7 +429,8 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
             failure = "The download had to restart. Tap Download again."
             completionHandler(.cancel)
         default:
-            failure = "Download failed (HTTP \(status))"
+            let location = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location").flatMap { URL(string: $0)?.host } ?? ""
+            failure = "Download failed (HTTP \(status)\(location.isEmpty ? "" : ", sent to " + location))"
             completionHandler(.cancel)
         }
     }
@@ -417,6 +448,7 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
         try? handle?.close()
         handle = nil
         session.finishTasksAndInvalidate()
+        if let error, !cancelled { log("Download \(file): connection error after \(received) bytes: \(error.localizedDescription)", "warn") }
         if cancelled { return send("cancelled") }
         if let failure { return send("error", failure) }
         if let error { return send("error", "\(error.localizedDescription) Tap Download to continue.") }
@@ -434,6 +466,8 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
             return send("error", "Couldn't save the model.")
         }
         received = size
+        let secs = max(Date().timeIntervalSince(startedAt), 0.1)
+        log(String(format: "Download %@: finished, %lld bytes in %.0f s (%.1f MB/s)", file, size, secs, Double(size) / secs / 1_048_576), "info")
         send("done")
     }
 }

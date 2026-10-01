@@ -192,8 +192,14 @@ public class MainActivity extends Activity implements NativeBridge.Host {
      * engine and writes the result to the log, so CI can check real on-device generation.
      */
     private void runSelfTest(String modelFile, String grammarFile) {
+        final String downloadUrl = getIntent().getStringExtra("selftest_download_url");
         new Thread(() -> {
             try {
+                if (downloadUrl != null) {
+                    String err = bridge.downloadNow(downloadUrl, modelFile, getIntent().getLongExtra("selftest_download_size", -1));
+                    if (err != null) { Log.e(TAG, "NOURISH_DOWNLOAD_FAIL " + err); Log.e(TAG, "NOURISH_SELFTEST_FAIL download: " + err); return; }
+                    Log.i(TAG, "NOURISH_DOWNLOAD_OK " + new File(bridge.modelsDir(), modelFile).length());
+                }
                 File model = new File(bridge.modelsDir(), modelFile);
                 String grammar = null;
                 if (grammarFile != null) {

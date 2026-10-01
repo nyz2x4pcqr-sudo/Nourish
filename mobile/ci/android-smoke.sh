@@ -41,11 +41,13 @@ echo "$NEW" | grep -q '"GET /api/info' || fail "the app's JavaScript never calle
 
 echo "== 3. On-device AI: a real model, the app's engine and the app's meal format"
 adb shell am force-stop $APP
-adb push test-model.gguf /data/local/tmp/test-model.gguf >/dev/null || fail "push model"
 adb push day.gbnf /data/local/tmp/day.gbnf >/dev/null || fail "push grammar"
-adb shell run-as $APP sh -c "'mkdir -p files/models && cp /data/local/tmp/test-model.gguf /data/local/tmp/day.gbnf files/models/'" || fail "copy model into the app"
+adb shell run-as $APP sh -c "'mkdir -p files/models && cp /data/local/tmp/day.gbnf files/models/'" || fail "copy grammar into the app"
 adb logcat -c
-adb shell am start -W -n $APP/io.github.nourish.MainActivity --ez local true --es selftest_model test-model.gguf --es selftest_grammar day.gbnf
+# The app downloads the model from Hugging Face itself (following its redirects), then runs it.
+adb shell am start -W -n $APP/io.github.nourish.MainActivity --ez local true --es selftest_model test-model.gguf --es selftest_grammar day.gbnf \
+  --es selftest_download_url "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf?download=true" \
+  --el selftest_download_size 105454432
 RESULT=""
 # The emulator has no fast maths instructions, so even a tiny model takes minutes here.
 for i in $(seq 1 150); do
@@ -53,6 +55,8 @@ for i in $(seq 1 150); do
   [ -n "$RESULT" ] && break
   sleep 5
 done
+adb logcat -d -s Nourish:* | grep -E "Download|NOURISH_DOWNLOAD" | head -n 20
+adb logcat -d -s Nourish:* | grep -q NOURISH_DOWNLOAD_OK || fail "model download through the app failed"
 echo "$RESULT" | cut -c1-600
 echo "$RESULT" | grep -q NOURISH_SELFTEST_OK || fail "on-device generation failed or timed out"
 echo "$RESULT" | sed 's/.*NOURISH_SELFTEST_OK //' > shots/android-selftest.json

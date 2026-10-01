@@ -22,12 +22,19 @@ function nativeAvailable() {
 function nativeCall(cmd, args = {}, { timeoutMs = 60000 } = {}) {
     if (!nativeAvailable()) return Promise.reject(new Error('This needs the Nourish phone app.'));
     const id = String(++nativeSeq);
+    const started = Date.now();
+    if (cmd !== 'http') logNative(`→ ${cmd}`, summarizeArgs(cmd, args));
     return new Promise((resolve, reject) => {
         const timer = timeoutMs ? setTimeout(() => {
             delete nativePending[id];
+            logNative(`✗ ${cmd} timed out after ${timeoutMs} ms`, null, 'warn');
             reject(new Error('The phone took too long to answer.'));
         }, timeoutMs) : null;
-        nativePending[id] = { resolve, reject, timer };
+        nativePending[id] = {
+            resolve: v => { if (cmd !== 'http') logNative(`← ${cmd} ok (${Date.now() - started} ms)`, cmd === 'specs' || cmd === 'models' ? v : null); resolve(v); },
+            reject: e => { logNative(`✗ ${cmd} failed (${Date.now() - started} ms): ${e.message}`, null, 'warn'); reject(e); },
+            timer,
+        };
         try {
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nourishNative) {
                 window.webkit.messageHandlers.nourishNative.postMessage({ id, cmd, args });
@@ -55,6 +62,20 @@ nativeRoot.__nourishNativeReply = (id, ok, payload) => {
 nativeRoot.__nourishNativeEvent = (name, payload) => {
     (nativeListeners[name] || []).forEach(fn => { try { fn(payload); } catch (e) { /* keep going */ } });
 };
+function logNative(msg, details, level = 'debug') {
+    if (typeof nlog === 'function') nlog('phone', msg, details, level);
+}
+
+// What a bridge call was asked to do, without the long or secret parts.
+function summarizeArgs(cmd, a) {
+    if (cmd === 'generate') return { model: a.model, messages: (a.messages || []).length, chars: (a.messages || []).reduce((n, m) => n + (m.content || '').length, 0), grammar: !!a.grammar, max_tokens: a.max_tokens, n_ctx: a.n_ctx, gpu: a.gpu };
+    if (cmd === 'hfToken') return { action: a.action };
+    return a;
+}
+
+// Native code reports its own steps (download redirects, model loading…) as "log" events.
+nativeRoot.__nourishNativeLog = (msg, level) => logNative(msg, null, level || 'info');
+
 function nativeOn(name, fn) {
     if (!nativeListeners[name]) nativeListeners[name] = [];
     nativeListeners[name].push(fn);
@@ -78,7 +99,15 @@ async function nativeHttp(url, { method = 'GET', headers = {}, body, form, auth,
 }
 
 async function nativeJSON(url, opts = {}) {
-    const res = await nativeHttp(url, opts);
+    const started = Date.now();
+    let res;
+    try {
+        res = await nativeHttp(url, opts);
+    } catch (e) {
+        if (typeof nlog === 'function') nlog('web', `${opts.method || 'GET'} ${url.split('?')[0]} failed: ${e.message}`, null, 'warn');
+        throw e;
+    }
+    if (typeof nlog === 'function') nlog('web', `${opts.method || 'GET'} ${url.length > 160 ? url.slice(0, 160) + '…' : url} → ${res.status} (${Date.now() - started} ms, ${(res.body || '').length} bytes)`, null, res.status >= 400 ? 'warn' : 'debug');
     let data = null;
     try { data = JSON.parse(res.body || 'null'); } catch (e) { /* not JSON */ }
     if (res.status >= 400) {
@@ -175,6 +204,7 @@ async function callCloud(req) {
 async function runOnDevice(req, id) {
     if (!req.model) throw new Error('Download a model first: Settings → AI model.');
     if (on('keep_awake')) nativeCall('keepAwake', { on: true }).catch(() => {});
+    const started = Date.now();
     try {
         const res = await nativeCall('generate', {
             id, model: req.model, messages: req.messages, grammar: req.grammar || null,
@@ -182,7 +212,9 @@ async function runOnDevice(req, id) {
             n_ctx: Number(settings.local_ctx) || 4096, gpu: on('local_gpu'),
         }, { timeoutMs: 0 });
         if (res && res.cancelled) { const e = new Error('Cancelled'); e.cancelled = true; throw e; }
-        return stripThinking((res && res.text) || '');
+        const text = (res && res.text) || '';
+        if (typeof nlog === 'function') nlog('ai', `${req.model}: ${text.length} characters in ${((Date.now() - started) / 1000).toFixed(1)} s${req.grammar ? ' (structured)' : ''}`, text.slice(0, 300), 'debug');
+        return stripThinking(text);
     } finally {
         if (on('keep_awake')) nativeCall('keepAwake', { on: false }).catch(() => {});
     }
@@ -427,7 +459,12 @@ function compareVersions(a, b) {
 // === THE PHONE ITSELF ===
 let specsCache = null;
 async function getSpecs(refresh = false) {
-    if (!specsCache || refresh) specsCache = await nativeCall('specs', {}, { timeoutMs: 10000 });
+    if (!specsCache || refresh) {
+        specsCache = await nativeCall('specs', {}, { timeoutMs: 10000 });
+        if (typeof nlog === 'function') {
+            nlog('phone', `${specsCache.device}: ${formatBytes(specsCache.ram)} RAM, app may use ${formatBytes(specsCache.usable)} → model budget ${formatBytes(memoryBudget(specsCache))}; ${formatBytes(specsCache.disk_free)} free; ${specsCache.thermal}; ${specsCache.os}`);
+        }
+    }
     return specsCache;
 }
 
@@ -454,21 +491,6 @@ function bandwidthGBs(specs) {
     return ram >= 11 ? 50 : ram >= 7.5 ? 38 : ram >= 5.5 ? 26 : 15;
 }
 
-// Curated starting points: real files on Hugging Face, all downloadable without an account.
-// quality: 1–10, how well it follows recipes and the plan format in our tests and published results.
-const MODEL_CATALOG = [
-    { id: 'qwen35-08b', name: 'Qwen 3.5 0.8B', repo: 'unsloth/Qwen3.5-0.8B-GGUF', file: 'Qwen3.5-0.8B-Q4_K_M.gguf', size: 532517120, params: 0.8, quality: 3, blurb: 'Tiny and quick. Simple meals; may repeat itself.' },
-    { id: 'llama32-1b', name: 'Llama 3.2 1B', repo: 'bartowski/Llama-3.2-1B-Instruct-GGUF', file: 'Llama-3.2-1B-Instruct-Q4_K_M.gguf', size: 807694464, params: 1.2, quality: 3.5, blurb: 'Small, fast, runs on almost any phone.' },
-    { id: 'qwen25-15b', name: 'Qwen 2.5 1.5B', repo: 'bartowski/Qwen2.5-1.5B-Instruct-GGUF', file: 'Qwen2.5-1.5B-Instruct-Q4_K_M.gguf', size: 986048768, params: 1.5, quality: 4.5, blurb: 'Good balance for older phones.' },
-    { id: 'qwen35-2b', name: 'Qwen 3.5 2B', repo: 'unsloth/Qwen3.5-2B-GGUF', file: 'Qwen3.5-2B-Q4_K_M.gguf', size: 1280835840, params: 2, quality: 5.5, blurb: 'Quick, with sensible, varied meals.' },
-    { id: 'llama32-3b', name: 'Llama 3.2 3B', repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF', file: 'Llama-3.2-3B-Instruct-Q4_K_M.gguf', size: 2019377696, params: 3.2, quality: 6, blurb: 'Reliable all-rounder.' },
-    { id: 'qwen3-4b-2507', name: 'Qwen 3 4B Instruct', repo: 'unsloth/Qwen3-4B-Instruct-2507-GGUF', file: 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf', size: 2497281120, params: 4, quality: 7.5, blurb: 'Great recipes and chat; answers straight away.' },
-    { id: 'qwen35-4b', name: 'Qwen 3.5 4B', repo: 'unsloth/Qwen3.5-4B-GGUF', file: 'Qwen3.5-4B-Q4_K_M.gguf', size: 2740937888, params: 4, quality: 7.5, blurb: 'Newer and smart; thinks before chat answers, so replies take longer.' },
-    { id: 'gemma4-e2b', name: 'Gemma 4 E2B', repo: 'unsloth/gemma-4-E2B-it-GGUF', file: 'gemma-4-E2B-it-Q4_K_M.gguf', size: 3106738272, params: 2.3, quality: 6.5, blurb: "Google's phone-sized model. Fast for its size." },
-    { id: 'gemma4-e4b', name: 'Gemma 4 E4B', repo: 'unsloth/gemma-4-E4B-it-GGUF', file: 'gemma-4-E4B-it-Q4_K_M.gguf', size: 4977171584, params: 4.5, quality: 8, blurb: "Google's best phone model. Excellent food knowledge." },
-    { id: 'qwen35-9b', name: 'Qwen 3.5 9B', repo: 'unsloth/Qwen3.5-9B-GGUF', file: 'Qwen3.5-9B-Q4_K_M.gguf', size: 5680522464, params: 9, quality: 9, blurb: 'Closest to a PC model. For phones with lots of memory.' },
-];
-
 // Memory needed while running: the file, the conversation memory for ~4k words, and working space.
 function memoryNeeded(size, params) {
     const p = params || Math.max(0.5, size / (0.6 * GB));
@@ -491,7 +513,8 @@ function assessModel(model, specs) {
 }
 
 // The personal top-5 list: the best models that fit this phone, with tags.
-function rankModels(specs, models = MODEL_CATALOG) {
+function rankModels(specs, models) {
+    models = models || [];
     const rated = models.map(m => Object.assign({}, m, { a: assessModel(m, specs) }));
     const fits = rated.filter(m => m.a.fit !== 'too-big').sort((x, y) => y.a.score - x.a.score);
     const top = fits.slice(0, 5);
@@ -587,13 +610,21 @@ function compactCount(n) {
     return n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
 }
 
+function mlog(msg, details, level) {
+    if (typeof nlog === 'function') nlog('models', msg, details, level || 'info');
+}
+
 async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth: 'hf' }), force = false } = {}) {
     const budget = memoryBudget(specs);
     const bucket = Math.round(budget / GB * 2) / 2;
+    mlog(`Building the model list for ${specs.device || 'this phone'}: budget ${formatBytes(budget)}${force ? ' (refresh)' : ''}`);
     if (!force) {
         try {
             const cached = JSON.parse(localStorage.getItem(LIVE_CACHE_KEY) || 'null');
-            if (cached && cached.bucket === bucket && Date.now() - cached.at < LIVE_CACHE_MS && cached.models.length) return cached;
+            if (cached && cached.bucket === bucket && Date.now() - cached.at < LIVE_CACHE_MS && cached.models.length) {
+                mlog(`Using the list from ${Math.round((Date.now() - cached.at) / 60000)} min ago (${cached.models.length} models). Tap Refresh to ask Hugging Face again.`);
+                return cached;
+            }
         } catch (e) { /* no cache */ }
     }
     const q = 'filter=gguf&filter=conversational&direction=-1&full=false';
@@ -604,11 +635,17 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
     // Biggest model worth looking at: about what fits in this phone's memory at 4-bit.
     const maxParams = budget / (0.62 * GB);
     const seen = {};
+    const skipped = { unsuitable: 0, littleKnown: 0, tooBig: 0, gatedOrPrivate: 0 };
+    let total = 0;
     lists.forEach(list => (Array.isArray(list) ? list : []).forEach(r => {
+        total++;
         // Skip private, gated, unsuitable and little-known uploads (fewer than 2,000 downloads).
-        if (!r || !r.id || r.private || r.gated || HF_SKIP.test(r.id) || (r.downloads || 0) < 2000) return;
+        if (!r || !r.id) return;
+        if (r.private || r.gated) { skipped.gatedOrPrivate++; return; }
+        if (HF_SKIP.test(r.id)) { skipped.unsuitable++; return; }
+        if ((r.downloads || 0) < 2000) { skipped.littleKnown++; return; }
         const params = paramsFromName(r.id);
-        if (params && params > maxParams * 1.15) return;
+        if (params && params > maxParams * 1.15) { skipped.tooBig++; return; }
         const key = baseKey(r);
         const entry = { id: r.id, params, downloads: r.downloads || 0, likes: r.likes || 0, created: r.lastModified || r.createdAt, key };
         if (!seen[key] || entry.downloads > seen[key].downloads) seen[key] = entry;
@@ -625,12 +662,22 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
         if (bands[band].length < [5, 5, 4, 3][band]) bands[band].push(r);
     });
     const pre = bands.reduce((a, b) => a.concat(b), []);
+    mlog(`Hugging Face returned ${total} results (${lists.map(l => (Array.isArray(l) ? l.length : 'error')).join(' + ')}); ${Object.keys(seen).length} different models kept`,
+        { skipped, biggestWorthChecking: `${maxParams.toFixed(1)}B parameters` });
+    mlog(`Checking file sizes for ${pre.length} candidates`, bands.map((b, i) => `${['small', 'medium', 'large', 'very large'][i]}: ${b.map(r => r.id).join(', ') || '—'}`).join('\n'), 'debug');
     if (!pre.length) throw new Error('Hugging Face returned no suitable models.');
 
     const picked = await mapLimit(pre, 4, async r => {
-        const tree = await fetchJSON(`${HF_API}/${r.id}/tree/main`);
+        let tree;
+        try {
+            tree = await fetchJSON(`${HF_API}/${r.id}/tree/main`);
+        } catch (e) {
+            mlog(`${r.id}: couldn't list files (${e.message})`, null, 'warn');
+            return null;
+        }
         const f = pickQuant(tree, r.params, specs);
-        if (!f) return null;
+        if (!f) { mlog(`${r.id}: no version fits this phone`, null, 'debug'); return null; }
+        mlog(`${r.id}: ${f.file} (${formatBytes(f.size)}, ${f.quant})`, null, 'debug');
         const params = r.params || Math.max(0.3, f.size / (0.6 * GB));
         return {
             id: 'hf:' + r.id + '/' + f.file, name: prettyModelName(r.id), repo: r.id, file: f.file, size: f.size, params,
@@ -643,13 +690,9 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
         };
     });
     const models = picked.filter(Boolean);
-    // Hugging Face's lists change daily; if few fit this phone, add Nourish's tested picks that do.
-    const fitting = models.filter(m => assessModel(m, specs).fit !== 'too-big');
-    if (fitting.length < 5) {
-        MODEL_CATALOG.filter(c => assessModel(c, specs).fit !== 'too-big' && !models.some(m => baseKey({ id: m.repo }) === baseKey({ id: c.repo })))
-            .slice(0, 5 - fitting.length).forEach(c => models.push(Object.assign({}, c, { blurb: c.blurb + ' (Nourish pick)' })));
-    }
     if (!models.length) throw new Error('None of the models found on Hugging Face fit this phone.');
+    const top = rankModels(specs, models).top;
+    mlog(`Top ${top.length} for this phone: ${top.map((m, i) => `${i + 1}. ${m.name} (${formatBytes(m.size)}, ${m.a.fit}${m.tags.length ? ', ' + m.tags.map(t => t[0]).join('/') : ''})`).join('; ')}`);
     const result = { at: Date.now(), bucket, models };
     try { localStorage.setItem(LIVE_CACHE_KEY, JSON.stringify(result)); } catch (e) { /* not cached */ }
     return result;
@@ -670,6 +713,13 @@ function isDownloaded(file) {
 
 nativeOn('download', ev => {
     if (!ev || !ev.file) return;
+    const prev = downloads[ev.file];
+    const pctNow = ev.total ? Math.floor(ev.received / ev.total * 10) : 0;
+    if (!prev || prev.state !== ev.state || ev.state !== 'running') {
+        nlog('download', `${ev.file}: ${ev.state}${ev.error ? ' — ' + ev.error : ''} (${formatBytes(ev.received)} of ${formatBytes(ev.total)})`, null, ev.state === 'error' ? 'error' : 'info');
+    } else if (prev.total && Math.floor(prev.received / prev.total * 10) !== pctNow) {
+        nlog('download', `${ev.file}: ${pctNow * 10}% (${formatBytes(ev.received)})`, null, 'debug');
+    }
     downloads[ev.file] = ev;
     const bar = document.getElementById('dl-' + cssId(ev.file));
     if (bar && ev.state === 'running') {
@@ -699,6 +749,7 @@ async function startDownload(model) {
         return;
     }
     if (model.size > 1.5 * GB && !confirm(`Download ${model.name} (${formatBytes(model.size)})? Use Wi-Fi: it's a big file.`)) return;
+    nlog('download', `Starting ${model.repo}/${model.file} (${formatBytes(model.size)}); ${formatBytes(specs.disk_free)} free`);
     downloads[model.file] = { file: model.file, received: 0, total: model.size, state: 'running' };
     renderSettings();
     try {
@@ -864,7 +915,7 @@ function loadLiveModels(force) {
     if (settingsPage === 'ai') renderSettings();
     discoverModels(ondeviceState.specs, { force })
         .then(r => { ondeviceState.live = r; })
-        .catch(e => { ondeviceState.liveError = e.message; })
+        .catch(e => { ondeviceState.liveError = e.message; if (typeof nlog === 'function') nlog('models', `Couldn't build the list: ${e.message}`, e.stack, 'error'); })
         .then(() => { ondeviceState.liveBusy = false; if (settingsPage === 'ai') renderSettings(); });
 }
 
@@ -886,14 +937,14 @@ function renderOnDeviceSection() {
         setChildren(box, h('p', { class: 'settings-note', text: ondeviceState.error || 'Checking this phone…' }));
         return box;
     }
-    // The live list from Hugging Face; the built-in list only while it loads or when offline.
+    // The list is always built live from Hugging Face for this phone; there is no built-in list.
     const live = ondeviceState.live && ondeviceState.live.models.length ? ondeviceState.live : null;
-    const ranked = rankModels(specs, live ? live.models : MODEL_CATALOG);
+    const ranked = rankModels(specs, live ? live.models : []);
     const sourceNote = ondeviceState.liveBusy
-        ? 'Checking Hugging Face for the best models for this phone…'
+        ? 'Asking Hugging Face for the best models for this phone…'
         : live
             ? `Live from Hugging Face · ${new Date(live.at).toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' })}`
-            : `Couldn't reach Hugging Face${ondeviceState.liveError ? ' (' + ondeviceState.liveError + ')' : ''}, so this is Nourish's built-in list.`;
+            : `Couldn't reach Hugging Face${ondeviceState.liveError ? ' (' + ondeviceState.liveError + ')' : ''}. Check the internet connection and tap Retry.`;
     const hfInput = h('input', { type: 'password', class: 'settings-input', placeholder: 'hf_…', autocomplete: 'off', 'aria-label': 'Hugging Face token' });
     const searchInput = h('input', { type: 'search', class: 'settings-input', placeholder: 'e.g. qwen, llama, gemma', value: hfSearch.query, 'aria-label': 'Search Hugging Face',
         onkeydown: e => { if (e.key === 'Enter' && e.target.value.trim()) runHfSearch(e.target.value.trim()); } });
@@ -926,10 +977,10 @@ function renderOnDeviceSection() {
         h('div', { class: 'live-note' },
             ondeviceState.liveBusy ? h('span', { class: 'job-bar-spinner', 'aria-hidden': 'true' }) : icon(live ? 'i-globe' : 'i-book'),
             h('span', { text: sourceNote }),
-            ondeviceState.liveBusy ? null : h('button', { type: 'button', class: 'link-btn', onclick: () => loadLiveModels(true) }, 'Refresh')),
+            ondeviceState.liveBusy ? null : h('button', { type: 'button', class: 'link-btn', onclick: () => loadLiveModels(true) }, live ? 'Refresh' : 'Retry')),
         ranked.top.length
             ? h('div', { class: 'model-list' }, ranked.top.map(m => modelCard(m, specs)))
-            : h('p', { class: 'settings-note', text: 'None of the listed models fit in the memory this phone allows. Try searching for a smaller one below, or use a cloud AI.' }),
+            : h('p', { class: 'settings-note', text: ondeviceState.liveBusy ? 'Building your list…' : live ? 'None of the models found fit in the memory this phone allows. Try searching for a smaller one below, or use a cloud AI.' : 'No list yet.' }),
         ranked.more.length || ranked.tooBig.length ? h('button', { type: 'button', class: 'link-btn', onclick: () => { ondeviceState.showTooBig = !ondeviceState.showTooBig; renderSettings(); } },
             ondeviceState.showTooBig ? 'Hide other models' : `Show ${ranked.more.length + ranked.tooBig.length} other models`) : null,
         ondeviceState.showTooBig ? h('div', { class: 'model-list' }, ranked.more.concat(ranked.tooBig).map(m => modelCard(m, specs))) : null,
@@ -969,5 +1020,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, MODEL_CATALOG, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
+    module.exports = { discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
 }
