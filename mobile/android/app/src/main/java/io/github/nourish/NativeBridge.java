@@ -184,7 +184,8 @@ final class NativeBridge {
         for (InetAddress addr : InetAddress.getAllByName(url.getHost())) {
             boolean ula = addr instanceof Inet6Address && (addr.getAddress()[0] & 0xfe) == 0xfc;
             if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress() || addr.isSiteLocalAddress() || addr.isMulticastAddress() || ula) {
-                throw new SecurityException("That address points to a private network, so it was blocked");
+                throw new SecurityException(url.getHost() + " points to " + addr.getHostAddress()
+                        + ", a private or blocked address, so it was blocked. (An ad blocker, VPN or DNS filter can do this.)");
             }
         }
     }

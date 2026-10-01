@@ -189,33 +189,46 @@ final class NativeBridge: NSObject {
 
     // MARK: Web requests (home-network addresses blocked, every redirect checked)
 
-    static func isPublicHost(_ host: String) -> Bool {
+    /// nil when every address the host has is on the public internet; otherwise why not. A failed
+    /// lookup is retried (it can fail briefly on a flaky network) and reported as such, not as private.
+    static func hostProblem(_ host: String) -> String? {
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
         hints.ai_socktype = SOCK_STREAM
         var result: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, nil, &hints, &result) == 0, let first = result else { return false }
+        var rc: Int32 = -1
+        for attempt in 0..<3 {
+            rc = getaddrinfo(host, nil, &hints, &result)
+            if rc == 0 { break }
+            if attempt < 2 { Thread.sleep(forTimeInterval: 0.5 * Double(attempt + 1)) }
+        }
+        guard rc == 0, let first = result else {
+            return "Couldn't look up \(host) (\(String(cString: gai_strerror(rc)))). Check the internet connection."
+        }
         defer { freeaddrinfo(result) }
         for info in sequence(first: first, next: { $0.pointee.ai_next }) {
             guard let sa = info.pointee.ai_addr else { continue }
+            var name = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            getnameinfo(sa, info.pointee.ai_addrlen, &name, socklen_t(name.count), nil, 0, NI_NUMERICHOST)
+            let blocked = "\(host) points to \(String(cString: name)), a private or blocked address, so it was blocked. (An ad blocker, VPN or DNS filter can do this.)"
             if Int32(sa.pointee.sa_family) == AF_INET {
                 let raw = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr }
-                if !isPublicV4(UInt32(bigEndian: raw)) { return false }
+                if !isPublicV4(UInt32(bigEndian: raw)) { return blocked }
             } else if Int32(sa.pointee.sa_family) == AF_INET6 {
                 let bytes: [UInt8] = sa.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { p in
                     var addr = p.pointee.sin6_addr
                     return withUnsafeBytes(of: &addr) { Array($0) }
                 }
-                if bytes.allSatisfy({ $0 == 0 }) || (bytes[0..<15].allSatisfy({ $0 == 0 }) && bytes[15] == 1) { return false }   // :: and ::1
-                if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80 { return false }   // link-local
-                if (bytes[0] & 0xfe) == 0xfc || bytes[0] == 0xff { return false }      // private, multicast
+                if bytes.allSatisfy({ $0 == 0 }) || (bytes[0..<15].allSatisfy({ $0 == 0 }) && bytes[15] == 1) { return blocked }   // :: and ::1
+                if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80 { return blocked }   // link-local
+                if (bytes[0] & 0xfe) == 0xfc || bytes[0] == 0xff { return blocked }      // private, multicast
                 if bytes[0..<10].allSatisfy({ $0 == 0 }) && bytes[10] == 0xff && bytes[11] == 0xff {   // IPv4-mapped
                     let v4 = UInt32(bytes[12]) << 24 | UInt32(bytes[13]) << 16 | UInt32(bytes[14]) << 8 | UInt32(bytes[15])
-                    if !isPublicV4(v4) { return false }
+                    if !isPublicV4(v4) { return blocked }
                 }
             }
         }
-        return true
+        return nil
     }
 
     private static func isPublicV4(_ a: UInt32) -> Bool {
@@ -282,8 +295,8 @@ final class NativeBridge: NSObject {
         let publicOnly = a["publicOnly"] as? Bool ?? true
         let useToken = (a["auth"] as? String) == "hf"
         for _ in 0..<6 {
-            if publicOnly, !Self.isPublicHost(url.host ?? "") {
-                throw BridgeError(message: "That address points to a private network, so it was blocked")
+            if publicOnly, let problem = Self.hostProblem(url.host ?? "") {
+                throw BridgeError(message: problem)
             }
             var req = URLRequest(url: url, timeoutInterval: timeout)
             req.httpMethod = method
