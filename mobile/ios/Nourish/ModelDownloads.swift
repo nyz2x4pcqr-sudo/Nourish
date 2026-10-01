@@ -280,8 +280,9 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         let secs = max(Date().timeIntervalSince(job.startedAt), 0.1)
         log(String(format: "Download %@: saved, %lld bytes%@, GGUF header OK, %.0f s (%.1f MB/s)", file, size,
                    job.expected > 0 ? " (exactly the size Hugging Face lists)" : "", secs, Double(job.received) / secs / 1_048_576), "info")
+        let offset = jobs[file]?.resumeOffset ?? 0
         jobs[file]?.saved = true
-        jobs[file]?.sinceStart = size - (jobs[file]?.resumeOffset ?? 0)
+        jobs[file]?.sinceStart = size - offset
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
