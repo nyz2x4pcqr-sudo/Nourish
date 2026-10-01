@@ -37,6 +37,24 @@ final class NativeBridge: NSObject {
         ModelDownloads.shared.reconnect()
     }
 
+    /// Where this copy of Nourish runs. Inside LiveContainer the app shares the host app's process,
+    /// signature and entitlements, which can change what iOS allows (e.g. background downloads).
+    static func environment() -> String {
+        let bundle = Bundle.main
+        let path = bundle.bundlePath
+        let process = ProcessInfo.processInfo.processName
+        let executable = bundle.infoDictionary?["CFBundleExecutable"] as? String ?? "?"
+        let hints = [
+            path.contains("LiveContainer") ? "bundle path mentions LiveContainer" : nil,
+            path.contains("/Documents/Applications/") ? "bundle is inside another app's Documents (how LiveContainer stores apps)" : nil,
+            bundle.bundleIdentifier != "io.github.nourish.app" ? "bundle ID isn't Nourish's own" : nil,
+            process != executable ? "process name \(process) isn't the app's executable \(executable)" : nil,
+            ProcessInfo.processInfo.environment.keys.contains { $0.hasPrefix("LC_") } ? "LiveContainer (LC_) settings in the environment" : nil,
+        ].compactMap { $0 }
+        return "App environment: bundle ID \(bundle.bundleIdentifier ?? "?"), process \(process), bundle path \(path) — "
+            + (hints.isEmpty ? "looks like a normally installed app" : "probably inside LiveContainer: " + hints.joined(separator: "; "))
+    }
+
     // MARK: Plumbing
 
     func handle(id: String, cmd: String, args: [String: Any]) {
@@ -87,6 +105,10 @@ final class NativeBridge: NSObject {
             let file = a["file"] as? String ?? ""
             ModelDownloads.shared.cancel(file)
             return [String: Any]()
+        case "downloadCheck":
+            guard let url = URL(string: a["url"] as? String ?? ""), Self.isHuggingFace(url) else { throw BridgeError(message: "Give a Hugging Face file address") }
+            return DownloadCheck.run(source: url, target: nil, token: UserDefaults.standard.string(forKey: Self.tokenKey), label: url.lastPathComponent,
+                                     log: { [weak self] message, level in self?.log(message, level: level) }).report
         case "models": return models()
         case "deleteModel": return try deleteModel(a)
         case "generate": return try generate(a)
@@ -144,6 +166,7 @@ final class NativeBridge: NSObject {
             "platform": "ios",
             "device": device + (simulator ? " (simulator)" : ""),
             "model_id": id,
+            "environment": Self.environment(),
             "ram": Int64(ProcessInfo.processInfo.physicalMemory),
             // What iOS lets this app use right now; includes a raised limit (e.g. LiveContainer with more RAM).
             "usable": Int64(os_proc_available_memory()),
@@ -334,7 +357,8 @@ final class NativeBridge: NSObject {
             throw BridgeError(message: "Models can only be downloaded from Hugging Face")
         }
         let expected = (a["size"] as? NSNumber)?.int64Value ?? -1
-        ModelDownloads.shared.start(url: url, file: file, expected: expected, token: UserDefaults.standard.string(forKey: Self.tokenKey))
+        ModelDownloads.shared.start(url: url, file: file, expected: expected, token: UserDefaults.standard.string(forKey: Self.tokenKey),
+                                    chunked: (a["mode"] as? String) == "chunked")
         DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = true }
         return ["started": true]
     }

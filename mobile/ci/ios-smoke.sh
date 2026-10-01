@@ -99,20 +99,23 @@ assert any("continuing from" in l for l in v["log"]), "the second download did n
 print(f"Stopped at {v['stoppedAt']} bytes, continued, and the file on disk is exactly {on_disk[0]} bytes")
 PY
 
-echo "== 4b. Download LiquidAI/LFM2.5-230M-GGUF (a model from the phone's own list) through the app, byte-checked"
+echo "== 4b. Download check, then LiquidAI/LFM2.5-230M-GGUF step by step (16 MB pieces) through the app, byte-checked, then run it"
 probe "const repo = 'LiquidAI/LFM2.5-230M-GGUF', file = 'LFM2.5-230M-Q4_K_M.gguf';
   const tree = await nativeJSON('https://huggingface.co/api/models/' + repo + '/tree/main');
   const entry = tree.find(f => f.path === file); if (!entry) throw new Error('not in the repo: ' + file);
   const want = (entry.lfs && entry.lfs.size) || entry.size;
+  const check = await nativeCall('downloadCheck', { url: 'https://huggingface.co/' + repo + '/resolve/main/' + file }, { timeoutMs: 120000 });
   const done = new Promise((ok, bad) => nativeOn('download', e => {
     if (e.file !== file) return;
     if (e.state === 'done') ok(e); else if (e.state === 'error' || e.state === 'cancelled') bad(new Error(e.error || e.state));
   }));
-  await nativeCall('download', { url: 'https://huggingface.co/' + repo + '/resolve/main/' + file, file, size: want, auth: 'hf' });
+  await nativeCall('download', { url: 'https://huggingface.co/' + repo + '/resolve/main/' + file, file, size: want, auth: 'hf', mode: 'chunked' });
   const e = await done;
   const models = (await nativeCall('models', {})).files;
-  const log = activityLog.filter(l => l.msg.includes(file)).map(l => l.level + ' ' + l.msg);
-  return JSON.stringify({ want, e, models, log });" 600
+  const gen = await nativeCall('generate', { model: file, temperature: 0.2, max_tokens: 24, n_ctx: 1024, gpu: false,
+    messages: [{ role: 'user', content: 'Name one breakfast food.' }] }, { timeoutMs: 0 });
+  const log = activityLog.filter(l => l.msg.includes(file) || l.msg.includes('Download session') || l.area === 'phone').map(l => l.level + ' ' + l.msg);
+  return JSON.stringify({ want, check, e, models, gen, log });" 900
 python3 - "$PROBE" <<'PY' || fail "LFM2.5-230M download through the app failed"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
@@ -122,8 +125,14 @@ want = v["want"]; assert want > 100_000_000, want
 assert v["e"]["state"] == "done" and v["e"]["received"] == want, v["e"]
 on_disk = [m["size"] for m in v["models"] if m["file"] == "LFM2.5-230M-Q4_K_M.gguf"]
 assert on_disk == [want], ("file on disk", on_disk, "expected", want)
-assert any("normal download" in l for l in v["log"]), "expected the normal (foreground) download"
+c = v["check"]; print("Download check:", json.dumps(c))
+assert c["get_bytes"] == 1048576 and c["get_status"] == 206, ("bare URLSession 1 MB GET", c)
+assert any("step-by-step download" in l for l in v["log"]), "expected the step-by-step download"
+assert any("first piece OK (HTTP 206" in l for l in v["log"]), "no 206 for the first piece"
 print(f"LFM2.5-230M: {on_disk[0]} bytes on disk, exactly the size Hugging Face lists")
+text = v["gen"]["text"]; print("LFM2.5-230M says:", repr(text))
+assert text.strip(), "LFM2.5-230M produced no text"
+
 PY
 
 echo "== 5. On-device AI through the app's own code"

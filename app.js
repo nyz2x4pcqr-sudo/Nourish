@@ -1273,6 +1273,7 @@ const SETTINGS_RENDERERS = {
         return [
             ...settingsGroup('', [
                 settingsToggle('verbose_log', 'Detailed logging', { hint: 'Every request, download step and timing' }),
+                IN_PHONE_APP && /NourishApp\/\S+ \(iOS\)/.test(navigator.userAgent) ? settingsButton('Check download connection', checkDownloadConnection) : null,
                 settingsButton('Share log', () => shareLog(false)),
                 settingsButton('Copy log', () => shareLog(true)),
                 settingsButton('Clear log', () => {
@@ -1341,6 +1342,21 @@ async function logReport() {
     }
     lines.push('', ...activityLog.map(logLine));
     return redactSecrets(lines.join('\n'));
+}
+
+// Runs the phone's download check (network, DNS, the download server) on a small public model file.
+// Everything it finds goes into the activity log.
+async function checkDownloadConnection() {
+    showToast('Checking the download connection… (up to a minute)', false);
+    nlog('download', 'Download connection check started');
+    try {
+        const r = await nativeCall('downloadCheck', { url: 'https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/main/LFM2.5-230M-Q4_K_M.gguf' }, { timeoutMs: 120000 });
+        showToast(r.advice || 'Check finished: see the log below', false);
+    } catch (e) {
+        nlog('download', `Download connection check failed: ${e.message}`, null, 'error');
+        showToast(`Check failed: ${e.message}`);
+    }
+    if (settingsPage === 'logs') renderSettings();
 }
 
 async function shareLog(copyOnly) {

@@ -27,6 +27,7 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
     var backgroundEventsDone: (() -> Void)?
 
     private struct Job {
+        let id = UUID()                // tells a replaced download's late answers apart
         let file: String
         let expected: Int64
         let source: URL?
@@ -44,6 +45,12 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         var cancelled = false
         var stalled: String?           // set by the watchdog when no data arrived in time
         var logged5: Int64 = -1        // last 5% step written to the log
+        var target: URL?               // the download server address Hugging Face gave
+        var checked = false            // the download check already ran for this download
+        var checking = false           // ... and is running now
+        var chunked = false            // downloading in 16 MB pieces (see "Step-by-step download")
+        var chunkTask: URLSessionDataTask?
+        var advice: String?            // from the download check, added to a final error
         var received: Int64 { resumeOffset + sinceStart }
     }
 
@@ -76,12 +83,24 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
     private lazy var foreground: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 60              // longest wait for the next piece of data
-        config.timeoutIntervalForResource = 6 * 3600       // a whole 1–5 GB model on a slow connection
-        config.waitsForConnectivity = true                 // wait for a network instead of failing at once
+        config.timeoutIntervalForResource = 7200           // a whole model on a slow connection
+        config.waitsForConnectivity = false                // fail with iOS's real error instead of waiting silently
         config.allowsCellularAccess = true
         config.allowsExpensiveNetworkAccess = true
         config.allowsConstrainedNetworkAccess = true       // Low Data Mode
+        self.log("Download session: waitsForConnectivity \(config.waitsForConnectivity), allowsCellularAccess \(config.allowsCellularAccess), allowsExpensiveNetworkAccess \(config.allowsExpensiveNetworkAccess), allowsConstrainedNetworkAccess \(config.allowsConstrainedNetworkAccess), request timeout \(Int(config.timeoutIntervalForRequest)) s, resource timeout \(Int(config.timeoutIntervalForResource)) s", "info")
         return URLSession(configuration: config, delegate: self, delegateQueue: queue)
+    }()
+    /// The step-by-step download uses the same kind of short requests as the app's Hugging Face calls.
+    private let chunkSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 600
+        config.waitsForConnectivity = false
+        config.allowsCellularAccess = true
+        config.allowsExpensiveNetworkAccess = true
+        config.allowsConstrainedNetworkAccess = true
+        return URLSession(configuration: config)
     }()
     private let resolver = URLSession(configuration: .ephemeral, delegate: RefuseRedirects(), delegateQueue: nil)
 
@@ -121,13 +140,19 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
 
     // MARK: Starting and cancelling
 
-    func start(url: URL, file: String, expected: Int64, token: String?) {
+    /// `chunked` starts straight with the step-by-step download (the automated test uses it).
+    func start(url: URL, file: String, expected: Int64, token: String?, chunked: Bool = false) {
         queue.addOperation {
             if let old = self.jobs[file]?.task { old.cancel() }   // its callbacks are ignored from now on
+            self.jobs[file]?.chunkTask?.cancel()
             self.jobs[file] = Job(file: file, expected: expected, source: url, token: token)
             self.jobs[file]?.foreground = !Self.useBackground || self.backgroundBroken
-            // A leftover partial file from Nourish 0.4.0–0.4.2 (they downloaded differently).
-            try? FileManager.default.removeItem(at: NativeBridge.modelsDir.appendingPathComponent(file + ".part"))
+            // A partial file (from a step-by-step download, or from Nourish 0.4.0–0.4.2, which saved the
+            // same bytes the same way) is continued step by step.
+            let partSize = (try? FileManager.default.attributesOfItem(atPath: Self.partURL(file).path)[.size] as? NSNumber)?.int64Value ?? 0
+            if chunked || partSize > 0 {
+                return self.startChunked(file, reason: chunked ? "asked for" : "continuing \(partSize) bytes already on the phone")
+            }
             if let data = try? Data(contentsOf: Self.resumeURL(file)) {
                 try? FileManager.default.removeItem(at: Self.resumeURL(file))
                 self.log("Download \(file): continuing the earlier, unfinished download", "info")
@@ -144,7 +169,12 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         queue.addOperation {
             guard let job = self.jobs[file] else { return }
             self.jobs[file]?.cancelled = true
-            if let task = job.task {
+            if job.chunked {
+                job.chunkTask?.cancel()          // the piece's completion sees `cancelled`
+                if job.chunkTask == nil { self.finish(file, "cancelled") }
+            } else if job.checking {
+                self.finish(file, "cancelled")
+            } else if let task = job.task {
                 // Keep what was downloaded so far: Download continues from there.
                 task.cancel(byProducingResumeData: { data in
                     if let data { try? data.write(to: Self.resumeURL(file)) }
@@ -170,6 +200,7 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
                     self.jobs[file]?.failure = failure.message
                     self.finish(file, "error")
                 case .success(let target):
+                    self.jobs[file]?.target = target
                     var request = URLRequest(url: target)
                     // Only a Hugging Face address gets the token; signed download-server addresses never do.
                     if let token, NativeBridge.isHuggingFace(target) { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -357,9 +388,13 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         log("Download \(task.taskDescription ?? "?"): task \(task.taskIdentifier) ended \(error == nil ? "without an error" : "with: " + Self.describe(error! as NSError)), \(task.countOfBytesReceived) bytes received", error == nil ? "info" : "warn")
         guard let file = file(for: task), let job = jobs[file] else { return }
-        if let stalled = job.stalled {
-            jobs[file]?.failure = stalled
-            return finish(file, "error")
+        if job.stalled != nil || (error != nil && job.sinceStart == 0 && !job.cancelled && job.resumeData == nil && session !== background) {
+            // No data at all: find out why (logged), then try the step-by-step download.
+            if job.source != nil, !job.checked { return checkThenChunked(file, failure: job.stalled ?? "") }
+            if let stalled = job.stalled {
+                jobs[file]?.failure = stalled
+                return finish(file, "error")
+            }
         }
         if let error = error as NSError? {
             if let data = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
@@ -388,6 +423,175 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         if job.saved { return finish(file, "done") }
         if job.failure == nil { jobs[file]?.failure = "The download ended without a file. Tap Download to try again." }
         finish(file, "error")
+    }
+
+    // MARK: Download check, then step-by-step download
+
+    private func checkThenChunked(_ file: String, failure: String) {
+        guard let job = jobs[file], let source = job.source else { return }
+        jobs[file]?.checked = true
+        jobs[file]?.checking = true
+        jobs[file]?.task = nil
+        log("Download \(file): no data arrived, so checking the connection, then trying a step-by-step download", "warn")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = DownloadCheck.run(source: source, target: job.target, token: job.token, label: file, log: self.log)
+            self.queue.addOperation {
+                guard let current = self.jobs[file], current.checking else { return }
+                self.jobs[file]?.checking = false
+                if current.cancelled { return self.finish(file, "cancelled") }
+                self.jobs[file]?.advice = outcome.advice
+                self.startChunked(file, reason: "the normal download got no data", target: outcome.alternate ?? job.target)
+            }
+        }
+    }
+
+    // MARK: Step-by-step download
+    //
+    // 16 MB pieces, each its own short request with "Range: bytes=start-end", appended to <file>.part.
+    // The .part file's size is the progress, so a failed piece is retried and a later Download continues
+    // from there. At most one piece (16 MB) is in memory at a time.
+
+    private static let chunkSize: Int64 = 16 * 1_048_576
+    private static func partURL(_ file: String) -> URL { NativeBridge.modelsDir.appendingPathComponent(file + ".part") }
+
+    private func startChunked(_ file: String, reason: String, target: URL? = nil) {
+        guard var job = jobs[file] else { return }
+        job.chunked = true
+        job.task = nil
+        if let target { job.target = target }
+        let part = Self.partURL(file)
+        if !FileManager.default.fileExists(atPath: part.path) { FileManager.default.createFile(atPath: part.path, contents: nil) }
+        job.resumeOffset = (try? FileManager.default.attributesOfItem(atPath: part.path)[.size] as? NSNumber)?.int64Value ?? 0
+        job.sinceStart = 0
+        job.startedAt = Date()
+        jobs[file] = job
+        log("Download \(file): step-by-step download in 16 MB pieces (\(reason)), from byte \(job.resumeOffset)", "info")
+        send(file, "running")
+        nextChunk(file, attempt: 0)
+    }
+
+    private func nextChunk(_ file: String, attempt: Int) {
+        guard let job = jobs[file], job.chunked else { return }
+        if job.cancelled { return finish(file, "cancelled") }
+        let id = job.id
+        let total = job.expected > 0 ? job.expected : job.serverTotal
+        if total > 0, job.received >= total { return finishChunked(file) }
+        guard let target = job.target else {
+            // No download address yet (or it expired): ask Hugging Face again.
+            guard let source = job.source else {
+                jobs[file]?.failure = "Tap Download to continue this download."
+                return finish(file, "error")
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.resolve(source, token: job.token, file: file)
+                self.queue.addOperation {
+                    guard self.jobs[file]?.id == id else { return }
+                    switch result {
+                    case .success(let url):
+                        self.jobs[file]?.target = url
+                        self.nextChunk(file, attempt: attempt)
+                    case .failure(let failure):
+                        self.jobs[file]?.failure = failure.message
+                        self.finish(file, "error")
+                    }
+                }
+            }
+            return
+        }
+        let start = job.received
+        let end = total > 0 ? min(start + Self.chunkSize, total) - 1 : start + Self.chunkSize - 1
+        var request = URLRequest(url: target, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
+        request.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
+        if let token = job.token, NativeBridge.isHuggingFace(target) { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let began = Date()
+        let task = chunkSession.dataTask(with: request) { data, response, error in
+            self.queue.addOperation { self.chunkDone(file, id: id, start: start, end: end, attempt: attempt, began: began, data, response as? HTTPURLResponse, error) }
+        }
+        jobs[file]?.chunkTask = task
+        task.resume()
+    }
+
+    private func chunkDone(_ file: String, id: UUID, start: Int64, end: Int64, attempt: Int, began: Date, _ data: Data?, _ response: HTTPURLResponse?, _ error: Error?) {
+        guard let job = jobs[file], job.id == id, job.chunked, job.received == start else { return }
+        jobs[file]?.chunkTask = nil
+        if job.cancelled { return finish(file, "cancelled") }
+        let status = response?.statusCode ?? 0
+        let secs = max(Date().timeIntervalSince(began), 0.001)
+        if status == 206, let data, !data.isEmpty, (response?.value(forHTTPHeaderField: "Content-Range") ?? "").hasPrefix("bytes \(start)-") {
+            if start == job.resumeOffset, job.sinceStart == 0 {
+                log("Download \(file): first piece OK (HTTP 206, Accept-Ranges: \(response?.value(forHTTPHeaderField: "Accept-Ranges") ?? "not sent"), Content-Range: \(response?.value(forHTTPHeaderField: "Content-Range") ?? "?"))", "info")
+            }
+            if let range = response?.value(forHTTPHeaderField: "Content-Range"), let slash = range.lastIndex(of: "/"), let size = Int64(range[range.index(after: slash)...]) {
+                jobs[file]?.serverTotal = size
+            }
+            do {
+                let handle = try FileHandle(forWritingTo: Self.partURL(file))
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+            } catch {
+                jobs[file]?.failure = "Couldn't save the download: \(error.localizedDescription). Is the phone's storage full?"
+                return finish(file, "error")
+            }
+            jobs[file]?.sinceStart += Int64(data.count)
+            let now = jobs[file]!
+            let total = now.expected > 0 ? now.expected : now.serverTotal
+            log(String(format: "Download %@: piece %lld–%lld saved (%.1f MB/s), %lld of %lld bytes (%lld%%)", file, start, start + Int64(data.count) - 1,
+                       Double(data.count) / secs / 1_048_576, now.received, total, total > 0 ? now.received * 100 / total : 0), "info")
+            send(file, "running")
+            return nextChunk(file, attempt: 0)
+        }
+        // Something went wrong with this piece.
+        var detail = response.map { "HTTP \($0.statusCode)" } ?? "no answer"
+        if let error { detail += ", " + Self.describe(error as NSError) }
+        if status == 200 { detail += " (the server sent the whole file instead of a piece)" }
+        log("Download \(file): piece \(start)–\(end) failed (attempt \(attempt + 1) of 5): \(detail)", "warn")
+        if status == 200 {
+            jobs[file]?.failure = "The download server doesn't support downloading in pieces."
+            return finish(file, "error")
+        }
+        if [401, 403, 410].contains(status) { jobs[file]?.target = nil }   // the signed address expired: get a new one
+        guard attempt < 4 else {
+            let advice = job.advice.map { " " + $0 } ?? ""
+            jobs[file]?.failure = job.received > 0
+                ? "The download stopped at \(Self.megabytes(job.received)) (\(detail)). Tap Download to continue from there.\(advice)"
+                : "The download couldn't start (\(detail)).\(advice)"
+            return finish(file, "error")
+        }
+        let wait = pow(2.0, Double(attempt + 1))   // 2, 4, 8, 16 s
+        DispatchQueue.global().asyncAfter(deadline: .now() + wait) {
+            self.queue.addOperation { if self.jobs[file]?.id == id { self.nextChunk(file, attempt: attempt + 1) } }
+        }
+    }
+
+    private func finishChunked(_ file: String) {
+        guard let job = jobs[file] else { return }
+        let part = Self.partURL(file)
+        let size = (try? FileManager.default.attributesOfItem(atPath: part.path)[.size] as? NSNumber)?.int64Value ?? 0
+        if job.expected > 0, size != job.expected {
+            try? FileManager.default.removeItem(at: part)
+            jobs[file]?.failure = "The download came out the wrong size (\(size) of \(job.expected) bytes), so it was deleted. Tap Download to try again."
+            return finish(file, "error")
+        }
+        guard let head = try? FileHandle(forReadingFrom: part), head.readData(ofLength: 4) == Data("GGUF".utf8) else {
+            try? FileManager.default.removeItem(at: part)
+            jobs[file]?.failure = "The downloaded file isn't a GGUF model."
+            return finish(file, "error")
+        }
+        try? head.close()
+        let destination = NativeBridge.modelsDir.appendingPathComponent(file)
+        try? FileManager.default.removeItem(at: destination)
+        do {
+            try FileManager.default.moveItem(at: part, to: destination)
+        } catch {
+            jobs[file]?.failure = "Couldn't save the model: \(error.localizedDescription)"
+            return finish(file, "error")
+        }
+        let secs = max(Date().timeIntervalSince(job.startedAt), 0.1)
+        log(String(format: "Download %@: saved, %lld bytes%@, GGUF header OK, %.0f s (%.1f MB/s, step by step)", file, size,
+                   job.expected > 0 ? " (exactly the size Hugging Face lists)" : "", secs, Double(job.sinceStart) / secs / 1_048_576), "info")
+        jobs[file]?.saved = true
+        finish(file, "done")
     }
 
     private func retry(_ file: String, foreground: Bool, resumeData: Data?) {
@@ -457,6 +661,11 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
             parts.append("underlying: \(underlying.domain) \(underlying.code) \(underlying.localizedDescription)")
         }
+        // Everything else iOS put in userInfo (resume data is binary, addresses are redacted above).
+        let shown: Set<String> = [NSURLErrorFailingURLStringErrorKey, NSURLErrorFailingURLErrorKey, "_kCFStreamErrorCodeKey",
+                                  NSUnderlyingErrorKey, NSLocalizedDescriptionKey, NSURLSessionDownloadTaskResumeData]
+        let rest = error.userInfo.filter { !shown.contains($0.key) }.map { "\($0.key)=\(String(describing: $0.value).prefix(200))" }.sorted()
+        if !rest.isEmpty { parts.append("userInfo: " + rest.joined(separator: ", ")) }
         return parts.joined(separator: "; ")
     }
 

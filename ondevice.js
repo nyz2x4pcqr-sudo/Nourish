@@ -463,6 +463,7 @@ async function getSpecs(refresh = false) {
         specsCache = await nativeCall('specs', {}, { timeoutMs: 10000 });
         if (typeof nlog === 'function') {
             nlog('phone', `${specsCache.device}: ${formatBytes(specsCache.ram)} RAM, app may use ${formatBytes(specsCache.usable)} → model budget ${formatBytes(memoryBudget(specsCache))}; ${formatBytes(specsCache.disk_free)} free; ${specsCache.thermal}; ${specsCache.os}`);
+            if (specsCache.environment) nlog('phone', specsCache.environment);
         }
     }
     return specsCache;
