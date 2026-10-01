@@ -54,7 +54,9 @@ echo "== 3. Connected to the Nourish server"
 xcrun simctl terminate "$UDID" $APP || true
 BEFORE=$(wc -l < "$LOG")
 xcrun simctl launch "$UDID" $APP -mode server -server_url http://127.0.0.1:8000/
-sleep 15
+# The app asks for /api/info after it has synced with the PC; wait for it (up to 60 s) rather than guessing.
+for i in $(seq 1 60); do tail -n +"$((BEFORE + 1))" "$LOG" | grep -q '"GET /api/info' && break; sleep 1; done
+sleep 2
 xcrun simctl io "$UDID" screenshot shots/ios-2-pc.png
 NEW=$(tail -n +"$((BEFORE + 1))" "$LOG"); echo "Server saw:"; echo "$NEW" | grep -oE '"(GET|POST) [^"]*"' | sort | uniq -c || true
 echo "$NEW" | grep -q '"GET /app.js' || fail "app.js never loaded"
