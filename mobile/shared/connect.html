@@ -34,7 +34,7 @@
 <main>
     <div class="logo" aria-hidden="true"><span></span></div>
     <h1>Connect to Nourish</h1>
-    <p>Nourish runs on your PC. Connect this phone to it once and the app remembers it.</p>
+    <p>Use Nourish from your PC to share one plan between all your devices. Connect once and the app remembers it.</p>
 
     <button type="button" class="primary" id="scanBtn" hidden>🔍 Find my PC automatically</button>
 
@@ -44,6 +44,8 @@
     <button type="button" class="secondary" id="anywayBtn" hidden>Connect anyway</button>
 
     <div class="status" id="status" role="status" aria-live="polite"></div>
+
+    <button type="button" class="secondary" id="localBtn" onclick="location.href='nourishapp://local'">Use this phone only instead</button>
 
     <div class="help">
         <b>Where's the address?</b> Start Nourish on your PC. Its window shows it next to "On your phone", for example <b>http://192.168.1.23:8000</b>.

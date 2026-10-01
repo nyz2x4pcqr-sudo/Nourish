@@ -30,7 +30,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
-      - name: Build APK
+      - name: Build APK (includes llama.cpp for arm64 and the x86_64 emulator)
         run: gradle -p mobile/android assembleDebug --no-daemon
       - name: Rename
         run: cp mobile/android/app/build/outputs/apk/debug/app-debug.apk Nourish.apk
@@ -55,6 +55,11 @@ jobs:
           pip install -r backend/requirements-core.txt
           cd backend && nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$GITHUB_WORKSPACE/server.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
+      - name: Get a tiny real model and the app's meal format
+        run: |
+          curl -sSfL -o test-model.gguf "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf"
+          node -e "require('fs').writeFileSync('day.gbnf', require('./ondevice.js').GBNF_DAY)"
+          ls -la test-model.gguf day.gbnf
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

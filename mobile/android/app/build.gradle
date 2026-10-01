@@ -10,8 +10,17 @@ android {
         applicationId 'io.github.nourish.app'
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '0.3.0-pre-alpha'
+        versionCode 4
+        versionName '0.4.0-pre-alpha'
+        // Real phones are arm64; x86_64 is for the emulator used by the automated test.
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+        externalNativeBuild {
+            cmake { arguments '-DANDROID_STL=c++_static' }
+        }
+    }
+
+    externalNativeBuild {
+        cmake { path 'src/main/cpp/CMakeLists.txt' }
     }
 
     buildTypes {
@@ -25,8 +34,20 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    // The shared "connect to your PC" page is used by both the Android and iOS apps.
+    // Built-in copy of the web app (assets/webapp) and the shared "connect to your PC" page.
     sourceSets {
-        main.assets.srcDirs += ['../../shared']
+        main.assets.srcDirs += ["$buildDir/generated/webassets"]
     }
 }
+
+def repoRoot = rootProject.file('../..')
+tasks.register('copyWebApp', Copy) {
+    from(repoRoot) {
+        include 'index.html', 'styles.css', 'app.js', 'ondevice.js', 'json-repair.js',
+                'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'
+        into 'webapp'
+    }
+    from(rootProject.file('../shared')) { include 'connect.html' }
+    into "$buildDir/generated/webassets"
+}
+preBuild.dependsOn copyWebApp
