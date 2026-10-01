@@ -278,6 +278,42 @@ function dropJunk(day) {
     return day;
 }
 
+// Problems inside one meal that the format can't stop: the same ingredient listed twice ("1/2 cup
+// green curry paste" × 7 to fill the list) and a step naming one ingredient twice in a sentence
+// ("Add 1/2 cup curry paste and 1/2 cup curry paste"). Returns a list of descriptions.
+function mealProblems(meal) {
+    const problems = [];
+    const lines = (meal && Array.isArray(meal.ingredients)) ? meal.ingredients : [];
+    const seen = {};
+    lines.forEach(line => {
+        const key = Grocery.ingredientKey(line);
+        seen[key] = (seen[key] || 0) + 1;
+        if (seen[key] === 2) problems.push(`"${key}" listed more than once`);
+    });
+    const names = lines.map(line => (Grocery.parseIngredient(line) || {}).name).filter(n => n && n.length > 2);
+    ((meal && meal.steps) || []).forEach(step => String(step).toLowerCase().split(/[.!?;]+/).forEach(sentence => {
+        names.forEach(name => {
+            const count = sentence.split(name).length - 1;
+            if (count >= 2) problems.push(`a step names "${name}" ${count} times`);
+        });
+    }));
+    return problems.filter((p, i) => problems.indexOf(p) === i);
+}
+
+// The meal's ingredients without repeats and with impossible amounts capped (see units.js).
+// Returns the caps made, for the log.
+const Units = typeof NourishUnits !== 'undefined' ? NourishUnits : require('./units.js');
+function tidyMeal(meal) {
+    const caps = [];
+    if (!meal || !Array.isArray(meal.ingredients)) return caps;
+    meal.ingredients = Grocery.dedupeIngredients(meal.ingredients).map(line => {
+        const c = Units.clampIngredient(line);
+        if (c.clamped) caps.push(`"${line}" → "${c.line}" (${c.clamped})`);
+        return c.line;
+    });
+    return caps;
+}
+
 // "Avocado & Spinach Pancakes" and "Spinach and Avocado Pancake" count as the same dish.
 const NAME_FILLER = ['with', 'and', 'the', 'a', 'an', 'of', 'in', 'on', 'style', 'homemade', 'easy', 'quick', 'healthy', 'simple', 'classic'];
 function dishWords(name) {
@@ -308,7 +344,7 @@ async function generatePlanOnDevice(messages, hooks, state) {
     if (st.cuisineOffset == null) st.cuisineOffset = Math.floor(Math.random() * CUISINES.length);
     const conversation = messages.filter(m => m.role !== 'system').slice(-8).map(m => `${m.role === 'user' ? 'They said' : 'You said'}: ${m.content}`).join('\n').slice(-1200);
     const system = 'You are a meal-planning chef. Plan ONE day of meals as JSON: breakfast, lunch and dinner, each with name, time_minutes, nutrition (calories, protein_g, carbs_g, fat_g for one serving), ingredients and short steps. ' +
-        'Each ingredient is ONE item with its amount, like "2 large eggs" or "1 cup spinach". Use real, appetising dish names. Spread the daily calorie and protein targets over the three meals.\n\nThe person:\n' + profileText();
+        'Each ingredient is ONE item with its amount, like "2 large eggs" or "1 cup spinach", and each ingredient only once. Use US kitchen units (cups, tbsp, tsp, oz, lb, °F). Use real, appetising dish names. Spread the daily calorie and protein targets over the three meals.\n\nThe person:\n' + profileText();
     const usedNames = () => st.days.reduce((all, day) => all.concat(PLAN_MEALS.map(t => day && day[t] && day[t].name).filter(Boolean)), []);
 
     for (let d = st.days.length; d < h.totalDays; d++) {
@@ -320,7 +356,7 @@ async function generatePlanOnDevice(messages, hooks, state) {
         const ask = `${conversation}\n\nPlan Day ${d + 1} (${dayName(d)}). Today's cuisine: ${cuisine}.${recent.length ? ' Recent dishes (make different ones): ' + recent.join(', ') + '.' : ''} Return only the JSON for this day.`;
         const promptChars = system.length + ask.length;
         const started = Date.now();
-        const stat = { day: d + 1, promptChars, thermal: st.lastThermal || '?', junkRows: 0, retried: false, repeatsFixed: 0, seconds: 0 };
+        const stat = { day: d + 1, promptChars, thermal: st.lastThermal || '?', junkRows: 0, retried: false, repeatsFixed: 0, mealsRemade: 0, capped: 0, seconds: 0 };
 
         let day = null;
         for (let attempt = 0; attempt < 2 && !day; attempt++) {
@@ -335,6 +371,20 @@ async function generatePlanOnDevice(messages, hooks, state) {
             else day = dropJunk(parsed);
         }
         if (!day) break;
+
+        // A meal that lists an ingredient twice, or names one twice in a step: make that meal again once.
+        for (let m = 0; m < PLAN_MEALS.length && !h.isCancelled(); m++) {
+            const type = PLAN_MEALS[m];
+            const problems = mealProblems(day[type]);
+            if (!problems.length) continue;
+            nlog('plan', `Day ${d + 1} ${type} "${day[type].name}": ${problems.join('; ')}; making it again`, null, 'warn');
+            const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user',
+                content: `${conversation}\n\nMake ONE ${type} for Day ${d + 1}, ${cuisine} cuisine. List each ingredient once. Return only the JSON for this meal.` }],
+            GBNF_MEAL, 450, `plan-fix-${d}-${m}`, h);
+            if (text == null) break;
+            const again = dropJunk({ [type]: parseLLMJSON(text) })[type];
+            if (again && again.name && mealProblems(again).length < problems.length) { day[type] = again; stat.mealsRemade++; }
+        }
 
         // Repeats of earlier dishes: make that one meal again with another cuisine.
         const earlier = usedNames();
@@ -352,10 +402,15 @@ async function generatePlanOnDevice(messages, hooks, state) {
             if (meal && meal.name && !earlier.some(n => sameDish(n, meal.name))) { day[type] = meal; stat.repeatsFixed++; }
         }
 
+        PLAN_MEALS.forEach(type => {
+            const caps = tidyMeal(day[type]);
+            stat.capped += caps.length;
+            caps.forEach(c => nlog('plan', `Day ${d + 1} ${type}: amount capped ${c}`, null, 'warn'));
+        });
         stat.seconds = Math.round((Date.now() - started) / 100) / 10;
         st.days.push(day);
         st.stats.push(stat);
-        nlog('plan', `Day ${d + 1} done in ${stat.seconds} s: prompt ${promptChars} characters, thermal ${stat.thermal}, junk lines ${stat.junkRows}${stat.retried ? ' (made again)' : ''}, repeats replaced ${stat.repeatsFixed}`,
+        nlog('plan', `Day ${d + 1} done in ${stat.seconds} s: prompt ${promptChars} characters, thermal ${stat.thermal}, junk lines ${stat.junkRows}${stat.retried ? ' (made again)' : ''}, meals remade for repeated ingredients ${stat.mealsRemade}, amounts capped ${stat.capped}, repeated dishes replaced ${stat.repeatsFixed}`,
             PLAN_MEALS.map(t => day[t] && day[t].name));
         h.save(st);
     }
@@ -1179,5 +1234,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
+    module.exports = { mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
 }

@@ -45,6 +45,7 @@ const SETTINGS_DEFAULTS = {
     text_size: 'default',
     start_tab: 'today',
     week_start: 'monday',
+    units: '',   // 'imperial' or 'metric'; empty: from the phone's region
     show_nutrition: 'on',
     reduce_motion: 'off',
     // AI
@@ -904,6 +905,21 @@ function setSetting(key, value, { quiet = false } = {}) {
     if (['theme', 'accent', 'text_size', 'reduce_motion'].includes(key)) applyAppearance();
     if (['calorie_target', 'protein_target', 'week_start', 'show_nutrition', 'name'].includes(key)) { updateTodayScreen(); updatePlanScreen(); }
     if (key === 'grocery_hide_checked') updateGroceryScreen();
+    if (key === 'units') refreshUnits();
+}
+
+// Imperial (US) or metric. The phone's measurement system decides until it's changed in Settings.
+function unitSystem() {
+    if (settings.units === 'imperial' || settings.units === 'metric') return settings.units;
+    const phone = typeof specsCache !== 'undefined' && specsCache && specsCache.measurement;
+    if (phone === 'imperial' || phone === 'metric') return phone;
+    return NourishUnits.defaultSystem((navigator.languages && navigator.languages[0]) || navigator.language);
+}
+
+// Plans keep the AI's own amounts; switching units only redraws.
+function refreshUnits() {
+    updateGroceryScreen();
+    if (openRecipe && $('recipeSheet').classList.contains('active')) openRecipeSheet(openRecipe.mealType, openRecipe.meal, openRecipe.dayIndex);
 }
 
 function setPref(key, value) {
@@ -1133,6 +1149,7 @@ const SETTINGS_RENDERERS = {
             ...settingsGroup('Layout', [
                 settingsRow('Open on', settingsSelect('start_tab', { today: 'Today', plan: 'Plan', chat: 'Chat', grocery: 'Grocery' })),
                 settingsRow('Plan starts on', settingsSelect('week_start', { monday: 'Monday', sunday: 'Sunday', today: 'Today' })),
+                settingsChoice('Units', unitSystem(), { imperial: 'Imperial (cups, °F)', metric: 'Metric (ml, °C)' }, v => setSetting('units', v, { quiet: true })),
                 settingsToggle('show_nutrition', 'Show nutrition', { hint: 'Calories and macros on meals' }),
                 settingsToggle('reduce_motion', 'Reduce motion', { hint: 'Fewer animations' }),
             ], 'These settings sync to every device connected to your PC.'),
@@ -1530,8 +1547,12 @@ function closeGenerateSheet() {
     $('generateSheet').classList.remove('active');
 }
 
+let openRecipe = null;
 function openRecipeSheet(mealType, meal, dayIndex = null) {
+    openRecipe = { mealType, meal, dayIndex };
     const content = $('recipeSheetContent');
+    const units = unitSystem();
+    const ingredients = NourishGrocery.dedupeIngredients(meal.ingredients || []).map(line => NourishUnits.formatIngredient(NourishUnits.clampIngredient(line).line, units));
     const n = meal.nutrition;
     const chips = [h('span', { class: 'chip' }, icon('i-clock'), formatMinutes(meal.time_minutes))];
     if (on('show_nutrition')) {
@@ -1557,14 +1578,14 @@ function openRecipeSheet(mealType, meal, dayIndex = null) {
                 onclick: () => { closeRecipeSheet(); swapMeal(dayIndex, mealType); },
             }, icon('i-swap'), 'Swap meal') : null,
             h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => askAboutMeal(meal) }, icon('i-chat'), 'Ask the chef')),
-        meal.ingredients.length ? h('div', { class: 'recipe-section' },
-            h('div', { class: 'recipe-section-title', text: `Ingredients · ${meal.ingredients.length}` }),
-            h('div', { class: 'recipe-ingredients' }, meal.ingredients.map(i => h('div', { class: 'recipe-ingredient', text: i })))) : null,
+        ingredients.length ? h('div', { class: 'recipe-section' },
+            h('div', { class: 'recipe-section-title', text: `Ingredients · ${ingredients.length}` }),
+            h('div', { class: 'recipe-ingredients' }, ingredients.map(i => h('div', { class: 'recipe-ingredient', text: i })))) : null,
         meal.steps.length ? h('div', { class: 'recipe-section' },
             h('div', { class: 'recipe-section-title', text: 'Instructions' }),
             h('div', { class: 'recipe-steps' }, meal.steps.map((s, idx) => h('div', { class: 'recipe-step' },
                 h('div', { class: 'recipe-step-number', text: idx + 1 }),
-                h('div', { class: 'recipe-step-text', text: s }))))) : null,
+                h('div', { class: 'recipe-step-text', text: NourishUnits.convertText(s, units) }))))) : null,
         meal.source_url ? h('a', { class: 'btn btn-secondary recipe-source', href: meal.source_url, target: '_blank', rel: 'noopener noreferrer' },
             icon('i-link'), `Original recipe on ${meal.source_name || 'the web'}`) : h('div', { style: 'height:20px' }),
     );
@@ -1741,7 +1762,7 @@ const GROCERY_ORDER = NourishGrocery.CATEGORIES.map(c => c[0]).concat(['Other'])
 
 function groceryItems() {
     const items = {};
-    NourishGrocery.buildList(daysData, MEAL_TYPES).forEach(row => {
+    NourishGrocery.buildList(daysData, MEAL_TYPES, unitSystem()).forEach(row => {
         if (!items[row.category]) items[row.category] = [];
         items[row.category].push(row);
     });
@@ -1910,14 +1931,33 @@ function toStringList(v) {
     return Array.isArray(v) ? v.map(x => typeof x === 'string' ? x.trim() : ((x && (x.name || x.text)) || '')).filter(Boolean).map(String) : [];
 }
 
+// One line per thing (a repeat of an earlier line is dropped) and impossible amounts capped
+// ("1 cup curry paste" → "2 tbsp curry paste"; each cap is logged once per plan).
+let reportCaps = false;
+function cleanIngredients(list, dish) {
+    return NourishGrocery.dedupeIngredients(list).map(line => {
+        const c = NourishUnits.clampIngredient(line);
+        if (c.clamped && reportCaps) nlog('plan', `Amount capped in "${dish}": "${line}" → "${c.line}" (${c.clamped})`, null, 'warn');
+        return c.line;
+    });
+}
+
+// The amount and unit of each ingredient, kept apart from the words, so any unit system can be shown
+// exactly ({ qty: 0.5, unit: 'cup', text: 'green curry paste' }).
+function ingredientAmounts(list) {
+    return list.map(line => NourishUnits.splitIngredient(line));
+}
+
 function normalizeMeal(m) {
     if (!m || typeof m !== 'object' || !m.name) return null;
     const n = m.nutrition && typeof m.nutrition === 'object' ? m.nutrition : null;
+    const ingredients = cleanIngredients(toStringList(m.ingredients), m.name);
     return Object.assign({
         name: String(m.name).trim(),
         time_minutes: toNumber(m.time_minutes),
         nutrition: n ? { calories: toNumber(n.calories), protein_g: toNumber(n.protein_g), carbs_g: toNumber(n.carbs_g), fat_g: toNumber(n.fat_g) } : null,
-        ingredients: toStringList(m.ingredients),
+        ingredients,
+        amounts: ingredientAmounts(ingredients),
         steps: toStringList(m.steps),
     }, safeSource(m));
 }
@@ -1944,7 +1984,8 @@ function normalizePlan(data, strict = true) {
 }
 
 function applyPlan(raw, { navigate = true } = {}) {
-    daysData = normalizePlan(raw);
+    reportCaps = true;
+    try { daysData = normalizePlan(raw); } finally { reportCaps = false; }
     selectedDay = todayIndex();
     grocery.checked = [];
     changed('plan');
@@ -1965,7 +2006,9 @@ function applyEdits(parsed) {
     for (const c of list) {
         const day = Math.round(toNumber(c && c.day)) - 1;
         const meal = String((c && c.meal) || '').toLowerCase();
-        const recipe = normalizeMeal(c && (c.recipe || c.new_recipe));
+        reportCaps = true;
+        let recipe;
+        try { recipe = normalizeMeal(c && (c.recipe || c.new_recipe)); } finally { reportCaps = false; }
         if (!(day >= 0 && day < 7) || !MEAL_TYPES.includes(meal) || !recipe) continue;
         while (daysData.length <= day) daysData.push({ breakfast: null, lunch: null, dinner: null });
         daysData[day][meal] = recipe;

@@ -111,3 +111,19 @@ test('the plan format keeps each ingredient to one short item and at most 10 per
     assert.match(GBNF_DAY, /item ::= .*\[\^"\\\\\\x7F\\x00-\\x1F,\]\{2,47\}/);
     assert.match(GBNF_MEAL, /^root ::= meal/);
 });
+
+test('repeated ingredients and steps that name one twice are caught; amounts are capped', () => {
+    const { mealProblems, tidyMeal } = require('../ondevice.js');
+    const curry = {
+        name: 'Green Curry',
+        ingredients: ['1 lb lean beef', '1 cup green curry paste', '1 cup coconut milk', '1/2 cup green curry paste', '1/2 cup green curry paste'],
+        steps: ['Add 1/2 cup green curry paste and 1/2 cup green curry paste to the pan.', 'Simmer the beef in coconut milk.'],
+    };
+    const problems = mealProblems(curry);
+    assert.ok(problems.some(p => /green curry paste" listed more than once/.test(p)), problems.join(' | '));
+    assert.ok(problems.some(p => /a step names "green curry paste" 2 times/.test(p)), problems.join(' | '));
+    assert.deepEqual(mealProblems({ name: 'Fine', ingredients: ['2 eggs', '1 cup spinach'], steps: ['Whisk the eggs, then add the spinach.'] }), []);
+    const caps = tidyMeal(curry);
+    assert.deepEqual(curry.ingredients, ['1 lb lean beef', '2 tbsp green curry paste', '1 cup coconut milk']);
+    assert.equal(caps.length, 1);
+});

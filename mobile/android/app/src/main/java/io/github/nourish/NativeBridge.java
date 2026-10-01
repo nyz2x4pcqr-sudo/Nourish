@@ -148,6 +148,9 @@ final class NativeBridge {
         o.put("disk_free", fs.getAvailableBytes());
         o.put("cores", Runtime.getRuntime().availableProcessors());
         o.put("thermal", thermal());
+        // Cups and °F only for US, Liberia and Myanmar; everywhere else cooks in metric.
+        String country = java.util.Locale.getDefault().getCountry();
+        o.put("measurement", "US".equals(country) || "LR".equals(country) || "MM".equals(country) ? "imperial" : "metric");
         o.put("gpu", false);                       // CPU only on Android for now
         o.put("os", "Android " + Build.VERSION.RELEASE);
         o.put("simulator", Build.FINGERPRINT.contains("generic") || Build.HARDWARE.contains("ranchu"));

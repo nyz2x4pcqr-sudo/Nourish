@@ -172,6 +172,8 @@ final class NativeBridge: NSObject {
             "device": device + (simulator ? " (simulator)" : ""),
             "model_id": id,
             "environment": Self.environment(),
+            // Cups and °F only where the phone is set to the US system; the UK cooks in metric.
+            "measurement": Locale.current.measurementSystem == .us ? "imperial" : "metric",
             "ram": Int64(ProcessInfo.processInfo.physicalMemory),
             // What iOS lets this app use right now; includes a raised limit (e.g. LiveContainer with more RAM).
             "usable": Int64(os_proc_available_memory()),
