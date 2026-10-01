@@ -90,7 +90,7 @@ class _DDGParser(HTMLParser):
 
 async def search(client: httpx.AsyncClient, query: str, brave_key: Optional[str] = None, count: int = 15) -> list:
     if brave_key:
-        res = await client.get(BRAVE_URL, params={"q": query, "count": min(count, 20)},
+        res = await client.get(BRAVE_URL, params={"q": query, "count": min(count, 20)}, follow_redirects=True,
                                headers={"X-Subscription-Token": brave_key, "Accept": "application/json"})
         if res.status_code in (401, 403, 422):
             raise WebRecipeError("Brave Search rejected the API key. Check it in Settings → Recipe sources.")
@@ -100,7 +100,7 @@ async def search(client: httpx.AsyncClient, query: str, brave_key: Optional[str]
             raise WebRecipeError(f"Brave Search returned {res.status_code}")
         urls = [r.get("url") for r in (res.json().get("web") or {}).get("results") or []]
     else:
-        res = await client.post(DDG_URL, data={"q": query}, headers={"Referer": "https://html.duckduckgo.com/"})
+        res = await client.post(DDG_URL, data={"q": query}, follow_redirects=True, headers={"Referer": "https://html.duckduckgo.com/"})
         if res.status_code in (202, 403, 429):
             raise WebRecipeError("DuckDuckGo is limiting searches right now. Wait a few minutes, or add a free Brave Search key in Settings.")
         if res.status_code >= 400:

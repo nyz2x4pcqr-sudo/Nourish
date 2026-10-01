@@ -14,6 +14,8 @@ on:
       - "app.js"
       - "json-repair.js"
       - "styles.css"
+      - "manifest.webmanifest"
+      - "*.png"
       - ".github/workflows/build-exe.yml"
   workflow_dispatch:
 
@@ -50,6 +52,8 @@ jobs:
           --collect-submodules uvicorn --paths backend
           --add-data "index.html;frontend" --add-data "app.js;frontend"
           --add-data "json-repair.js;frontend" --add-data "styles.css;frontend"
+          --add-data "manifest.webmanifest;frontend" --add-data "icon-192.png;frontend"
+          --add-data "icon-512.png;frontend" --add-data "apple-touch-icon.png;frontend"
           backend/nourish_app.py
 
       - name: Smoke test the .exe
@@ -66,7 +70,8 @@ jobs:
             try {
               $health = Invoke-WebRequest http://localhost:8010/health -UseBasicParsing
               $page = Invoke-WebRequest http://localhost:8010/app.js -UseBasicParsing
-              if ($health.StatusCode -eq 200 -and $page.StatusCode -eq 200) { $ok = $true; break }
+              $icon = Invoke-WebRequest http://localhost:8010/icon-192.png -UseBasicParsing
+              if ($health.StatusCode -eq 200 -and $page.StatusCode -eq 200 -and $icon.StatusCode -eq 200) { $ok = $true; break }
             } catch { }
             Start-Sleep -Seconds 1
           }

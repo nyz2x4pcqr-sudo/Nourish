@@ -8,11 +8,9 @@ services:
     volumes:
       - ./backend:/app
       - chroma_data:/app/chroma_data
-      # The backend serves the web app too; mount only the frontend files, read-only.
-      - ./index.html:/frontend/index.html:ro
-      - ./app.js:/frontend/app.js:ro
-      - ./json-repair.js:/frontend/json-repair.js:ro
-      - ./styles.css:/frontend/styles.css:ro
+      # The backend serves the web app too. Read-only; the server only hands out a fixed list
+      # of named files (index.html, app.js, icons...), never anything else in this folder.
+      - .:/frontend:ro
     environment:
       FRONTEND_DIR: /frontend
       # Inside Docker, "localhost" is the container itself; reach LM Studio / Ollama on the PC.

@@ -243,6 +243,8 @@ async function checkBackend() {
 function updateBackendStatus() {
     if (location.protocol === 'file:') return;
     showBanner(backendOnline === false ? "Can't reach the Nourish server. Your saved plan still works; the AI needs the server." : '');
+    const summary = document.getElementById('settingsSummary-server');
+    if (summary) summary.textContent = settingsSummary('server');
     const status = document.getElementById('serverStatus');
     if (status) status.textContent = backendOnline ? 'Connected' : backendOnline === false ? 'Not reachable' : 'Checking…';
 }
@@ -313,7 +315,9 @@ function renderUpdateResult() {
             updateInfo.url ? h('a', { class: 'settings-row settings-button', href: updateInfo.url, target: '_blank', rel: 'noopener' }, 'Open the download page') : null),
         h('p', { class: 'settings-note', text: updateInfo.can_install
             ? 'Nourish downloads the update, checks it against GitHub\'s fingerprint, installs it and restarts by itself. Your plan and settings are kept.'
-            : 'This copy (Python or Docker) can\'t update itself: pull the latest code, or switch to Nourish.exe for one-tap updates.' }));
+            : serverInfo?.can_self_update
+                ? 'The download for this version isn\'t ready yet (GitHub is still building it). Try "Check now" again in a few minutes.'
+                : 'This copy (Python or Docker) can\'t update itself: pull the latest code, or switch to Nourish.exe for one-tap updates.' }));
 }
 
 async function installUpdate(e) {
@@ -569,7 +573,7 @@ function renderSettings() {
                 h('button', { type: 'button', class: 'settings-row settings-nav', onclick: () => openSettingsPage(key) },
                     h('span', { class: 'settings-nav-icon', 'aria-hidden': 'true', text: icon }),
                     h('span', { class: 'settings-label', text: title }),
-                    h('span', { class: 'settings-value settings-nav-summary' + (key === 'updates' && updateInfo?.update_available ? ' badge' : ''), text: settingsSummary(key) }),
+                    h('span', { id: `settingsSummary-${key}`, class: 'settings-value settings-nav-summary' + (key === 'updates' && updateInfo?.update_available ? ' badge' : ''), text: settingsSummary(key) }),
                     h('span', { class: 'settings-chevron', 'aria-hidden': 'true', text: '›' })))),
             h('p', { class: 'settings-note', text: `Nourish ${serverInfo?.version ? 'v' + serverInfo.version : ''} · free & open source (AGPL-3.0) · changes save automatically` }),
         );

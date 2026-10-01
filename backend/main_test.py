@@ -86,6 +86,11 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(self.client.get("/backend/.env").status_code, 404)
         self.assertEqual(self.client.get("/.git/config").status_code, 404)
 
+    def test_every_served_file_exists(self):
+        for name in main.FRONTEND_FILES:
+            self.assertTrue((main.FRONTEND_DIR / name).is_file(), name)
+            self.assertEqual(self.client.get(f"/{name}").status_code, 200, name)
+
     def test_logs_endpoint_removed(self):
         self.assertEqual(self.client.get("/api/logs").status_code, 404)
 
