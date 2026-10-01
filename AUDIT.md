@@ -222,6 +222,37 @@ What the owner reported, and what was done:
 - AI time limit raised from 5 to 15 minutes (a 14B model writing 12k tokens can take longer than 5).
 - Core dependencies tested on Python 3.12 and 3.13 (19/19 backend tests pass). They also resolve on 3.14 (not run).
 
+## Round 3 (v0.2.0-pre-alpha)
+
+Requested: organized settings, self-updating app, more recipe sources (including web search), a bug hunt, a new release, and phone apps (IPA/APK).
+
+**Built**
+- **Settings menu** with six pages and live summaries. Tapping the Settings tab again returns to the menu.
+- **Self-update** (`backend/updater.py`): checks GitHub Releases, verifies each download against GitHub's published SHA-256 digest, swaps the `.exe`, restarts, and cleans up the old copy.
+  - **Verified end to end** with two real PyInstaller builds (0.2.0 → 0.3.0) against a fake GitHub API. The app offered the update, showed notes and a badge, installed it, restarted as 0.3.0, and the page reloaded itself.
+  - Unit tests cover: a tampered download is rejected and leaves the old file untouched; a verified download is swapped.
+- **Web recipes** (`backend/web_recipes.py`): DuckDuckGo (no key) or Brave Search (key) → schema.org Recipe JSON-LD, with one search per meal type. **+ From link** adds any single recipe page.
+  - Every fetch, including each redirect hop, is checked to be a public internet address. Unit tests confirm loopback, LAN, link-local/metadata and `file:` addresses are all blocked.
+- **Phone apps:** Android (Java WebView) and iPhone (Swift WKWebView, unsigned IPA), sharing a connect page that can scan the /24 network for the PC.
+  - CI builds both and launches them in an emulator/simulator against a real server.
+- **Release workflow** (`release.yml`) builds the `.exe`, `.apk` and `.ipa` and publishes them together.
+
+**Bugs found and fixed this round** (all reproduced first)
+1. The app used port 8000 even when served on another port (`NOURISH_PORT`), so it showed another server's data or failed. *Found by the self-update test.*
+2. After a self-update, the new copy looked for its web files in the old copy's deleted temp folder, which it inherited through the environment. This would have broken every update on Windows too.
+3. A downloaded update lost its executable permission (non-Windows only).
+4. The update screen showed the newest *release* number as "your version" when the installed copy was newer.
+5. The settings menu's server status didn't refresh.
+6. Docker and the `.exe` build would have been missing the new icon and manifest files. There's now a test that every served file exists, and the Windows smoke test fetches an icon.
+7. When a release is published before its `.exe` is attached, the Windows app wrongly said it "can't update itself".
+8. A clipped label in Recipe sources.
+
+**Honest limits**
+- **iPhone:** the IPA is unsigned. It can't be installed without re-signing (AltStore/Sideloadly with your Apple ID), and free-account signatures expire after 7 days. A signed, permanent install needs a paid Apple Developer account. There's no way around Apple's rules.
+- **Android:** debug-signed. Installing a future build over it may require uninstalling first, because each build machine has its own debug key. To fix this, add a release keystore as a GitHub secret.
+- **Both phone apps** display Nourish from the PC. They don't work with the PC off, and Export doesn't work inside them.
+- **Web search:** live DuckDuckGo/Brave/recipe-site requests are **UNVERIFIED** (those hosts are blocked from this sandbox). Tested only against faithful local copies of their page formats.
+
 ## UNVERIFIED (and why)
 
 - **Live TheMealDB, Spoonacular and USDA calls** — those hosts are blocked by this sandbox's network policy. The endpoints were tested against faked responses in the documented format.
@@ -229,4 +260,6 @@ What the owner reported, and what was done:
 - **Knowledge base** — huggingface.co is blocked, so the embedding model can't download. The endpoints return a clean 503 here.
 - **Docker** — no Docker daemon in this environment. `Dockerfile` and `docker-compose.yml` were edited but not built.
 - **Actual iPhone Safari** — tested with Chromium in mobile emulation (390×844, touch) only. Safe-area insets are zero in emulation.
+- **Phone apps on real devices** — tested only in GitHub's Android emulator and iOS simulator (see the workflow's screenshots). Sideloading, the Local Network prompt and Wi-Fi scanning on a real phone are untested.
+- **Self-update on real Windows** — the swap-and-restart was tested with Linux builds of the app, plus the same code paths in unit tests. `os.rename` of a running `.exe` and `CREATE_NEW_CONSOLE` are standard Windows behaviour, but the first real Windows update (0.2.0 → the next release) is untested.
 - **Exact Dependabot alert list** — not readable with the tools here; reproduced with `pip-audit`.

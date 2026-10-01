@@ -92,6 +92,40 @@ Want to use LM Studio from Docker, or from another PC? In LM Studio's server set
 
 ---
 
+## Updates
+
+| Problem | What to do |
+|---|---|
+| "Couldn't reach GitHub to check for updates" | Check the PC's internet connection. Updates are optional; Nourish works without them. |
+| "GitHub's rate limit was hit" | GitHub allows about 60 checks an hour per home connection. Wait an hour. |
+| "The download for this version isn't ready yet" | The release was just published and GitHub is still building it. Try again in a few minutes. |
+| "didn't match GitHub's fingerprint" | The download was damaged or changed on the way, so Nourish refused to install it. Try again. Your current version is untouched. |
+| Updated but didn't come back | Start `Nourish.exe` again. If `Nourish.old.exe` is still in the folder, you can delete it. |
+| Python or Docker install | These can't update themselves. Run `git pull`, then restart. |
+
+---
+
+## Phone apps
+
+| Problem | What to do |
+|---|---|
+| "Find my PC automatically" finds nothing | Start Nourish on the PC first, and check both are on the same Wi-Fi (not guest Wi-Fi). Allow Nourish on **Private networks** in the Windows Firewall prompt. Or type the address shown in the Nourish window. |
+| iPhone: no "Find my PC" button, or it never finds anything | Allow **Local Network** access: iPhone **Settings → Nourish → Local Network**. |
+| iPhone: "Untrusted Developer" / the app won't open | **Settings → General → VPN & Device Management** → trust your Apple ID. On iOS 16+, also turn on **Settings → Privacy & Security → Developer Mode**. |
+| iPhone: the app stopped opening after a week | Free Apple ID sideloads expire after 7 days. Refresh it in AltStore or Sideloadly. |
+| Android: "App not installed" | Allow "Install unknown apps" for the browser or file manager you're using. If an older Nourish is installed, uninstall it first. |
+| Connected to the wrong PC | **Settings → Server & phone → Connect to a different PC**. |
+
+---
+
+## Web search finds nothing
+
+- "DuckDuckGo is limiting searches right now": DuckDuckGo throttles automated searches sometimes. Wait a few minutes, or get a free key at [brave.com/search/api](https://brave.com/search/api) and add it under **Settings → Recipe sources** (choose *Brave Search*).
+- "No recipe was found on that page": the link has to be a page with one recipe on it, not a list of recipes, a video, or a page behind a login.
+- Some sites block automated readers. Try another site, or another search.
+
+---
+
 ## The plan never shows up
 
 - Look at the bar at the top of the app. While a plan is cooking it shows a timer and **Cancel**. If something fails, the reason stays there until you tap **Dismiss**.
