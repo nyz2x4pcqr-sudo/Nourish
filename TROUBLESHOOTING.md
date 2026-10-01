@@ -114,7 +114,7 @@ Want to use LM Studio from Docker, or from another PC? In LM Studio's server set
 | iPhone: "Untrusted Developer" / the app won't open | **Settings → General → VPN & Device Management** → trust your Apple ID. On iOS 16+, also turn on **Settings → Privacy & Security → Developer Mode**. |
 | iPhone: the app stopped opening after a week | Free Apple ID sideloads expire after 7 days. Refresh it in AltStore or Sideloadly. |
 | Android: "App not installed" | Allow "Install unknown apps" for the browser or file manager you're using. If an older Nourish is installed, uninstall it first. |
-| Connected to the wrong PC | **Settings → Server & phone → Connect to a different PC**. |
+| Connected to the wrong PC | **Settings → Server & devices → Connect to a different PC**. |
 
 ---
 
@@ -133,6 +133,14 @@ Want to use LM Studio from Docker, or from another PC? In LM Studio's server set
 - The reply is broken or cut short: try **Response length: Long**, a lower **Creativity**, or a larger or non-"coder" model.
 
 ---
+
+## My phone and PC show different settings or plans
+
+Since 0.3.0, everything is kept on the PC and synced, usually within a few seconds (immediately when you switch back to the app).
+- Open **Settings → Server & devices**. **Sync** should say "Up to date with your PC". Tap **Sync now** to force it.
+- "Can't reach your PC right now": the phone is offline or on another Wi-Fi. Changes are kept on the phone and sent when it reconnects.
+- If two devices change the *same* thing at the same moment, the last change wins.
+- Everything is stored in `nourish-data.json` in the folder Nourish runs from. Deleting it resets the PC's copy; the next device that connects sends its own copy back.
 
 ## Other messages
 

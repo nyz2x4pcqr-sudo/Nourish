@@ -262,6 +262,26 @@ All of these pass.
 - **Both phone apps** display Nourish from the PC. They don't work with the PC off, and Export doesn't work inside them.
 - **Web search:** live DuckDuckGo/Brave/recipe-site requests are **UNVERIFIED** (those hosts are blocked from this sandbox). Tested only against faithful local copies of their page formats.
 
+## Round 4 (v0.3.0-pre-alpha)
+
+**Asked for:** a more modern, professional look; more settings; chat that actually puts plans into the Plan tab; phone app settings that match the PC.
+
+**Root cause of "the iPhone's settings don't match the PC":** everything was stored per device in `localStorage`, so each browser and phone app had its own separate settings, plan and chat. **Fixed:** a shared store on the PC (`backend/store.py`, `GET /api/state`, `PUT /api/state/{section}`), saved atomically to `nourish-data.json`, with revision numbers rather than clocks. API keys are kept on the PC and never returned (devices only see "saved: yes/no"); the AI and recipe endpoints use the PC's saved key when a device doesn't send one. A damaged data file is set aside instead of crashing. 8 new backend tests.
+
+**Chat → plan:** the chat recognises "make me a plan" (creates a plan in the Plan tab) and "swap/change <day> <meal>" (edits only those meals via a `{"changes": [...]}` reply). Results show as a card in the chat. Can be turned off in Settings → Chat. Every recipe also has **Swap meal**.
+
+**Redesign:** new design system (dark, light and auto themes; 6 accent colours; 3 text sizes; reduced motion), SVG icons instead of emoji, greeting header, day strip, calorie ring, plan as day cards, grocery progress, custom grocery items, sharing, nine settings pages. The phone apps now match the status bar to the theme.
+
+**Bugs found while testing this round (fixed):**
+1. Choosing DuckDuckGo still used a Brave key saved on the PC. The request now says which engine to use.
+2. A device that received a plan by sync stayed on Monday instead of today.
+3. "Share" failed where the clipboard API is refused; it now falls back.
+4. Several buttons were under the 44 px tap size (theme buttons, grocery remove, chat-card buttons); the recipe close button was drawn at hero size; the header button got squeezed by long names.
+
+**Verified (browser, two separate devices against one server, fake LLM):** settings changed on device A (theme, accent, text size, name, API key) appear on device B (as the iPhone app); the key never appears in `/api/state` or device storage; "make me a plan" in chat fills the Plan tab; "swap Wednesday dinner…" changes only that meal; plain questions get normal replies (HTML in replies stays text); swap from recipe; grocery add/tick/share and sync to device B; every screen and settings page has no tap targets under 44 px (the colour dots use a 44 px invisible tap area), no inputs under 16 px, no stray "null/undefined", no sideways scrolling. 41 backend + 11 frontend tests pass.
+
+**Not verified:** the status-bar colour change in the phone apps (needs the CI build/real device); the edit prompt with real models (small local models may ignore the `changes` format — the app then shows an error in the chat instead of changing anything).
+
 ## UNVERIFIED (and why)
 
 - **Live TheMealDB, Spoonacular and USDA calls** — those hosts are blocked by this sandbox's network policy. The endpoints were tested against faked responses in the documented format.

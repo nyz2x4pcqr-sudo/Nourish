@@ -17,16 +17,20 @@ Nourish makes a 7-day meal plan (breakfast, lunch, dinner) with recipes, calorie
   - **TheMealDB**: free, no key. It has no nutrition data, so calories show as "—".
   - **Spoonacular**: needs a free key.
   - **+ From link** on the Plan tab adds any single recipe page to a day and meal you pick.
-- **Chat with the chef**: describe what you want in plain words ("cheap high-protein dinners, nothing spicy"), go back and forth, then tap **Make plan** to turn the conversation into your 7-day plan. You can also ask about any recipe.
-- **Settings, organized into pages**: AI model, Your profile, Recipe sources, Server & phone, Updates, and Data & privacy.
-  - Pick the exact AI model, creativity and response length, and test the AI.
-  - Your profile (calorie and protein targets, diet, allergies, cuisines, maximum cooking time, servings, skill, budget, units) is used in every plan and chat.
+- **Chat with the chef**: describe what you want in plain words ("cheap high-protein dinners, nothing spicy") and go back and forth.
+  - Say **"make me a plan"** and the plan goes straight into the Plan tab (or tap **Make plan**).
+  - Say **"swap Wednesday dinner for something vegetarian"** and just that meal changes.
+  - You can also ask about any recipe. Every recipe also has a **Swap meal** button.
+- **Settings, organized into pages**: Appearance, AI model, Chat, Your profile, Recipe sources, Grocery list, Server & devices, Updates, and Data & privacy.
+  - Theme (dark, light or auto), accent colour, text size, which tab opens first, which day the week starts, show/hide nutrition, reduce motion.
+  - Pick the exact AI model, creativity and plan length, and test the AI. Choose the chef's style and reply length, and whether chat may change your plan.
+  - Your profile (name, goal, calorie and protein targets, diet, allergies, foods you love and avoid, cuisines, maximum cooking time, servings, skill, budget, units) is used in every plan and chat.
   - Settings save automatically.
 - **Updates itself**: the Windows app checks GitHub for new releases. One tap downloads, verifies, installs and restarts.
 - **Phone apps** for Android (`.apk`) and iPhone (`.ipa`, sideloaded). They find your PC on the Wi-Fi and open Nourish from it.
 - **Today screen**: calories and protein/carbs/fat for each day against your targets, with meal cards you can tap for the full recipe.
-- **Grocery list**: built from every ingredient in the plan, grouped by category. Your ticks are saved.
-- **Saved on the device**: your plan, grocery ticks and settings are kept in the browser (`localStorage`). They survive a reload and work even while the server is off. Only making a new plan needs the server.
+- **Grocery list**: built from every ingredient in the plan, grouped by aisle, with a progress bar. Add your own items, hide ticked ones, and share or copy the list.
+- **The same everywhere**: your settings, plan, grocery list and chat are kept on the PC (in `nourish-data.json`, next to Nourish) and synced to every browser and phone app connected to it, within a few seconds. Each device also keeps a copy, so a saved plan still shows while the PC is off. API keys are stored on the PC and never sent back to phones.
 
 Making a plan with a local model can take a few minutes. It runs in the background on your PC, so you can lock your phone or switch apps and the plan still arrives. The backend also has a knowledge-base (RAG) API, but the current UI doesn't use it (see `AUDIT.md`).
 
@@ -99,7 +103,7 @@ The apps show Nourish from your PC, so the PC must be on and running Nourish. Wh
 **Or just use the browser:**
 
 1. Keep the server running on the PC. The PC and phone must be on the same Wi-Fi.
-2. Find the address: it's printed in the Nourish window, and shown in **Settings → Server & phone**. (Or on Windows: `ipconfig` → "IPv4 Address", e.g. `192.168.1.23`.)
+2. Find the address: it's printed in the Nourish window, and shown in **Settings → Server & devices**. (Or on Windows: `ipconfig` → "IPv4 Address", e.g. `192.168.1.23`.)
 3. On the iPhone, open Safari and go to `http://192.168.1.23:8000`.
 4. Optional: tap Share → **Add to Home Screen** to get an app icon.
 
@@ -109,7 +113,7 @@ Windows may ask whether Python can accept network connections. Allow it on **Pri
 
 ## 🔧 Configuration
 
-Everything can be set in the app under **⚙️ Settings**: the AI provider and model, creativity, response length, API keys, your profile, and your Spoonacular key. Keys are stored only on that device and sent only to your own Nourish server.
+Everything can be set in the app under **⚙️ Settings**: the AI provider and model, creativity, response length, API keys, your profile, and your Spoonacular key. Settings sync to every device. API keys are kept on your PC (in `nourish-data.json`) and are never sent back to phones or browsers; devices only see whether a key is saved.
 
 The address the *server* uses to reach LM Studio or Ollama is set on the server, not in the app: `LMSTUDIO_URL` / `OLLAMA_URL` in `backend/.env`. The defaults are right for the `.exe` and Python (`localhost`) and for Docker (`host.docker.internal`, set in `docker-compose.yml`). Settings shows the current value.
 
