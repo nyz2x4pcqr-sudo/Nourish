@@ -1,6 +1,7 @@
 import Foundation
 import os
 import UIKit
+import UserNotifications
 
 /// What the built-in web app asks the iPhone to do (see ondevice.js): report the phone's specs,
 /// fetch web pages and APIs, download models from Hugging Face, and run them with llama.cpp.
@@ -115,8 +116,12 @@ final class NativeBridge: NSObject {
         case "cancelGenerate": engine.cancel(); return [String: Any]()
         case "keepAwake":
             let on = a["on"] as? Bool ?? false
-            DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = on }
+            DispatchQueue.main.async {
+                if UIApplication.shared.isIdleTimerDisabled != on { self.log("Screen stays on: \(on ? "yes" : "no")", level: "debug") }
+                UIApplication.shared.isIdleTimerDisabled = on
+            }
             return [String: Any]()
+        case "notify": return notify(a)
         case "setMode":
             let mode = a["mode"] as? String ?? "local"
             DispatchQueue.main.async { self.setMode(mode) }
@@ -365,28 +370,138 @@ final class NativeBridge: NSObject {
 
     // MARK: Running a model
 
+    /// Runs the model. Wrapped in an iOS background task: when Nourish leaves the screen mid-answer,
+    /// iOS allows a short extra time (logged every 5 s as "background time left"); when that runs out
+    /// the answer is stopped and reported as `suspended`, and the page asks again once Nourish is back.
+    /// The graphics chip can't be used in the background at all; a GPU failure there (code -3) is
+    /// also reported as `suspended`. A GPU failure on screen is retried once on the processor.
     private func generate(_ a: [String: Any]) throws -> [String: Any] {
         let model = Self.modelsDir.appendingPathComponent(try Self.safeName(a["model"] as? String))
         guard FileManager.default.fileExists(atPath: model.path) else { throw BridgeError(message: "That model isn't downloaded on this phone.") }
         let messages: [(role: String, content: String)] = (a["messages"] as? [[String: Any]] ?? []).map {
             (role: $0["role"] as? String ?? "user", content: $0["content"] as? String ?? "")
         }
+        let nCtx = a["n_ctx"] as? Int ?? 4096
+        var gpu = a["gpu"] as? Bool ?? true
+        try load(model, nCtx: nCtx, gpu: gpu)
+
+        var expired = false
+        let task = BackgroundWindow(name: "Nourish AI", log: { [weak self] in self?.log($0, level: $1) }) { [weak self] in
+            expired = true
+            self?.engine.cancel()
+            Self.postNotification(title: "Nourish paused", body: "iOS paused Nourish while it was working. Open Nourish to continue.")
+        }
+        defer { task.end() }
+
+        let genStart = Date()
+        defer { log(String(format: "Generated in %.1f s%@", Date().timeIntervalSince(genStart), engine.cancelRequested ? " (stopped)" : ""), level: "debug") }
+        for attempt in 0..<2 {
+            do {
+                let text = try engine.generate(messages: messages, grammar: a["grammar"] as? String,
+                                               temperature: Float(a["temperature"] as? Double ?? 0.7), maxTokens: a["max_tokens"] as? Int ?? 1024)
+                if expired { log("Answer stopped: iOS ended Nourish's background time", level: "warn") }
+                return ["text": text, "cancelled": engine.cancelRequested, "suspended": expired]
+            } catch {
+                let message = error.localizedDescription
+                let gpuFailure = message.contains("(code -3)") || message.contains("(code -2)")
+                let active = Self.appIsActive()
+                log("Generation failed: \(message) (app \(active ? "on screen" : "in the background"), graphics chip \(gpu ? "on" : "off"), memory available \(os_proc_available_memory() / 1_048_576) MB)", level: "warn")
+                if gpuFailure && (!active || expired) {
+                    // iOS doesn't let apps use the graphics chip in the background.
+                    return ["text": "", "cancelled": true, "suspended": true]
+                }
+                if gpuFailure && gpu && attempt == 0 {
+                    log("The graphics chip failed while Nourish was on screen; trying again on the processor", level: "warn")
+                    gpu = false
+                    try load(model, nCtx: nCtx, gpu: false)
+                    continue
+                }
+                if gpuFailure {
+                    throw BridgeError(message: "The phone couldn't run the model (\(message.contains("-2") ? "out of graphics memory" : "graphics chip error")). Close other apps and try again, or pick a smaller model.")
+                }
+                throw error
+            }
+        }
+        throw BridgeError(message: "The model couldn't answer.")
+    }
+
+    private func load(_ model: URL, nCtx: Int, gpu: Bool) throws {
         let loadStart = Date()
         let wasLoaded = engine.isLoaded(path: model.path)
         do {
-            try engine.ensureLoaded(path: model.path, nCtx: a["n_ctx"] as? Int ?? 4096, gpu: a["gpu"] as? Bool ?? true)
+            try engine.ensureLoaded(path: model.path, nCtx: nCtx, gpu: gpu)
         } catch {
             log("Loading \(model.lastPathComponent) failed: \(error.localizedDescription) (memory available: \(os_proc_available_memory() / 1_048_576) MB)", level: "error")
             throw error
         }
-        if !wasLoaded {
-            log(String(format: "Loaded %@ in %.1f s (memory still available: %ld MB)", model.lastPathComponent, Date().timeIntervalSince(loadStart), os_proc_available_memory() / 1_048_576))
+        if !wasLoaded || Date().timeIntervalSince(loadStart) > 0.5 {
+            log(String(format: "Loaded %@ in %.1f s (graphics chip %@, memory still available: %ld MB)", model.lastPathComponent, Date().timeIntervalSince(loadStart), gpu ? "on" : "off", os_proc_available_memory() / 1_048_576))
         }
-        let genStart = Date()
-        defer { log(String(format: "Generated in %.1f s%@", Date().timeIntervalSince(genStart), engine.cancelRequested ? " (cancelled)" : ""), level: "debug") }
-        let text = try engine.generate(messages: messages, grammar: a["grammar"] as? String,
-                                       temperature: Float(a["temperature"] as? Double ?? 0.7), maxTokens: a["max_tokens"] as? Int ?? 1024)
-        return ["text": text, "cancelled": engine.cancelRequested]
+    }
+
+    static func appIsActive() -> Bool {
+        if Thread.isMainThread { return UIApplication.shared.applicationState == .active }
+        return DispatchQueue.main.sync { UIApplication.shared.applicationState == .active }
+    }
+
+    // MARK: Notifications
+
+    /// {permission: true} asks once; {title, body} shows a notification now.
+    private func notify(_ a: [String: Any]) -> [String: Any] {
+        if a["permission"] as? Bool == true {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
+                self?.log("Notifications \(granted ? "allowed" : "not allowed")\(error.map { ": \($0.localizedDescription)" } ?? "")", level: "debug")
+            }
+            return [:]
+        }
+        Self.postNotification(title: a["title"] as? String ?? "Nourish", body: a["body"] as? String ?? "")
+        return [:]
+    }
+
+    static func postNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+}
+
+/// An iOS background task around one piece of work, with the time iOS still allows written to the
+/// activity log every 5 s while Nourish is off screen. `end()` must be called (it's idempotent).
+final class BackgroundWindow {
+    private var id: UIBackgroundTaskIdentifier = .invalid
+    private var timer: DispatchSourceTimer?
+    private let lock = NSLock()
+    private var ended = false
+
+    init(name: String, log: @escaping (String, String) -> Void, expired: @escaping () -> Void) {
+        let begin = {
+            self.id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+                log(String(format: "iOS is ending Nourish's background time now (%.0f s left)", UIApplication.shared.backgroundTimeRemaining), "warn")
+                expired()
+                self?.end()
+            }
+        }
+        if Thread.isMainThread { begin() } else { DispatchQueue.main.sync(execute: begin) }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.setEventHandler {
+            guard UIApplication.shared.applicationState != .active else { return }
+            let left = UIApplication.shared.backgroundTimeRemaining
+            log(left > 100_000 ? "In the background: iOS hasn't limited the time yet" : String(format: "In the background: %.0f s of background time left", left), "info")
+        }
+        timer.resume()
+        self.timer = timer
+    }
+
+    func end() {
+        lock.lock(); defer { lock.unlock() }
+        guard !ended else { return }
+        ended = true
+        timer?.cancel()
+        let id = self.id
+        DispatchQueue.main.async { if id != .invalid { UIApplication.shared.endBackgroundTask(id) } }
     }
 }
 

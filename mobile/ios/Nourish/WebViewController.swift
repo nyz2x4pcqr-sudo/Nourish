@@ -134,7 +134,23 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         showConnect(error: "Couldn't reach Nourish at \(address). Is it running on your PC, and is this iPhone on the same Wi-Fi?")
     }
 
+    // The page also gets the screen's safe areas from here (as --native-safe-*), in case
+    // env(safe-area-inset-*) reports 0, as it can when the app runs inside another app.
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        sendSafeArea()
+    }
+
+    private func sendSafeArea() {
+        guard let webView else { return }
+        let i = view.safeAreaInsets
+        let js = "(function (s) { s.setProperty('--native-safe-top', '\(Int(i.top))px'); s.setProperty('--native-safe-bottom', '\(Int(i.bottom))px'); "
+            + "s.setProperty('--native-safe-left', '\(Int(i.left))px'); s.setProperty('--native-safe-right', '\(Int(i.right))px'); })(document.documentElement.style)"
+        webView.evaluateJavaScript(js)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        sendSafeArea()
         if webView.url?.scheme == LocalAppSchemeHandler.scheme { runProbeIfAsked() }
         guard webView.url?.isFileURL == true else { return }
         let info: [String: Any] = [
