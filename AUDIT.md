@@ -246,6 +246,15 @@ Requested: organized settings, self-updating app, more recipe sources (including
 6. Docker and the `.exe` build would have been missing the new icon and manifest files. There's now a test that every served file exists, and the Windows smoke test fetches an icon.
 7. When a release is published before its `.exe` is attached, the Windows app wrongly said it "can't update itself".
 8. A clipped label in Recipe sources.
+9. **Blank app on older phones** (found by the emulator test). `app.js` used logical assignment (`||=`, Chrome 85+), `Element.replaceChildren` (Chrome 86+) and regex lookbehind (Safari 16.4+). One unsupported feature stops the whole script, so the Android app on an older WebView and iPhones on iOS 15–16.3 showed a blank screen. Rewritten without them; `tests/compat.test.js` fails if they come back (checked: it fails on the old code).
+10. **`/api/info` could take ~5 s** (found by the iOS simulator test). It looked up the PC's own hostname on every call, which can stall on mDNS. The app timed out, so Settings showed no server details. Addresses are now found once in the background and cached; the hostname lookup is only a fallback.
+
+**Phone app verification (CI):** both apps are built, then launched in an Android 11 emulator / iOS simulator against a real Nourish server. The tests check:
+- Android reads "Connect to Nourish" off the screen on first launch, and the Nourish app's text after connecting.
+- On both platforms, the server's request log must show the app loading `app.js` and its own code calling `/api/info`.
+- Android also checks logcat for crashes.
+
+All of these pass.
 
 **Honest limits**
 - **iPhone:** the IPA is unsigned. It can't be installed without re-signing (AltStore/Sideloadly with your Apple ID), and free-account signatures expire after 7 days. A signed, permanent install needs a paid Apple Developer account. There's no way around Apple's rules.
