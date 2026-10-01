@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const FILES = ['app.js', 'json-repair.js', 'mobile/shared/connect.html'];
+const FILES = ['app.js', 'ondevice.js', 'json-repair.js', 'mobile/shared/connect.html'];
 const TOO_NEW = [
     [/\|\|=|&&=|\?\?=/, 'logical assignment (||=, &&=, ??=): Chrome 85'],
     [/\(\?<[=!]/, 'regex lookbehind: Safari 16.4'],

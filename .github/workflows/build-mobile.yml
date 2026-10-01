@@ -12,6 +12,7 @@ on:
       - "index.html"
       - "app.js"
       - "json-repair.js"
+      - "ondevice.js"
       - "styles.css"
       - ".github/workflows/build-mobile.yml"
   workflow_dispatch:

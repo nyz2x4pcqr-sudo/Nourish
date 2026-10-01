@@ -11,7 +11,13 @@ const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
 const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
 const MEAL_ICONS = { breakfast: 'i-sunrise', lunch: 'i-sun', dinner: 'i-moon' };
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const PROVIDERS = { lmstudio: 'LM Studio (local)', ollama: 'Ollama (local)', claude: 'Claude', openai: 'OpenAI' };
+const PROVIDERS = { local: 'On this phone', lmstudio: 'LM Studio (local)', ollama: 'Ollama (local)', claude: 'Claude', openai: 'OpenAI' };
+// Phone-only mode (see ondevice.js) offers on-device AI and cloud AIs; on a PC, the PC's own AIs.
+const isLocalMode = () => typeof LOCAL_MODE !== 'undefined' && LOCAL_MODE;
+function availableProviders() {
+    const keys = isLocalMode() ? ['local', 'claude', 'openai'] : ['lmstudio', 'ollama', 'claude', 'openai'];
+    return Object.fromEntries(keys.map(k => [k, PROVIDERS[k]]));
+}
 const MODEL_SUGGESTIONS = {
     claude: ['claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'],
     openai: ['gpt-4o-mini', 'gpt-4o'],
@@ -51,6 +57,11 @@ const SETTINGS_DEFAULTS = {
     openai_model: 'gpt-4o-mini',
     temperature: '0.7',
     max_tokens: '8000',
+    // on-device AI (phone app only)
+    local_model: '',
+    local_gpu: 'on',
+    local_ctx: '4096',
+    keep_awake: 'on',
     // chat
     chef_style: 'friendly',
     chat_length: 'normal',
@@ -125,7 +136,7 @@ function h(tag, props = {}, ...children) {
         else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
         else el.setAttribute(k, v === true ? '' : v);
     }
-    for (const c of children.flat()) {
+    for (const c of children.flat(Infinity)) {
         if (c == null || c === false) continue;
         el.append(c instanceof Node ? c : document.createTextNode(String(c)));
     }
@@ -150,7 +161,7 @@ function icon(name, cls) {
 // Written without el.replaceChildren() so older phone browsers (Android WebView < 86) work too.
 function setChildren(el, ...children) {
     while (el.firstChild) el.removeChild(el.firstChild);
-    el.append(...children.flat().filter(c => c != null && c !== false));
+    el.append(...children.flat(Infinity).filter(c => c != null && c !== false));
 }
 
 const $ = id => document.getElementById(id);
@@ -199,7 +210,7 @@ function renderAll() {
 // === LOCAL STATE ===
 function loadLocalState() {
     for (const key of Object.keys(SETTINGS_DEFAULTS)) settings[key] = load(key, SETTINGS_DEFAULTS[key]);
-    if (!PROVIDERS[settings.active_provider]) settings.active_provider = 'lmstudio';
+    if (!availableProviders()[settings.active_provider]) settings.active_provider = isLocalMode() ? 'local' : 'lmstudio';
     secretsSet = loadJSON('nourish_secrets_set', {});
     pendingClears = loadJSON('nourish_pending_clears', []);
 
@@ -314,7 +325,7 @@ function applyRemote(section, value) {
             if (SECRET_FIELDS.includes(key)) continue;   // keys never come back from the PC
             settings[key] = value[key] == null ? SETTINGS_DEFAULTS[key] : String(value[key]);
         }
-        if (!PROVIDERS[settings.active_provider]) settings.active_provider = 'lmstudio';
+        if (!availableProviders()[settings.active_provider]) settings.active_provider = 'lmstudio';
         secretsSet = value._secrets_set && typeof value._secrets_set === 'object' ? value._secrets_set : {};
         applyAppearance();
     } else if (section === 'prefs') {
@@ -355,6 +366,7 @@ async function pushSection(section) {
 }
 
 async function syncNow() {
+    if (isLocalMode()) return;   // phone-only: nothing to sync with
     if (location.protocol === 'file:' && backendOnline !== true) return;
     if (syncing) { syncAgain = true; return; }
     syncing = true;
@@ -401,6 +413,7 @@ function rerenderAfterSync(sections) {
 }
 
 function syncStatusText() {
+    if (isLocalMode()) return 'Off: Nourish is running on this phone only';
     if (location.protocol === 'file:') return 'Not synced (opened as a file)';
     if (SECTIONS.some(s => syncMeta[s].dirty)) return syncFailed ? 'Waiting for the PC… changes are saved here' : 'Saving to your PC…';
     if (syncFailed) return "Can't reach your PC right now";
@@ -528,6 +541,7 @@ function showJobBar(state, message) {
 
 // === API ===
 async function api(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
+    if (isLocalMode()) return localApi(path, { method, body });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res;
@@ -645,6 +659,8 @@ function renderUpdateResult() {
             updateInfo.url ? h('a', { class: 'settings-row settings-button', href: updateInfo.url, target: '_blank', rel: 'noopener' }, 'Open the download page') : null),
         h('p', { class: 'settings-note', text: updateInfo.can_install
             ? 'Nourish downloads the update, checks it against GitHub\'s fingerprint, installs it and restarts by itself. Your plan and settings are kept.'
+            : isLocalMode()
+                ? 'Download the new app from the release page and install it the same way as before. Your plan, settings and models are kept.'
             : serverInfo && serverInfo.can_self_update
                 ? 'The download for this version isn\'t ready yet (GitHub is still building it). Try "Check now" again in a few minutes.'
                 : 'This copy (Python or Docker) can\'t update itself: pull the latest code, or switch to Nourish.exe for one-tap updates.' }));
@@ -724,6 +740,7 @@ async function fetchModels(provider) {
 async function buildAIRequest(messages, { maxTokens } = {}) {
     const p = settings.active_provider;
     let model = settings[`${p}_model`];
+    if (p === 'local' && !model) throw new Error('Download a model first: Settings → AI model.');
     if (!model && (p === 'lmstudio' || p === 'ollama')) {
         const list = await fetchModels(p);
         if (list.error) throw new Error(list.error);
@@ -733,7 +750,7 @@ async function buildAIRequest(messages, { maxTokens } = {}) {
             : 'Ollama has no models. Run "ollama pull llama3.2" on your PC.');
     }
     if (!model) throw new Error('Pick a model in Settings first.');
-    if ((p === 'claude' || p === 'openai') && !settings[`${p}_api_key`] && !secretsSet[`${p}_api_key`]) {
+    if ((p === 'claude' || p === 'openai') && !settings[`${p}_api_key`] && (isLocalMode() || !secretsSet[`${p}_api_key`])) {
         throw new Error(`Add your ${PROVIDERS[p]} API key in Settings → AI model first.`);
     }
     return {
@@ -748,8 +765,11 @@ async function buildAIRequest(messages, { maxTokens } = {}) {
 }
 
 function extractText(provider, data) {
-    if (provider === 'claude') return ((data && data.content) || []).filter(b => b && b.type === 'text').map(b => b.text).join('');
-    return (data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    const text = provider === 'claude'
+        ? ((data && data.content) || []).filter(b => b && b.type === 'text').map(b => b.text).join('')
+        : (data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    // Some models "think out loud" in <think> tags first; only the answer matters.
+    return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 }
 
 // === PROFILE → PROMPTS ===
@@ -970,12 +990,14 @@ function settingsSummary(page) {
     const s = settings;
     switch (page) {
         case 'appearance': return `${{ dark: 'Dark', light: 'Light', system: 'Auto' }[s.theme] || 'Dark'} · ${s.accent.charAt(0).toUpperCase() + s.accent.slice(1)}`;
-        case 'ai': return `${PROVIDERS[s.active_provider].replace(' (local)', '')} · ${s[`${s.active_provider}_model`] || 'auto'}`;
+        case 'ai': return s.active_provider === 'local'
+            ? `This phone · ${s.local_model ? s.local_model.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '') : 'no model yet'}`
+            : `${PROVIDERS[s.active_provider].replace(' (local)', '')} · ${s[`${s.active_provider}_model`] || 'auto'}`;
         case 'chat': return `${s.chef_style.charAt(0).toUpperCase() + s.chef_style.slice(1)} · ${on('chat_actions') ? 'can edit plan' : 'chat only'}`;
         case 'profile': return `${s.calorie_target} kcal · ${s.diet === 'No restriction' ? 'any diet' : s.diet}`;
         case 'sources': return s.web_engine === 'brave' ? 'Web: Brave' : 'Web: DuckDuckGo';
         case 'grocery': return grocery.custom.length ? `${grocery.custom.length} added by you` : '';
-        case 'server': return backendOnline ? 'Connected' : backendOnline === false ? 'Not reachable' : '';
+        case 'server': return isLocalMode() ? 'This phone only' : backendOnline ? 'Connected' : backendOnline === false ? 'Not reachable' : '';
         case 'updates': return updateInfo && updateInfo.update_available ? `v${updateInfo.latest} available` : serverInfo ? `v${serverInfo.version}` : '';
         default: return '';
     }
@@ -1068,6 +1090,7 @@ const SETTINGS_RENDERERS = {
     ai() {
         const p = settings.active_provider;
         const cloud = p === 'claude' || p === 'openai';
+        const local = p === 'local';
         const tempValue = h('span', { class: 'settings-value', text: temperatureLabel(settings.temperature) });
         const tempSlider = h('input', {
             type: 'range', min: '0', max: '1.2', step: '0.1', value: settings.temperature, class: 'settings-range',
@@ -1077,16 +1100,17 @@ const SETTINGS_RENDERERS = {
         });
         return [
             ...settingsGroup('Provider', [
-                settingsRow('Provider', settingsSelect('active_provider', PROVIDERS, { onchange: () => renderSettings() })),
-                h('div', { id: 'modelControl' }),
+                settingsRow('Provider', settingsSelect('active_provider', availableProviders(), { onchange: () => renderSettings() })),
+                local ? null : h('div', { id: 'modelControl' }),
                 cloud ? secretRow(`${p}_api_key`, 'API key', p === 'claude' ? 'sk-ant-…' : 'sk-…') : null,
             ], h('span', { id: 'modelHint' })),
+            local ? renderOnDeviceSection() : null,
             ...settingsGroup('Answers', [
                 h('div', { class: 'settings-row settings-row-stack' },
                     h('div', { class: 'settings-row-top' }, h('span', { class: 'settings-label', text: 'Creativity' }), tempValue),
                     tempSlider),
-                settingsRow('Plan length', settingsSelect('max_tokens', { 4000: 'Short (faster)', 8000: 'Standard', 12000: 'Long', 16000: 'Extra long' })),
-            ], 'Lower creativity gives more predictable plans. Use "Long" if plans come back with fewer than 7 days.'),
+                local ? null : settingsRow('Plan length', settingsSelect('max_tokens', { 4000: 'Short (faster)', 8000: 'Standard', 12000: 'Long', 16000: 'Extra long' })),
+            ], local ? 'Lower creativity gives more predictable plans.' : 'Lower creativity gives more predictable plans. Use "Long" if plans come back with fewer than 7 days.'),
             ...settingsGroup('Check', [
                 settingsButton('Test the AI', testAI),
                 h('div', { id: 'testResult', class: 'settings-row settings-result', hidden: true }),
@@ -1161,6 +1185,14 @@ const SETTINGS_RENDERERS = {
         ];
     },
     server() {
+        if (isLocalMode()) {
+            return [
+                ...settingsGroup('Where Nourish runs', [
+                    infoRow('Running', 'On this phone only'),
+                    settingsButton('Connect to my PC instead', switchToPc),
+                ], 'Everything (your plan, settings, chat and AI models) stays on this phone. Connecting to Nourish on your PC instead shares one plan between all your devices and lets you use the PC\'s AI.'),
+            ];
+        }
         return [
             ...settingsGroup('Connection', [
                 infoRow('Status', '', 'serverStatus'),
@@ -1170,6 +1202,7 @@ const SETTINGS_RENDERERS = {
                     checkBackend().then(ok => { if (ok) { syncNow().then(() => showToast(syncFailed ? "Couldn't sync" : 'Synced ✓', syncFailed)); loadServerInfo(); renderModelControl(true); } });
                 }),
                 IN_PHONE_APP ? settingsButton('Connect to a different PC', () => { location.href = 'nourishapp://connect'; }) : null,
+                IN_PHONE_APP && typeof nativeAvailable === 'function' && nativeAvailable() ? settingsButton('Use on this phone only (no PC)', switchToPhone) : null,
             ], 'Your settings, plan, grocery list and chat are kept on the PC, so every phone and browser connected to it shows the same thing. The phone and PC must be on the same Wi-Fi.'),
         ];
     },
@@ -1191,7 +1224,7 @@ const SETTINGS_RENDERERS = {
                 settingsButton('Clear chat history', clearChat),
                 settingsButton('Clear meal plan', clearPlan, 'danger'),
                 settingsButton('Reset all settings', resetSettings, 'danger'),
-            ], 'Your plan, chat, settings and API keys are stored on your own PC (in nourish-data.json next to Nourish) and on this device. API keys are never sent back to phones. Nothing goes anywhere else except the AI and recipe services you choose.'),
+            ], isLocalMode() ? 'Your plan, chat, settings, API keys and AI models are stored only on this phone. Nothing goes anywhere else except the recipe sites, Hugging Face and AI services you choose.' : 'Your plan, chat, settings and API keys are stored on your own PC (in nourish-data.json next to Nourish) and on this device. API keys are never sent back to phones. Nothing goes anywhere else except the AI and recipe services you choose.'),
         ];
     },
 };
@@ -1200,6 +1233,7 @@ function renderModelControl(refresh = false) {
     const box = $('modelControl');
     if (!box) return;
     const p = settings.active_provider;
+    if (p === 'local') { setChildren(box); return; }
     if (p === 'claude' || p === 'openai') {
         setChildren(box,
             settingsRow('Model', settingsInput(`${p}_model`, { list: `${p}-models`, placeholder: SETTINGS_DEFAULTS[`${p}_model`] })),
@@ -1225,12 +1259,16 @@ function renderModelHint() {
     const el = $('modelHint');
     if (!el) return;
     const p = settings.active_provider;
-    if (p === 'lmstudio' || p === 'ollama') {
+    if (p === 'local') {
+        el.textContent = 'Runs entirely on this phone: private, free and works offline. Bigger models give better plans but are slower and warmer.';
+    } else if (p === 'lmstudio' || p === 'ollama') {
         const url = serverInfo && serverInfo[`${p}_url`];
         el.textContent = `The Nourish server reaches ${PROVIDERS[p].replace(' (local)', '')} at ${url || '…'}. ` +
             `To change it, set ${p === 'lmstudio' ? 'LMSTUDIO_URL' : 'OLLAMA_URL'} in backend/.env and restart the server.`;
     } else {
-        el.textContent = 'Cloud models cost money per use on your own account. The key is saved on your PC and used by every device. Creativity is capped at 1.0 for Claude.';
+        el.textContent = isLocalMode()
+            ? 'Cloud models cost money per use on your own account. The key is kept on this phone. Creativity is capped at 1.0 for Claude.'
+            : 'Cloud models cost money per use on your own account. The key is saved on your PC and used by every device. Creativity is capped at 1.0 for Claude.';
     }
 }
 
@@ -1877,19 +1915,35 @@ async function runPlanJob(job, resume = null) {
     const kind = resume ? resume.kind || 'plan' : job.kind;
     const busyText = kind === 'edit' ? 'Updating your plan…' : 'Cooking your meal plan…';
     try {
-        if (resume) {
-            planJob = resume;
+        let parsed;
+        const onPhone = !resume && settings.active_provider === 'local';
+        if (onPhone && kind === 'plan') {
+            // On the phone: one day at a time, each forced into the right format.
+            if (!settings.local_model) throw new Error('Download a model first: Settings → AI model.');
+            localPlanCancelled = false;
+            planJob = { id: 'on-device', started: Date.now(), provider: 'local', kind, origin, local: true };
+            if (origin === 'chat') { chatBusy = true; chatBusyLabel = 'Cooking your plan…'; chatError = ''; }
+            renderChat();
+            parsed = await generatePlanOnDevice(job.messages,
+                d => { showJobBar('busy', `Cooking day ${d + 1} of 7…`); if (origin === 'chat') { chatBusyLabel = `Cooking day ${d + 1} of 7…`; renderChat(); } },
+                () => localPlanCancelled);
+            if (!parsed.days.length) { const e = new Error('Cancelled'); e.cancelled = true; throw e; }
         } else {
-            showJobBar('busy', 'Preparing…');
-            const req = await buildAIRequest(job.messages, kind === 'edit' ? { maxTokens: Math.min(Number(settings.max_tokens) || 8000, 4000) } : {});
-            planJob = { id: await startJob(req), started: Date.now(), provider: req.provider, kind, origin };
-            store('nourish_pending_plan', planJob);
+            if (resume) {
+                planJob = resume;
+            } else {
+                showJobBar('busy', 'Preparing…');
+                const req = await buildAIRequest(job.messages, kind === 'edit' ? { maxTokens: Math.min(Number(settings.max_tokens) || 8000, onPhone ? 1600 : 4000) } : {});
+                if (onPhone) req.grammar = GBNF_EDIT;
+                planJob = { id: await startJob(req), started: Date.now(), provider: req.provider, kind, origin, local: onPhone };
+                if (!isLocalMode()) store('nourish_pending_plan', planJob);
+            }
+            if (origin === 'chat') { chatBusy = true; chatBusyLabel = kind === 'edit' ? 'Updating your plan…' : 'Cooking your plan…'; chatError = ''; }
+            renderChat();
+            showJobBar('busy', busyText);
+            const data = await waitForJob(planJob.id);
+            parsed = parseLLMJSON(extractText(planJob.provider, data));
         }
-        if (origin === 'chat') { chatBusy = true; chatBusyLabel = kind === 'edit' ? 'Updating your plan…' : 'Cooking your plan…'; chatError = ''; }
-        renderChat();
-        showJobBar('busy', busyText);
-        const data = await waitForJob(planJob.id);
-        const parsed = parseLLMJSON(extractText(planJob.provider, data));
         if (kind === 'edit') {
             const result = applyEdits(parsed);
             const summary = result.replacedPlan ? 'I rewrote your plan.' : result.changes.map(c => `Day ${c.day} (${dayName(c.day - 1)}) ${c.meal}: ${c.name}`).join('\n');
@@ -1925,12 +1979,20 @@ async function runPlanJob(job, resume = null) {
     }
 }
 
+let localPlanCancelled = false;
 async function cancelPlan() {
     if (!planJob) return;
+    if (planJob.id === 'on-device') {
+        // Stop after the day being made; days already made are kept.
+        localPlanCancelled = true;
+        nativeCall('cancelGenerate', {}).catch(() => {});
+        return;
+    }
     try { await api(`/api/jobs/${planJob.id}`, { method: 'DELETE' }); } catch (e) { /* the poll will report it */ }
 }
 
 function resumePendingJobs() {
+    if (isLocalMode()) return;   // on-device requests don't survive the app restarting
     const plan = loadJSON('nourish_pending_plan', null);
     if (plan && plan.id && !planJob) runPlanJob(null, plan);
     const chat = loadJSON('nourish_pending_chat', null);
@@ -2135,11 +2197,12 @@ async function requestChatReply(resume = null) {
     try {
         let pending = resume;
         if (!pending) {
+            const phone = settings.active_provider === 'local';
             const req = await buildAIRequest(
-                [{ role: 'system', content: chatSystemPrompt() }].concat(cleanHistory(chatHistory.slice(-CHAT_HISTORY_LIMIT))),
-                { maxTokens: Math.min(Number(settings.max_tokens) || 8000, CHAT_LENGTHS[settings.chat_length] || 2000) });
+                [{ role: 'system', content: chatSystemPrompt() }].concat(cleanHistory(chatHistory.slice(phone ? -8 : -CHAT_HISTORY_LIMIT))),
+                { maxTokens: Math.min(Number(settings.max_tokens) || 8000, CHAT_LENGTHS[settings.chat_length] || 2000, phone ? 1024 : 8000) });
             pending = { id: await startJob(req), provider: req.provider };
-            store('nourish_pending_chat', pending);
+            if (!isLocalMode()) store('nourish_pending_chat', pending);
         }
         const data = await waitForJob(pending.id);
         chatBusy = false;   // let addAssistantMessage's sync include this reply

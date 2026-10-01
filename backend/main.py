@@ -48,7 +48,7 @@ SPOONACULAR_URL = os.getenv("SPOONACULAR_URL", "https://api.spoonacular.com").rs
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", Path(__file__).resolve().parent.parent))
 # Only these files are served. Never mount the repo root as a static directory:
 # it would expose backend/.env and .git to anyone on the network.
-FRONTEND_FILES = {"index.html", "app.js", "json-repair.js", "styles.css",
+FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "styles.css",
                   "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"}
 
 # Knowledge base (optional). Heavy imports and the embedding-model download happen
