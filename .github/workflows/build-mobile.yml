@@ -90,13 +90,21 @@ jobs:
           python-version: "3.12"
       - name: Install XcodeGen
         run: brew install xcodegen
-      - name: Cache llama.cpp for iOS
-        uses: actions/cache@v4
+      - name: Restore llama.cpp for iOS
+        id: llama-cache
+        uses: actions/cache/restore@v4
         with:
           path: mobile/ios/Frameworks
           key: llama-xcframework-${{ hashFiles('mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/ci/prepare-ios.sh') }}
       - name: Copy the web app in and build llama.cpp
         run: bash mobile/ci/prepare-ios.sh
+      # Saved straight away (not at the end of the job), so a later failure doesn't mean rebuilding it.
+      - name: Save llama.cpp for iOS
+        if: steps.llama-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mobile/ios/Frameworks
+          key: llama-xcframework-${{ hashFiles('mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/ci/prepare-ios.sh') }}
       - name: Generate the Xcode project
         working-directory: mobile/ios
         run: xcodegen generate

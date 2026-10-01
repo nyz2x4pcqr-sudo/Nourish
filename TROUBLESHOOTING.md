@@ -115,6 +115,18 @@ Want to use LM Studio from Docker, or from another PC? In LM Studio's server set
 | iPhone: the app stopped opening after a week | Free Apple ID sideloads expire after 7 days. Refresh it in AltStore or Sideloadly. |
 | Android: "App not installed" | Allow "Install unknown apps" for the browser or file manager you're using. If an older Nourish is installed, uninstall it first. |
 | Connected to the wrong PC | **Settings → Server & devices → Connect to a different PC**. |
+| Want to go back to phone-only | On the connect screen, tap **Use this phone only instead**, or **Settings → Server & devices → Use on this phone only**. |
+
+### AI on the phone
+
+| Problem | What to do |
+|---|---|
+| A model isn't in my top 5 / says "Too big for this phone" | The list only recommends models that fit the memory the phone lets Nourish use. **Show other models** lists the rest; you can still download one, but it may crash or be very slow. |
+| The download stopped | Phones pause downloads when locked or when you switch apps. Open **Settings → AI model** and tap **Download** again: it continues where it stopped. |
+| "Hugging Face refused the download" | That model is gated. Sign in under **Hugging Face account** with a token from huggingface.co/settings/tokens, and accept the model's licence on its Hugging Face page first. |
+| The app closes while making a plan | The model needs more memory than iOS/Android gave the app. Pick a smaller model (the "Recommended" one), or lower **Memory for chat** to 2k. |
+| Plans are slow or the phone gets hot | Use a smaller model ("Fastest" / "Runs cool"). Keep **Use the graphics chip** on (iPhone). Let the phone cool down: the temperature shows on the AI model page. |
+| Plans are repetitive or odd | Small models are limited. Try a 4B model or larger, or a cloud AI (Claude/OpenAI) with your own key. |
 
 ---
 

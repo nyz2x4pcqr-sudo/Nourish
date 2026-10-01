@@ -94,11 +94,13 @@ Open **http://localhost:8000**. Inside Docker, the server reaches LM Studio or O
 
 ### On your phone
 
-**The apps** (from the Releases page):
-- **Android:** install `Nourish.apk`, open it, and tap **Find my PC automatically**.
-- **iPhone:** `Nourish-unsigned.ipa` must be sideloaded with [AltStore](https://altstore.io) or [Sideloadly](https://sideloadly.io), which sign it with your Apple ID. With a free Apple ID, it has to be refreshed every 7 days. Step-by-step instructions are in the release notes.
+**The apps** (from the Releases page) work on their own: no PC needed.
+- **Android:** install `Nourish.apk`.
+- **iPhone (iOS 16.4+):** `Nourish-unsigned.ipa` must be sideloaded with [AltStore](https://altstore.io), [Sideloadly](https://sideloadly.io) or LiveContainer, which sign it with your Apple ID. With a free Apple ID, it has to be refreshed every 7 days. Step-by-step instructions are in the release notes.
 
-The apps show Nourish from your PC, so the PC must be on and running Nourish. When you update Nourish on the PC, the phone apps get the new version automatically.
+**AI on the phone:** in **Settings → AI model**, choose **On this phone**. Nourish checks the phone's memory, storage and temperature, then shows a top-5 list of Hugging Face models that fit it, with tags (Recommended, Fastest, Best quality, May get warm…). Tap **Download**, then **Use this model**. You can also search Hugging Face for any GGUF model, and sign in with a free Hugging Face token for gated models. The models run with [llama.cpp](https://github.com/ggml-org/llama.cpp): on the iPhone's GPU (Metal), and on the processor on Android.
+
+**Or use Nourish from your PC** (one shared plan for all devices, and the PC's AI): **Settings → Server & devices → Connect to my PC instead**, then **Find my PC automatically**.
 
 **Or just use the browser:**
 
