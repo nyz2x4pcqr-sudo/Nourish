@@ -109,7 +109,7 @@ test('near-duplicate dish names are caught', () => {
 test('the plan format keeps each ingredient to one short item and at most 10 per meal', () => {
     const { GBNF_DAY, GBNF_MEAL } = require('../ondevice.js');
     assert.match(GBNF_DAY, /item \(","\s*ws item\)\{2,9\}/);
-    assert.match(GBNF_DAY, /item ::= .*\[\^"\\\\\\x7F\\x00-\\x1F,\]\{2,47\}/);
+    assert.match(GBNF_DAY, /item ::= .*\[\^"\\\\\\x7F\\x00-\\x1F,\]\{2,35\}/);
     assert.match(GBNF_MEAL, /^root ::= meal/);
 });
 
@@ -138,4 +138,15 @@ test('a remade meal cut off at the length limit is not used', () => {
     assert.ok(!completeMeal(Object.assign({}, whole, { ingredients: ['1 lb beef'] })));
     assert.ok(!completeMeal(Object.assign({}, whole, { nutrition: null })));
     assert.ok(!completeMeal(null));
+});
+
+test('a whole day at the format\'s maximum fits in the token budget (no cut-off answers)', () => {
+    const { PLAN_LIMITS: L, DAY_TOKENS, MEAL_TOKENS } = require('../ondevice.js');
+    // Longest possible meal in characters: field names and punctuation (~200), the name, every
+    // ingredient and step at full length with quotes, comma and spacing, four 4-digit numbers.
+    const meal = 200 + (L.nameChars + 2) + L.maxItems * (L.itemChars + 5) + L.maxSteps * (L.stepChars + 5) + 4 * 4;
+    const day = 3 * meal + 60;
+    // Worst case about 2 characters per token (numbers and punctuation; English text is ~4).
+    assert.ok(day / 2 <= DAY_TOKENS, `day worst case ${day} chars ≈ ${day / 2} tokens > ${DAY_TOKENS}`);
+    assert.ok(meal / 2 <= MEAL_TOKENS, `meal worst case ${meal} chars ≈ ${meal / 2} tokens > ${MEAL_TOKENS}`);
 });

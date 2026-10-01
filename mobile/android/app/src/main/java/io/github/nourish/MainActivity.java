@@ -208,10 +208,11 @@ public class MainActivity extends Activity implements NativeBridge.Host {
                     }
                 }
                 long t0 = System.currentTimeMillis();
-                String out = bridge.runModel(model, 2048,
+                // Same budget as the app's plans (DAY_TOKENS in ondevice.js) and its default memory size.
+                String out = bridge.runModel(model, 4096,
                         new String[]{"system", "user"},
                         new String[]{"You are a meal-planning chef. Reply with JSON only.", "Plan Day 1 (Monday): breakfast, lunch and dinner."},
-                        grammar, 0.7f, 900);
+                        grammar, 0.7f, 1700);
                 JSONObject o = new JSONObject().put("ms", System.currentTimeMillis() - t0).put("text", out);
                 Log.i(TAG, "NOURISH_SELFTEST_OK " + o);
             } catch (Throwable t) {

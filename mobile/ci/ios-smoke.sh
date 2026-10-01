@@ -150,7 +150,7 @@ assert text.strip(), "LFM2.5-230M produced no text"
 PY
 
 echo "== 5. On-device AI through the app's own code"
-probe "const r = await nativeCall('generate', { model: 'test-model.gguf', grammar: GBNF_DAY, temperature: 0.7, max_tokens: 900, n_ctx: 2048, gpu: false,
+probe "const r = await nativeCall('generate', { model: 'test-model.gguf', grammar: GBNF_DAY, temperature: 0.7, max_tokens: DAY_TOKENS, n_ctx: 4096, gpu: false,
   messages: [{ role: 'system', content: 'You are a meal-planning chef. Reply with JSON only.' }, { role: 'user', content: 'Plan Day 1 (Monday): breakfast, lunch and dinner.' }] }, { timeoutMs: 0 });
   const models = await nativeCall('models', {}); return JSON.stringify({ text: r.text, models: models.files });" 300
 python3 - "$PROBE" <<'PY' || fail "the model's day of meals is not valid"
@@ -165,7 +165,7 @@ PY
 cp "$PROBE" shots/ios-ai-probe.json
 
 echo "== 6a. A 7-day plan on the phone through the app's own Generate Plan code; the app is killed after day 2"
-probe "Object.assign(settings, { active_provider: 'local', local_model: 'test-model.gguf', local_ctx: '2048', local_gpu: 'off' }); changed('settings');
+probe "Object.assign(settings, { active_provider: 'local', local_model: 'test-model.gguf', local_ctx: '4096', local_gpu: 'off' }); changed('settings');
   runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
     { role: 'user', content: 'Goal: eat balanced. Likes: anything. Avoids: nothing. Generate the 7-day meal plan JSON.' }] });
   await new Promise(r => { const t = setInterval(() => { const s = JSON.parse(localStorage.getItem('nourish_plan_progress') || '{}'); if ((s.days || []).length >= 2) { clearInterval(t); r(); } }, 300); });

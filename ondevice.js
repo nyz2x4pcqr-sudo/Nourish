@@ -231,13 +231,18 @@ function stripThinking(text) {
 }
 
 // Output formats that small models are forced to follow, so their answers always parse.
-// Every text starts with a letter or digit. An ingredient is one short item (up to 48 characters,
-// no commas, so no lists squashed into one line), 3 to 10 per meal; a step is 10 to 160 characters.
+// Every text starts with a letter or digit. Small models tend to fill every list and string to the
+// maximum, so the maximums are kept small enough that a whole day always fits in DAY_TOKENS
+// (tests/ondevice.test.js checks this): an answer cut off half-way can't be used.
+const PLAN_LIMITS = { nameChars: 60, itemChars: 36, minItems: 3, maxItems: 10, stepChars: 100, minSteps: 2, maxSteps: 4 };
+const DAY_TOKENS = 1700;   // one day: 3 meals
+const MEAL_TOKENS = 700;   // one meal made again
+const L = PLAN_LIMITS;
 const GBNF_COMMON = String.raw`
-meal ::= "{" ws "\"name\":" ws name "," ws "\"time_minutes\":" ws int "," ws "\"nutrition\":" ws "{" ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}" "," ws "\"ingredients\":" ws "[" ws item ("," ws item){2,9} ws "]" "," ws "\"steps\":" ws "[" ws step ("," ws step){1,4} ws "]" ws "}"
-name ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{2,59} "\""
-item ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F,]{2,47} "\""
-step ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{9,159} "\""
+meal ::= "{" ws "\"name\":" ws name "," ws "\"time_minutes\":" ws int "," ws "\"nutrition\":" ws "{" ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}" "," ws "\"ingredients\":" ws "[" ws item ("," ws item){${L.minItems - 1},${L.maxItems - 1}} ws "]" "," ws "\"steps\":" ws "[" ws step ("," ws step){${L.minSteps - 1},${L.maxSteps - 1}} ws "]" ws "}"
+name ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{2,${L.nameChars - 1}} "\""
+item ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F,]{2,${L.itemChars - 1}} "\""
+step ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{9,${L.stepChars - 1}} "\""
 int ::= "0" | [1-9] [0-9]{0,3}
 ws ::= [ \n]{0,2}`;
 const GBNF_DAY = String.raw`root ::= "{" ws "\"breakfast\":" ws meal "," ws "\"lunch\":" ws meal "," ws "\"dinner\":" ws meal ws "}"` + GBNF_COMMON;
@@ -303,7 +308,6 @@ function mealProblems(meal) {
 
 // A remade meal is only used when it's whole. An answer cut off at the length limit can still
 // parse (the JSON repair keeps what's there) but lose its steps or ingredients.
-const MEAL_TOKENS = 700;
 function completeMeal(meal) {
     return !!(meal && meal.name && Array.isArray(meal.ingredients) && meal.ingredients.length >= 3
         && Array.isArray(meal.steps) && meal.steps.length >= 1 && meal.nutrition && typeof meal.nutrition === 'object');
@@ -369,7 +373,7 @@ async function generatePlanOnDevice(messages, hooks, state) {
 
         let day = null;
         for (let attempt = 0; attempt < 2 && !day; attempt++) {
-            const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user', content: ask }], GBNF_DAY, 1100, `plan-day-${d}`, h);
+            const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user', content: ask }], GBNF_DAY, DAY_TOKENS, `plan-day-${d}`, h);
             if (text == null) break;   // cancelled
             const parsed = parseLLMJSON(text);
             const bad = junkRows(parsed);
@@ -1244,5 +1248,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
+    module.exports = { PLAN_LIMITS, DAY_TOKENS, MEAL_TOKENS, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
 }
