@@ -185,9 +185,40 @@ final class NativeBridge: NSObject {
         return true
     }
 
-    private static func isHuggingFace(_ url: URL) -> Bool {
+    static func isHuggingFace(_ url: URL) -> Bool {
         let host = url.host?.lowercased() ?? ""
         return host == "huggingface.co" || host.hasSuffix(".huggingface.co")
+    }
+
+    /// Turns a redirect's Location header into an address iOS accepts. Download servers sometimes
+    /// send characters that aren't allowed in a web address (spaces, quotes, a lone "%"); those are
+    /// percent-encoded here, which is what a browser does. Only https is followed.
+    static func redirectTarget(_ location: String, from base: URL) -> (url: URL, fixed: Int)? {
+        let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#@!$&'()*+,;=".unicodeScalars)
+        let hex = Set("0123456789ABCDEFabcdef".unicodeScalars)
+        let chars = Array(location.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars)
+        var cleaned = String.UnicodeScalarView()
+        var fixed = 0
+        for (i, c) in chars.enumerated() {
+            let validPercent = c == "%" && i + 2 < chars.count && hex.contains(chars[i + 1]) && hex.contains(chars[i + 2])
+            if allowed.contains(c) || validPercent {
+                cleaned.append(c)
+            } else {
+                fixed += 1
+                for byte in String(c).utf8 { cleaned.append(contentsOf: String(format: "%%%02X", byte).unicodeScalars) }
+            }
+        }
+        guard let next = URL(string: String(cleaned), relativeTo: base)?.absoluteURL,
+              next.scheme?.lowercased() == "https", next.host != nil else { return nil }
+        return (next, fixed)
+    }
+
+    /// An address for the activity log: host, path and the names of its query parts, without
+    /// their values (download links carry a signature that shouldn't be shared).
+    static func describe(_ url: URL) -> String {
+        let keys = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.map(\.name) ?? []
+        let path = url.path.count > 60 ? String(url.path.prefix(57)) + "…" : url.path
+        return "\(url.host ?? "?")\(path)" + (keys.isEmpty ? "" : " (query: \(keys.joined(separator: ", ")))")
     }
 
     private final class NoRedirects: NSObject, URLSessionTaskDelegate {
@@ -222,8 +253,10 @@ final class NativeBridge: NSObject {
                 req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
             let (data, response) = try syncRequest(req)
-            if (300..<400).contains(response.statusCode), let location = response.value(forHTTPHeaderField: "Location"),
-               let next = URL(string: location, relativeTo: url)?.absoluteURL {
+            if (300..<400).contains(response.statusCode), let location = response.value(forHTTPHeaderField: "Location") {
+                guard let next = Self.redirectTarget(location, from: url)?.url else {
+                    throw BridgeError(message: "The server redirected to an address that couldn't be used")
+                }
                 url = next
                 if response.statusCode != 307 && response.statusCode != 308 { method = "GET"; body = nil }
                 continue
@@ -352,6 +385,8 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
     private var lastReport = Date.distantPast
     private var failure: String?
     private var cancelled = false
+    private var hops = 0
+    private var pendingRedirect: URL?
 
     private var partURL: URL { NativeBridge.modelsDir.appendingPathComponent(file + ".part") }
     private var finalURL: URL { NativeBridge.modelsDir.appendingPathComponent(file) }
@@ -368,14 +403,21 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
 
     func start() {
         received = (try? FileManager.default.attributesOfItem(atPath: partURL.path)[.size] as? Int64) ?? 0
-        var req = URLRequest(url: url)
-        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        if received > 0 { req.setValue("bytes=\(received)-", forHTTPHeaderField: "Range") }
         startedAt = Date()
-        log("Download \(file): GET \(url.host ?? "?")\(url.path)\(received > 0 ? " (resuming from \(received) bytes)" : "")\(token != nil ? " with Hugging Face sign-in" : "")", "info")
+        log("Download \(file): starting\(received > 0 ? " (resuming from \(received) bytes)" : "")\(token != nil ? " with Hugging Face sign-in" : "")", "info")
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 60
         session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        request(url)
+    }
+
+    /// One request. Redirects come back here one at a time (see below) so each address can be
+    /// checked and cleaned up first, and the Hugging Face token only ever goes to Hugging Face.
+    private func request(_ target: URL) {
+        var req = URLRequest(url: target)
+        if let token, NativeBridge.isHuggingFace(target) { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if received > 0 { req.setValue("bytes=\(received)-", forHTTPHeaderField: "Range") }
+        log("Download \(file): GET \(NativeBridge.describe(target))", "info")
         session?.dataTask(with: req).resume()
     }
 
@@ -390,27 +432,32 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
         report(p, state != "running")
     }
 
-    // Redirects (Hugging Face → its download servers): checked, and the token is never passed on.
+    // Redirects (Hugging Face → its download servers) aren't followed automatically: the redirect
+    // response arrives below and is handled there.
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        // Downloads only start at huggingface.co, so follow its redirects to its download servers
-        // (they must stay https). The token is never passed on to them.
-        log("Download \(file): HTTP \(response.statusCode) → redirected to \(request.url?.host ?? "?")", "info")
-        guard let next = request.url, next.scheme == "https" else {
-            failure = "The download was redirected to an insecure address (\(request.url?.host ?? "?")), so it was stopped."
-            return completionHandler(nil)
-        }
-        var req = request
-        let host = next.host?.lowercased() ?? ""
-        if !(host == "huggingface.co" || host.hasSuffix(".huggingface.co")) { req.setValue(nil, forHTTPHeaderField: "Authorization") }
-        completionHandler(req)
+        completionHandler(nil)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        log("Download \(file): server answered HTTP \(status) from \(response.url?.host ?? "?"), size \(response.expectedContentLength) bytes", status >= 300 ? "warn" : "info")
+        log("Download \(file): server answered HTTP \(status) from \(response.url?.host ?? "?"), size \(response.expectedContentLength) bytes", status >= 400 ? "warn" : "info")
         switch status {
+        case 301, 302, 303, 307, 308:
+            let location = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location") ?? ""
+            hops += 1
+            if hops > 8 {
+                failure = "The download was redirected too many times, so it was stopped."
+            } else if let base = response.url ?? dataTask.originalRequest?.url, let next = NativeBridge.redirectTarget(location, from: base) {
+                log("Download \(file): redirected (HTTP \(status)) to \(NativeBridge.describe(next.url))\(next.fixed > 0 ? ", fixed \(next.fixed) character(s) iOS doesn't accept" : "")", "info")
+                pendingRedirect = next.url   // started once this request has closed (didCompleteWithError)
+            } else {
+                log("Download \(file): unusable redirect address (\(location.count) characters, starts \"\(location.prefix(40))\")", "error")
+                failure = location.isEmpty ? "Download failed (HTTP \(status) without an address)"
+                    : "The download was redirected to an address that couldn't be used, so it was stopped."
+            }
+            completionHandler(.cancel)
         case 200, 206:
             if status == 200 { received = 0 }   // the server ignored the resume request: start over
             if !FileManager.default.fileExists(atPath: partURL.path) || status == 200 {
@@ -447,6 +494,10 @@ final class ModelDownload: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         try? handle?.close()
         handle = nil
+        if let next = pendingRedirect, !cancelled {
+            pendingRedirect = nil
+            return request(next)
+        }
         session.finishTasksAndInvalidate()
         if let error, !cancelled { log("Download \(file): connection error after \(received) bytes: \(error.localizedDescription)", "warn") }
         if cancelled { return send("cancelled") }

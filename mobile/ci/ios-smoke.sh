@@ -67,7 +67,7 @@ probe "const done = new Promise((ok, bad) => nativeOn('download', e => {
     if (e.file !== 'test-model.gguf') return;
     if (e.state === 'done') ok(e); else if (e.state === 'error' || e.state === 'cancelled') bad(new Error(e.error || e.state));
   }));
-  await nativeCall('download', { url: 'https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf?download=true',
+  await nativeCall('download', { url: 'https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf',
     file: 'test-model.gguf', size: 105454432, auth: 'hf' });
   const e = await done; return JSON.stringify(e);" 300
 python3 -c "

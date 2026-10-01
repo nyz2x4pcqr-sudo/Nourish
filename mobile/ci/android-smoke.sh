@@ -46,7 +46,7 @@ adb shell run-as $APP sh -c "'mkdir -p files/models && cp /data/local/tmp/day.gb
 adb logcat -c
 # The app downloads the model from Hugging Face itself (following its redirects), then runs it.
 adb shell am start -W -n $APP/io.github.nourish.MainActivity --ez local true --es selftest_model test-model.gguf --es selftest_grammar day.gbnf \
-  --es selftest_download_url "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf?download=true" \
+  --es selftest_download_url "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf" \
   --el selftest_download_size 105454432
 RESULT=""
 # The emulator has no fast maths instructions, so even a tiny model takes minutes here.

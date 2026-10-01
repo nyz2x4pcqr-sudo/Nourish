@@ -26,5 +26,16 @@ async function fetchJSON(url) {
         if (ranked.top.length < 3) { console.log('  FAIL: fewer than 3 models'); failed = true; }
         if (ranked.top.some(m => m.a.fit === 'too-big')) { console.log('  FAIL: a model that does not fit'); failed = true; }
     }
+    // Where a model download is redirected to, and whether that address has characters phones
+    // may refuse (an iPhone reported "bad URL" right after this redirect). Values are hidden.
+    const res = await fetch('https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf',
+        { redirect: 'manual', headers: { 'User-Agent': 'Nourish CI check' } });
+    const location = res.headers.get('location') || '';
+    const odd = [...new Set([...location].filter(c => !/[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%]/.test(c)))];
+    const loneP = (location.match(/%(?![0-9A-Fa-f]{2})/g) || []).length;
+    let shape = location;
+    try { const u = new URL(location, res.url); shape = `${u.host}${u.pathname.slice(0, 60)} query: ${[...u.searchParams.keys()].join(', ')}`; } catch (e) { /* shown raw */ }
+    console.log(`\nDownload redirect: HTTP ${res.status} -> ${shape}`);
+    console.log(`  characters not allowed in an address: ${odd.length ? JSON.stringify(odd.join('')) : 'none'}; lone "%": ${loneP}`);
     process.exit(failed ? 1 : 0);
 })().catch(e => { console.error('FAILED:', e); process.exit(1); });

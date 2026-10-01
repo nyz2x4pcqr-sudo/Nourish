@@ -471,7 +471,9 @@ async function getSpecs(refresh = false) {
 const GB = 1024 * 1024 * 1024;
 function formatBytes(n) {
     if (!Number.isFinite(n)) return '—';
-    return n >= GB ? `${(n / GB).toFixed(n >= 10 * GB ? 0 : 1)} GB` : `${Math.max(1, Math.round(n / 1048576))} MB`;
+    if (n >= GB) return `${(n / GB).toFixed(n >= 10 * GB ? 0 : 1)} GB`;
+    if (n >= 1048576) return `${Math.round(n / 1048576)} MB`;
+    return n > 0 ? `${Math.max(1, Math.round(n / 1024))} KB` : '0 MB';
 }
 
 // How much memory a model may use: what the system actually allows this app (this includes
@@ -548,7 +550,7 @@ const QUANT_ORDER = ['Q4_K_M', 'Q4_K_S', 'IQ4_XS', 'IQ4_NL', 'Q4_0', 'Q3_K_L', '
 const KNOWN_GOOD = /qwen-?3|qwen2\.5|gemma-?[34]|llama-?3\.[123]|phi-?4|smollm|granite-?4|lfm2|mistral|ministral/i;
 // Reasoning-style models "think" at length before answering: slow and hot on a phone.
 const THINKERS = /distill|reason|thinking|\br1\b|mimo/i;
-const LIVE_CACHE_KEY = 'nourish_hf_top';
+const LIVE_CACHE_KEY = 'nourish_hf_top_v2';   // bumped when the ranking rules change, so old lists aren't reused
 const LIVE_CACHE_MS = 12 * 60 * 60 * 1000;
 
 function paramsFromName(name) {
@@ -618,6 +620,7 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
     const budget = memoryBudget(specs);
     const bucket = Math.round(budget / GB * 2) / 2;
     mlog(`Building the model list for ${specs.device || 'this phone'}: budget ${formatBytes(budget)}${force ? ' (refresh)' : ''}`);
+    try { localStorage.removeItem('nourish_hf_top'); } catch (e) { /* the old list (older ranking rules) */ }
     if (!force) {
         try {
             const cached = JSON.parse(localStorage.getItem(LIVE_CACHE_KEY) || 'null');
@@ -754,7 +757,7 @@ async function startDownload(model) {
     renderSettings();
     try {
         await nativeCall('download', {
-            url: `https://huggingface.co/${model.repo}/resolve/main/${encodeURIComponent(model.file)}?download=true`,
+            url: `https://huggingface.co/${model.repo}/resolve/main/${encodeURIComponent(model.file)}`,
             file: model.file, size: model.size, auth: 'hf',
         });
     } catch (e) {
