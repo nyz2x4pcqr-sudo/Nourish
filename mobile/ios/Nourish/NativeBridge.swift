@@ -486,10 +486,16 @@ final class BackgroundWindow {
         if Thread.isMainThread { begin() } else { DispatchQueue.main.sync(execute: begin) }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 5, repeating: 5)
+        var last = ""
         timer.setEventHandler {
-            guard UIApplication.shared.applicationState != .active else { return }
-            let left = UIApplication.shared.backgroundTimeRemaining
-            log(left > 100_000 ? "In the background: iOS hasn't limited the time yet" : String(format: "In the background: %.0f s of background time left", left), "info")
+            // Written only when something changed, so a long answer doesn't fill the log.
+            let app = UIApplication.shared
+            let state = app.applicationState == .active ? "on screen" : app.applicationState == .background ? "in the background" : "inactive (switching apps or locked)"
+            let left = app.backgroundTimeRemaining
+            let line = app.applicationState == .active ? "Nourish is on screen"
+                : left > 100_000 ? "Nourish is \(state); iOS hasn't set a time limit"
+                : String(format: "Nourish is %@: %.0f s of background time left", state, (left / 5).rounded() * 5)
+            if line != last { log(line, "info"); last = line }
         }
         timer.resume()
         self.timer = timer
