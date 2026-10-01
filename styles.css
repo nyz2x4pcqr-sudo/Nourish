@@ -515,7 +515,7 @@ input::placeholder, textarea::placeholder {
 
 .source-buttons {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 8px;
 }
 
@@ -1087,6 +1087,112 @@ input::placeholder, textarea::placeholder {
 .toast.show {
     opacity: 1;
     transform: translate(-50%, 0);
+}
+
+/* Settings menu */
+.settings-heading {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.settings-back {
+    min-height: 44px;
+    padding: 0;
+    margin-bottom: -4px;
+    background: none;
+    color: var(--accent);
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.settings-nav {
+    width: 100%;
+    background: none;
+    text-align: left;
+    color: var(--text);
+    gap: 12px;
+}
+
+.settings-nav-icon {
+    font-size: 20px;
+    width: 28px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.settings-nav .settings-label {
+    flex: 1;
+}
+
+.settings-nav-summary {
+    font-size: 14px;
+    max-width: 45%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.settings-nav-summary.badge {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.settings-chevron {
+    color: var(--text-faint);
+    font-size: 22px;
+    line-height: 1;
+}
+
+.tab {
+    position: relative;
+}
+
+.tab.has-badge .tab-icon::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    margin-left: 2px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.update-notes {
+    font-size: 15px;
+    color: var(--text-dim);
+}
+
+.update-notes ul, .update-notes ol {
+    padding-left: 20px;
+}
+
+a.settings-button {
+    display: flex;
+    text-decoration: none;
+}
+
+/* Import sheet */
+.import-slot {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.form-error {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--fat);
+    background: #4a1f2c;
+    font-size: 15px;
+    overflow-wrap: anywhere;
+}
+
+.recipe-source {
+    margin-bottom: 10px;
+    text-decoration: none;
 }
 
 /* Secondary buttons & links */

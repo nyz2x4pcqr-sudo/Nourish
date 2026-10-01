@@ -208,5 +208,198 @@ class ApiTest(unittest.TestCase):
         self.assertEqual((params["diet"], params["intolerances"], params["maxReadyTime"]), ("vegetarian", "peanut", "30"))
 
 
+
+RECIPE_GRAPH_PAGE = """<html><head><script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"WebPage","name":"x"},
+ {"@type":["Recipe"],"name":"Garlic &amp; Lemon Chicken","totalTime":"PT1H5M",
+  "recipeIngredient":["2 chicken breasts","3 cloves garlic","1 lemon"],
+  "recipeInstructions":[{"@type":"HowToSection","name":"Prep","itemListElement":[{"@type":"HowToStep","text":"Mince the <b>garlic</b>."}]},
+                        {"@type":"HowToStep","text":"Bake 25 minutes."}],
+  "nutrition":{"@type":"NutritionInformation","calories":"420 kcal","proteinContent":"38 g","carbohydrateContent":"6g","fatContent":"24.5 g"}}]}
+</script></head><body>...</body></html>"""
+
+RECIPE_STRING_STEPS_PAGE = """<script type="application/ld+json">[{"@type":"Recipe","name":"Peanut Noodles",
+ "prepTime":"PT10M","cookTime":"PT15M","recipeIngredient":["noodles","peanut butter"],
+ "recipeInstructions":"Boil the noodles. Stir in the sauce.",}]</script>"""
+
+DDG_PAGE = """<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Frecipes.example%2Fgarlic-chicken&amp;rut=1">Garlic</a></div>
+<div class="result"><a class="result__a" href="https://recipes.example/peanut-noodles">Peanut</a></div>
+<div class="result"><a class="result__a" href="https://www.youtube.com/watch?v=1">Video</a></div>
+<div class="result"><a class="result__a" href="https://recipes.example/not-a-recipe">Blog</a></div>"""
+
+
+class WebRecipeTest(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(main.app)
+        self.up = FakeUpstream()
+        web_recipes_mod = main.web_recipes
+        self._allow = web_recipes_mod.ALLOW_PRIVATE
+        web_recipes_mod.ALLOW_PRIVATE = True  # fake hosts don't resolve offline
+        up = self.up
+
+        def handler(request):
+            up.requests.append(request)
+            url = str(request.url)
+            if "duckduckgo" in url:
+                return httpx.Response(200, text=DDG_PAGE)
+            if url.endswith("/garlic-chicken"):
+                return httpx.Response(200, text=RECIPE_GRAPH_PAGE, headers={"content-type": "text/html; charset=utf-8"})
+            if url.endswith("/peanut-noodles"):
+                return httpx.Response(200, text=RECIPE_STRING_STEPS_PAGE)
+            if url.endswith("/moved"):
+                return httpx.Response(302, headers={"location": "https://recipes.example/garlic-chicken"})
+            return httpx.Response(200, text="<html>no recipe here</html>")
+        self.up_handler = handler
+
+        class PatchedClient(_RealAsyncClient):
+            def __init__(self, *a, **kw):
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        main.httpx.AsyncClient = PatchedClient
+        web_recipes_mod.httpx.AsyncClient = PatchedClient
+
+    def tearDown(self):
+        main.web_recipes.ALLOW_PRIVATE = self._allow
+        main.httpx.AsyncClient = _RealAsyncClient
+
+    def test_parse_graph_recipe(self):
+        r = main.web_recipes.parse_recipe(RECIPE_GRAPH_PAGE, "https://www.recipes.example/x")
+        self.assertEqual(r["name"], "Garlic & Lemon Chicken")
+        self.assertEqual(r["time_minutes"], 65)
+        self.assertEqual(r["steps"], ["Mince the garlic .", "Bake 25 minutes."])
+        self.assertEqual(r["nutrition"], {"calories": 420, "protein_g": 38, "carbs_g": 6, "fat_g": 24.5})
+        self.assertEqual(r["source_name"], "recipes.example")
+
+    def test_parse_string_steps_and_trailing_comma(self):
+        r = main.web_recipes.parse_recipe(RECIPE_STRING_STEPS_PAGE, "https://recipes.example/p")
+        self.assertEqual(r["steps"], ["Boil the noodles.", "Stir in the sauce."])
+        self.assertEqual(r["time_minutes"], 25)
+        self.assertIsNone(r["nutrition"])
+
+    def test_no_recipe(self):
+        self.assertIsNone(main.web_recipes.parse_recipe("<html><p>hello</p></html>", "https://x.example/"))
+
+    def test_web_search_reads_recipes_and_excludes(self):
+        r = self.client.post("/api/recipes/web", json={"query": "chicken dinner recipe", "number": 7})
+        self.assertEqual(r.status_code, 200)
+        names = [x["name"] for x in r.json()["recipes"]]
+        self.assertEqual(sorted(names), ["Garlic & Lemon Chicken", "Peanut Noodles"])
+        self.assertFalse(any("youtube" in str(q.url) for q in self.up.requests))
+        r = self.client.post("/api/recipes/web", json={"query": "x", "exclude": "Peanut"})
+        self.assertEqual([x["name"] for x in r.json()["recipes"]], ["Garlic & Lemon Chicken"])
+
+    def test_import_follows_redirect(self):
+        r = self.client.post("/api/recipes/import", json={"url": "recipes.example/moved"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["source_url"], "https://recipes.example/garlic-chicken")
+
+    def test_import_page_without_recipe(self):
+        r = self.client.post("/api/recipes/import", json={"url": "https://recipes.example/blog"})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("No recipe", r.json()["detail"])
+
+    def test_private_addresses_blocked(self):
+        main.web_recipes.ALLOW_PRIVATE = False
+        for url in ("http://127.0.0.1:8000/.env", "http://192.168.1.1/", "http://10.0.0.2/", "http://[::1]/",
+                    "http://169.254.169.254/latest/meta-data", "file:///etc/passwd", "http://0.0.0.0/"):
+            r = self.client.post("/api/recipes/import", json={"url": url})
+            self.assertEqual(r.status_code, 422, url)
+        import asyncio
+        asyncio.run(main.web_recipes.check_public_url("http://8.8.8.8/"))  # a public address is allowed
+
+
+class UpdateTest(unittest.TestCase):
+    def test_version_order(self):
+        pv = main.updater.parse_version
+        ordered = ["0.1.0-pre-alpha", "0.1.0-alpha", "0.1.0-beta", "0.1.0-rc.1", "0.1.0", "v0.2.0-pre-alpha", "0.10.0"]
+        self.assertEqual(sorted(ordered, key=pv), ordered)
+        self.assertIsNone(pv("latest"))
+
+    def _check(self, releases, current="0.1.0-pre-alpha", prereleases=True):
+        def handler(request):
+            return httpx.Response(200, json=releases)
+
+        class Client(_RealAsyncClient):
+            def __init__(self, *a, **kw):
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        main.updater.httpx.AsyncClient = Client
+        try:
+            import asyncio
+            return asyncio.run(main.updater.fetch_latest(current, prereleases))
+        finally:
+            main.updater.httpx.AsyncClient = _RealAsyncClient
+
+    def test_newer_release_found(self):
+        asset = {"name": "Nourish.exe", "size": 5, "digest": "sha256:ABC", "browser_download_url": "https://github.com/x/Nourish.exe"}
+        info = self._check([
+            {"tag_name": "v0.1.0-pre-alpha", "prerelease": True, "assets": [asset]},
+            {"tag_name": "v0.2.0-pre-alpha", "prerelease": True, "body": "notes", "html_url": "u", "assets": [asset]},
+            {"tag_name": "v9.0.0", "draft": True, "assets": [asset]},
+        ])
+        self.assertTrue(info["update_available"])
+        self.assertEqual(info["latest"], "0.2.0-pre-alpha")
+        self.assertEqual(info["asset"]["sha256"], "abc")
+        self.assertFalse(info["can_install"])  # not the packaged Windows app
+
+    def test_up_to_date_and_stable_only(self):
+        rel = [{"tag_name": "v0.1.0-pre-alpha", "prerelease": True, "assets": []},
+               {"tag_name": "v0.2.0-beta", "prerelease": True, "assets": []}]
+        self.assertFalse(self._check(rel, current="0.2.0-beta")["update_available"])
+        self.assertFalse(self._check(rel, prereleases=False)["update_available"])
+
+    def test_no_digest_means_no_install(self):
+        info = self._check([{"tag_name": "v1.0.0", "assets": [{"name": "Nourish.exe", "browser_download_url": "https://x"}]}])
+        self.assertTrue(info["update_available"])
+        self.assertNotIn("asset", info)
+
+    def _swap(self, payload, expected_sha):
+        import asyncio, hashlib, tempfile, os, stat
+        from pathlib import Path
+        tmp = Path(tempfile.mkdtemp())
+        exe = tmp / "Nourish.exe"
+        exe.write_bytes(b"old version")
+        exe.chmod(0o755)
+
+        def handler(request):
+            return httpx.Response(200, content=payload)
+
+        class Client(_RealAsyncClient):
+            def __init__(self, *a, **kw):
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        saved = (main.updater.INSTALL_SUPPORTED, main.updater.sys.executable)
+        main.updater.INSTALL_SUPPORTED, main.updater.sys.executable = True, str(exe)
+        main.updater.httpx.AsyncClient = Client
+        try:
+            asyncio.run(main.updater.download_and_swap({"url": "https://github.com/x/Nourish.exe", "sha256": expected_sha}))
+            return tmp, None
+        except main.updater.UpdateError as e:
+            return tmp, e
+        finally:
+            main.updater.INSTALL_SUPPORTED, main.updater.sys.executable = saved
+            main.updater.httpx.AsyncClient = _RealAsyncClient
+
+    def test_tampered_download_rejected(self):
+        import hashlib
+        tmp, err = self._swap(b"evil", hashlib.sha256(b"the real new version").hexdigest())
+        self.assertIn("fingerprint", str(err))
+        self.assertEqual((tmp / "Nourish.exe").read_bytes(), b"old version")
+        self.assertEqual(sorted(p.name for p in tmp.iterdir()), ["Nourish.exe"])  # no leftovers
+
+    def test_verified_download_swapped(self):
+        import hashlib, os
+        tmp, err = self._swap(b"new version", hashlib.sha256(b"new version").hexdigest())
+        self.assertIsNone(err)
+        self.assertEqual((tmp / "Nourish.exe").read_bytes(), b"new version")
+        self.assertEqual((tmp / "Nourish.old.exe").read_bytes(), b"old version")
+        self.assertTrue(os.access(tmp / "Nourish.exe", os.X_OK))
+
+    def test_install_endpoint_refuses_without_check(self):
+        main._last_update_info.clear()
+        r = TestClient(main.app).post("/api/update/install")
+        self.assertEqual(r.status_code, 409)
+
+
 if __name__ == "__main__":
     unittest.main()

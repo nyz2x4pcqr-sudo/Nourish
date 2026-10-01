@@ -17,6 +17,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 
+import updater
+import web_recipes
+
 load_dotenv()
 
 # Chroma sends anonymous usage telemetry by default; this app promises nothing leaves the machine.
@@ -35,7 +38,7 @@ logger = logging.getLogger("nourish")
 # httpx logs full request URLs at INFO, which can include query-string API keys.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-VERSION = "0.1.0-pre-alpha"
+VERSION = "0.2.0-pre-alpha"
 PORT = int(os.getenv("NOURISH_PORT", "8000"))
 LMSTUDIO_URL = os.getenv("LMSTUDIO_URL", "http://localhost:1234").rstrip("/")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
@@ -44,7 +47,8 @@ SPOONACULAR_URL = os.getenv("SPOONACULAR_URL", "https://api.spoonacular.com").rs
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", Path(__file__).resolve().parent.parent))
 # Only these files are served. Never mount the repo root as a static directory:
 # it would expose backend/.env and .git to anyone on the network.
-FRONTEND_FILES = {"index.html", "app.js", "json-repair.js", "styles.css"}
+FRONTEND_FILES = {"index.html", "app.js", "json-repair.js", "styles.css",
+                  "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"}
 
 # Knowledge base (optional). Heavy imports and the embedding-model download happen
 # lazily so the rest of the app starts instantly and works offline.
@@ -111,6 +115,17 @@ class GenerateRequest(BaseModel):
     api_key: Optional[str] = None
     max_tokens: Optional[int] = 8000
     temperature: Optional[float] = None
+
+
+class WebRecipeRequest(BaseModel):
+    query: str
+    exclude: Optional[str] = ""
+    number: Optional[int] = 7
+    brave_key: Optional[str] = None
+
+
+class ImportRequest(BaseModel):
+    url: str
 
 
 class KnowledgeTextRequest(BaseModel):
@@ -190,6 +205,7 @@ def info():
         "lmstudio_url": LMSTUDIO_URL,
         "ollama_url": OLLAMA_URL,
         "in_docker": os.path.exists("/.dockerenv"),
+        "can_self_update": updater.INSTALL_SUPPORTED,
         "lan_urls": lan_urls(),
         "knowledge_base": importlib.util.find_spec("chromadb") is not None,
     }
@@ -372,6 +388,69 @@ async def recipes_spoonacular(req: RecipeSearchRequest):
     if res.status_code >= 400:
         raise upstream_error(res, "Spoonacular")
     return res.json()
+
+
+@app.post("/api/recipes/web")
+async def recipes_web(req: WebRecipeRequest):
+    logger.info(f"Web recipe search - query length: {len(req.query)}")
+    exclude = [w.strip().lower() for w in (req.exclude or "").split(",") if w.strip()]
+    try:
+        return await web_recipes.search_recipes(req.query, exclude, max(1, min(req.number or 7, 21)),
+                                                req.brave_key or os.getenv("BRAVE_API_KEY"))
+    except web_recipes.WebRecipeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/recipes/import")
+async def recipes_import(req: ImportRequest):
+    url = req.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        async with web_recipes.new_client() as client:
+            return await web_recipes.fetch_recipe(client, url)
+    except web_recipes.WebRecipeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Couldn't load that page ({type(e).__name__})")
+
+
+# --- updates ------------------------------------------------------------------------------
+_last_update_info: dict = {}
+
+
+@app.get("/api/update/check")
+async def update_check(prereleases: bool = True):
+    try:
+        info = await updater.fetch_latest(VERSION, include_prereleases=prereleases)
+    except updater.UpdateError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    _last_update_info.clear()
+    _last_update_info.update(info)
+    return {k: v for k, v in info.items() if k != "asset"}
+
+
+@app.post("/api/update/install")
+async def update_install():
+    info = dict(_last_update_info)
+    if not info.get("update_available") or not info.get("asset"):
+        raise HTTPException(status_code=409, detail="Check for updates first")
+    if not info.get("can_install"):
+        raise HTTPException(status_code=400, detail="This copy of Nourish can't update itself. Download the new version from GitHub.")
+    try:
+        exe = await updater.download_and_swap(info["asset"])
+    except updater.UpdateError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    logger.info(f"Update to {info.get('latest')} installed; restarting")
+
+    def restart_and_exit():
+        try:
+            updater.restart(exe)
+        finally:
+            os._exit(0)
+
+    asyncio.get_running_loop().call_later(1.0, restart_and_exit)
+    return {"status": "restarting", "version": info.get("latest")}
 
 
 @app.post("/api/knowledge/add-text")

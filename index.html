@@ -9,6 +9,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Nourish" />
     <title>Nourish - AI Meal Planner</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -76,6 +79,7 @@
         <div class="screen screen-plan" id="screenPlan">
             <div class="screen-header">
                 <h1 class="large-title">Plan</h1>
+                <button type="button" class="btn-header" id="importLinkBtn">+ From link</button>
             </div>
             <div class="accordions" id="planAccordions"></div>
         </div>
@@ -104,7 +108,10 @@
         <!-- Settings Screen -->
         <div class="screen screen-settings" id="screenSettings">
             <div class="screen-header">
-                <h1 class="large-title">Settings</h1>
+                <div class="settings-heading">
+                    <button type="button" class="settings-back" id="settingsBack" hidden>‹ Settings</button>
+                    <h1 class="large-title" id="settingsTitle">Settings</h1>
+                </div>
             </div>
             <div class="settings-list" id="settingsList"></div>
         </div>
@@ -174,6 +181,7 @@
                         <button type="button" class="source-btn" data-source="aiChef">AI Chef</button>
                         <button type="button" class="source-btn" data-source="themealdb">TheMealDB</button>
                         <button type="button" class="source-btn" data-source="spoonacular">Spoonacular</button>
+                        <button type="button" class="source-btn" data-source="web">🌐 Web search</button>
                     </div>
                 </div>
 
@@ -181,6 +189,40 @@
                     <button type="button" class="link-btn" id="editProfileBtn">Edit profile</button></p>
 
                 <button type="button" class="btn btn-primary" id="generateBtn">Generate Plan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import-from-link Sheet -->
+    <div class="generate-sheet" id="importSheet" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+        <div class="sheet-backdrop" id="importSheetBackdrop"></div>
+        <div class="sheet-content">
+            <div class="sheet-header">
+                <h2 class="title" id="importTitle">Add a recipe from a link</h2>
+                <button type="button" class="btn-close" id="closeImportBtn" aria-label="Close">✕</button>
+            </div>
+            <div class="sheet-body">
+                <div class="input-group">
+                    <label class="label" for="importUrl">Recipe web address</label>
+                    <input type="url" id="importUrl" placeholder="https://www.example.com/recipe/..." autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url" />
+                </div>
+                <div class="input-group import-slot">
+                    <div>
+                        <label class="label" for="importDay">Day</label>
+                        <select id="importDay"></select>
+                    </div>
+                    <div>
+                        <label class="label" for="importMeal">Meal</label>
+                        <select id="importMeal">
+                            <option value="breakfast">Breakfast</option>
+                            <option value="lunch">Lunch</option>
+                            <option value="dinner" selected>Dinner</option>
+                        </select>
+                    </div>
+                </div>
+                <p class="sheet-hint">Works with most recipe websites. The recipe replaces that meal in your plan.</p>
+                <div class="form-error" id="importError" role="alert" hidden></div>
+                <button type="button" class="btn btn-primary" id="importBtn">Add recipe</button>
             </div>
         </div>
     </div>

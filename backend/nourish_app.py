@@ -26,6 +26,27 @@ def port_in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def wait_for_port_free(port: int, seconds: float = 20) -> None:
+    deadline = time.time() + seconds
+    while port_in_use(port) and time.time() < deadline:
+        time.sleep(0.5)
+
+
+def remove_old_copy():
+    """After a self-update the previous .exe is left as Nourish.old.exe; delete it once it has exited."""
+    if not FROZEN:
+        return
+    exe = Path(sys.executable).resolve()
+    old = exe.with_name(f"{exe.stem}.old{exe.suffix}")
+    for _ in range(20):
+        try:
+            if old.exists():
+                old.unlink()
+            return
+        except OSError:
+            time.sleep(0.5)
+
+
 def pause_before_exit():
     # When double-clicked, the console window would vanish before the message could be read.
     if FROZEN:
@@ -36,11 +57,20 @@ def pause_before_exit():
 
 
 def main():
-    os.environ.setdefault("FRONTEND_DIR", str(BUNDLE_DIR / "frontend" if FROZEN else BUNDLE_DIR))
+    if FROZEN:
+        # Always our own unpacked files: after a self-update this process must not reuse the old copy's folder.
+        os.environ["FRONTEND_DIR"] = str(BUNDLE_DIR / "frontend")
+    else:
+        os.environ.setdefault("FRONTEND_DIR", str(BUNDLE_DIR))
     os.environ.setdefault("NOURISH_PORT", str(PORT))
     os.chdir(DATA_DIR)
     local_url = f"http://localhost:{PORT}"
     open_browser = os.getenv("NOURISH_NO_BROWSER") != "1"
+
+    if os.getenv("NOURISH_RESTARTED") == "1":
+        print("Nourish was updated - starting the new version...")
+        wait_for_port_free(PORT)
+    threading.Thread(target=remove_old_copy, daemon=True).start()
 
     if port_in_use(PORT):
         print(f"Something is already using port {PORT} - Nourish is probably already running.")

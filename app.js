@@ -1,9 +1,7 @@
 // === CONFIG ===
-// The backend serves this page, so API calls are same-origin. If the page is served
-// some other way (a static server on another port), talk to port 8000 on the same host.
-const API_BASE = location.protocol === 'file:' ? 'http://localhost:8000'
-    : location.port === '8000' ? ''
-    : `${location.protocol}//${location.hostname}:8000`;
+// The Nourish server serves this page, so API calls go back to wherever the page came from
+// (any port: NOURISH_PORT can change it). Opened as a file, fall back to the default server.
+const API_BASE = location.protocol === 'file:' ? 'http://localhost:8000' : '';
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
 const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
@@ -47,6 +45,10 @@ const SETTINGS_DEFAULTS = {
     budget: 'Any',
     units: 'US',
     spoonacular_api_key: '',
+    web_engine: 'duckduckgo',
+    brave_api_key: '',
+    auto_update_check: 'on',
+    update_prereleases: 'on',
 };
 
 // === STATE ===
@@ -63,6 +65,9 @@ let chatHistory = [];          // [{ role: 'user' | 'assistant', content }]
 let chatBusy = false;
 let chatError = '';
 let planJob = null;            // { id, started } while an AI plan is cooking
+let updateInfo = null;         // result of the last update check
+let updateChecking = false;
+let updateError = '';
 
 // === STORAGE (localStorage can throw in private browsing) ===
 function store(key, value) {
@@ -139,6 +144,10 @@ function initTabs() {
 }
 
 function switchTab(tabName) {
+    if (tabName === 'settings' && document.getElementById('screenSettings')?.classList.contains('active') && settingsPage) {
+        settingsPage = null;
+        renderSettings();
+    }
     const screenMap = { today: 'screenToday', plan: 'screenPlan', chat: 'screenChat', grocery: 'screenGrocery', settings: 'screenSettings' };
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => {
@@ -242,6 +251,100 @@ async function loadServerInfo() {
     try { serverInfo = await api('/api/info', { timeoutMs: 5000 }); } catch (e) { serverInfo = null; }
     renderServerInfo();
     renderModelHint();
+    if (!settingsPage) renderSettings();
+    maybeAutoCheckForUpdates();
+}
+
+// === UPDATES ===
+function maybeAutoCheckForUpdates() {
+    if (settings.auto_update_check !== 'on') return;
+    const last = Number(load('nourish_last_update_check', '0'));
+    if (Date.now() - last < 12 * 60 * 60 * 1000) {
+        updateInfo = loadJSON('nourish_last_update_info', null);
+        // Ignore a cached result for the version that is now installed.
+        if (updateInfo && serverInfo?.version && updateInfo.latest === serverInfo.version) updateInfo = null;
+        markUpdateBadge();
+        return;
+    }
+    checkForUpdates({ manual: false });
+}
+
+async function checkForUpdates({ manual }) {
+    if (updateChecking) return;
+    updateChecking = true;
+    updateError = '';
+    renderUpdateResult();
+    try {
+        updateInfo = await api(`/api/update/check?prereleases=${settings.update_prereleases === 'on'}`, { timeoutMs: 20000 });
+        store('nourish_last_update_check', String(Date.now()));
+        store('nourish_last_update_info', updateInfo);
+        if (!manual && updateInfo?.update_available) showToast(`Nourish v${updateInfo.latest} is available — see Settings → Updates`, false);
+    } catch (e) {
+        updateError = e.message;
+    } finally {
+        updateChecking = false;
+        markUpdateBadge();
+        renderUpdateResult();
+        if (!settingsPage) renderSettings();
+    }
+}
+
+function markUpdateBadge() {
+    document.querySelector('.tab[data-tab="settings"]')?.classList.toggle('has-badge', !!updateInfo?.update_available);
+}
+
+function renderUpdateResult() {
+    const box = document.getElementById('updateResult');
+    if (!box) return;
+    if (updateChecking) { setChildren(box, h('p', { class: 'settings-note', text: 'Checking GitHub for a newer version…' })); return; }
+    if (updateError) { setChildren(box, h('div', { class: 'chat-error' }, h('p', { text: updateError }))); return; }
+    if (!updateInfo) { setChildren(box); return; }
+    if (!updateInfo.update_available) {
+        setChildren(box, h('p', { class: 'settings-note', text: `✓ You're up to date (v${updateInfo.current || serverInfo?.version || '?'}).` }));
+        return;
+    }
+    setChildren(box,
+        h('div', { class: 'settings-group-label', text: `Version ${updateInfo.latest} is available` }),
+        h('div', { class: 'settings-group update-card' },
+            updateInfo.notes ? h('div', { class: 'settings-row settings-row-stack update-notes' }, formatMessage(updateInfo.notes.slice(0, 1500))) : null,
+            updateInfo.can_install
+                ? h('button', { type: 'button', class: 'settings-row settings-button', id: 'installUpdateBtn', onclick: installUpdate }, 'Download & install')
+                : null,
+            updateInfo.url ? h('a', { class: 'settings-row settings-button', href: updateInfo.url, target: '_blank', rel: 'noopener' }, 'Open the download page') : null),
+        h('p', { class: 'settings-note', text: updateInfo.can_install
+            ? 'Nourish downloads the update, checks it against GitHub\'s fingerprint, installs it and restarts by itself. Your plan and settings are kept.'
+            : 'This copy (Python or Docker) can\'t update itself: pull the latest code, or switch to Nourish.exe for one-tap updates.' }));
+}
+
+async function installUpdate(e) {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Downloading…';
+    const from = serverInfo?.version;
+    try {
+        await api('/api/update/install', { method: 'POST', timeoutMs: 5 * 60 * 1000 });
+    } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Download & install';
+        showJobBar('error', `Update failed: ${err.message}`);
+        return;
+    }
+    showJobBar('busy', 'Installing the update and restarting…');
+    // Wait for the new version to answer, then reload so the new app loads.
+    const deadline = Date.now() + 120000;
+    await sleep(3000);
+    while (Date.now() < deadline) {
+        try {
+            const info = await api('/api/info', { timeoutMs: 3000 });
+            if (info?.version && info.version !== from) {
+                unstore('nourish_last_update_info');
+                location.reload();
+                return;
+            }
+        } catch (err) { /* restarting */ }
+        await sleep(2000);
+    }
+    showJobBar('error', 'The update was installed but Nourish didn\'t come back. Start Nourish.exe again.');
 }
 
 // === AI REQUESTS (run as server-side jobs so a locked phone or a slow model can't lose them) ===
@@ -418,77 +521,167 @@ function temperatureLabel(t) {
     return `${Number(t).toFixed(1)} · ${t <= 0.3 ? 'focused' : t <= 0.8 ? 'balanced' : 'adventurous'}`;
 }
 
-function renderSettings() {
-    const list = document.getElementById('settingsList');
-    const p = settings.active_provider;
-    const cloud = p === 'claude' || p === 'openai';
+const SETTINGS_PAGES = {
+    ai: { icon: '🤖', title: 'AI model' },
+    profile: { icon: '🙂', title: 'Your profile' },
+    sources: { icon: '📖', title: 'Recipe sources' },
+    server: { icon: '🖥️', title: 'Server & phone' },
+    updates: { icon: '⬆️', title: 'Updates' },
+    data: { icon: '🗂️', title: 'Data & privacy' },
+};
+let settingsPage = null;
 
-    const tempValue = h('span', { class: 'settings-value', text: temperatureLabel(settings.temperature) });
-    const tempSlider = h('input', {
-        type: 'range', min: '0', max: '1.2', step: '0.1', value: settings.temperature, class: 'settings-range',
-        'aria-label': 'Creativity',
-        oninput: e => { tempValue.textContent = temperatureLabel(e.target.value); },
-        onchange: e => setSetting('temperature', e.target.value),
-    });
+function settingsSummary(page) {
+    const s = settings;
+    switch (page) {
+        case 'ai': return `${PROVIDERS[s.active_provider].replace(' (local)', '')} · ${s[`${s.active_provider}_model`] || 'auto'}`;
+        case 'profile': return `${s.calorie_target} kcal · ${s.diet === 'No restriction' ? 'any diet' : s.diet}`;
+        case 'sources': return s.web_engine === 'brave' ? 'Web: Brave' : 'Web: DuckDuckGo';
+        case 'server': return backendOnline ? 'Connected' : backendOnline === false ? 'Not reachable' : '';
+        case 'updates': return updateInfo?.update_available ? `v${updateInfo.latest} available` : serverInfo ? `v${serverInfo.version}` : '';
+        default: return '';
+    }
+}
 
-    const group = (title, rows, note) => [
-        h('div', { class: 'settings-group-label', text: title }),
+function openSettingsPage(page) {
+    settingsPage = page;
+    renderSettings();
+    window.scrollTo(0, 0);
+}
+
+function settingsGroup(title, rows, note) {
+    return [
+        title ? h('div', { class: 'settings-group-label', text: title }) : null,
         h('div', { class: 'settings-group' }, rows),
         note ? h('p', { class: 'settings-note', ...(typeof note === 'string' ? { text: note } : {}) }, typeof note === 'string' ? null : note) : null,
     ];
+}
 
-    setChildren(list, 
-        h('p', { class: 'settings-note', text: 'Changes save automatically.' }),
+function renderSettings() {
+    const list = document.getElementById('settingsList');
+    const page = SETTINGS_PAGES[settingsPage] ? settingsPage : null;
+    document.getElementById('settingsTitle').textContent = page ? SETTINGS_PAGES[page].title : 'Settings';
+    document.getElementById('settingsBack').hidden = !page;
 
-        ...group('AI model', [
-            settingsRow('Provider', settingsSelect('active_provider', PROVIDERS, { onchange: () => renderSettings() })),
-            h('div', { id: 'modelControl' }),
-            cloud ? settingsRow('API key', settingsInput(`${p}_api_key`, { type: 'password', placeholder: p === 'claude' ? 'sk-ant-…' : 'sk-…' })) : null,
-            h('div', { class: 'settings-row settings-row-stack' },
-                h('div', { class: 'settings-row-top' }, h('span', { class: 'settings-label', text: 'Creativity' }), tempValue),
-                tempSlider),
-            settingsRow('Response length', settingsSelect('max_tokens', { 4000: 'Short (faster)', 8000: 'Standard', 12000: 'Long' })),
-            settingsButton('Test the AI', testAI),
-            h('div', { id: 'testResult', class: 'settings-row settings-result', hidden: true }),
-        ], h('span', { id: 'modelHint' })),
-
-        ...group('Your profile', [
-            settingsRow('Daily calories', settingsInput('calorie_target', { type: 'number', inputmode: 'numeric', min: '1000', max: '6000' })),
-            settingsRow('Protein (g/day)', settingsInput('protein_target', { type: 'number', inputmode: 'numeric', min: '20', max: '400' })),
-            settingsRow('Diet', settingsSelect('diet', DIETS)),
-            settingsRow('Allergies', settingsInput('allergies', { placeholder: 'e.g. peanuts, shellfish' })),
-            settingsRow('Cuisines', settingsInput('cuisines', { placeholder: 'e.g. Mexican, Thai' })),
-            settingsRow('Max cook time', settingsSelect('max_cook_time', { '': 'Any', 15: '15 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour' })),
-            settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6'])),
-            settingsRow('Cooking skill', settingsSelect('skill', ['Beginner', 'Intermediate', 'Advanced'])),
-            settingsRow('Budget', settingsSelect('budget', { Any: 'Any', 'Budget-friendly': 'Budget-friendly', Moderate: 'Moderate', 'No limit': 'No limit' })),
-            settingsRow('Units', settingsSelect('units', { US: 'US (cups, oz)', Metric: 'Metric (g, ml)' })),
-        ], 'Used for every AI meal plan and chat. Allergies are also filtered out of recipe searches.'),
-
-        ...group('Recipe sources', [
-            settingsRow('Spoonacular key', settingsInput('spoonacular_api_key', { type: 'password', placeholder: 'free key' })),
-        ], 'TheMealDB needs no key. Spoonacular needs a free key from spoonacular.com/food-api.'),
-
-        ...group('Server & phone', [
-            h('div', { class: 'settings-row' },
-                h('span', { class: 'settings-label', text: 'Status' }),
-                h('span', { id: 'serverStatus', class: 'settings-value' })),
-            h('div', { id: 'serverInfo' }),
-            settingsButton('Check again', () => checkBackend().then(ok => { if (ok) { loadServerInfo(); renderModelControl(true); } })),
-        ]),
-
-        ...group('Data', [
-            settingsButton('Export meal plan', exportPlan),
-            settingsButton('Clear chat history', clearChat),
-            settingsButton('Clear meal plan', clearPlan, 'danger'),
-            settingsButton('Reset all settings', resetSettings, 'danger'),
-        ], 'Keys and data are stored only on this device and sent only to your Nourish server.'),
-    );
+    if (!page) {
+        setChildren(list,
+            h('div', { class: 'settings-group' }, Object.entries(SETTINGS_PAGES).map(([key, { icon, title }]) =>
+                h('button', { type: 'button', class: 'settings-row settings-nav', onclick: () => openSettingsPage(key) },
+                    h('span', { class: 'settings-nav-icon', 'aria-hidden': 'true', text: icon }),
+                    h('span', { class: 'settings-label', text: title }),
+                    h('span', { class: 'settings-value settings-nav-summary' + (key === 'updates' && updateInfo?.update_available ? ' badge' : ''), text: settingsSummary(key) }),
+                    h('span', { class: 'settings-chevron', 'aria-hidden': 'true', text: '›' })))),
+            h('p', { class: 'settings-note', text: `Nourish ${serverInfo?.version ? 'v' + serverInfo.version : ''} · free & open source (AGPL-3.0) · changes save automatically` }),
+        );
+        updateBackendStatus();
+        return;
+    }
+    setChildren(list, ...SETTINGS_RENDERERS[page]());
     updateBackendStatus();
     renderModelControl();
     renderServerInfo();
     renderModelHint();
+    renderUpdateResult();
 }
+
+const SETTINGS_RENDERERS = {
+    ai() {
+        const p = settings.active_provider;
+        const cloud = p === 'claude' || p === 'openai';
+        const tempValue = h('span', { class: 'settings-value', text: temperatureLabel(settings.temperature) });
+        const tempSlider = h('input', {
+            type: 'range', min: '0', max: '1.2', step: '0.1', value: settings.temperature, class: 'settings-range',
+            'aria-label': 'Creativity',
+            oninput: e => { tempValue.textContent = temperatureLabel(e.target.value); },
+            onchange: e => setSetting('temperature', e.target.value),
+        });
+        return [
+            ...settingsGroup('Provider', [
+                settingsRow('Provider', settingsSelect('active_provider', PROVIDERS, { onchange: () => renderSettings() })),
+                h('div', { id: 'modelControl' }),
+                cloud ? settingsRow('API key', settingsInput(`${p}_api_key`, { type: 'password', placeholder: p === 'claude' ? 'sk-ant-…' : 'sk-…' })) : null,
+            ], h('span', { id: 'modelHint' })),
+            ...settingsGroup('Answers', [
+                h('div', { class: 'settings-row settings-row-stack' },
+                    h('div', { class: 'settings-row-top' }, h('span', { class: 'settings-label', text: 'Creativity' }), tempValue),
+                    tempSlider),
+                settingsRow('Response length', settingsSelect('max_tokens', { 4000: 'Short (faster)', 8000: 'Standard', 12000: 'Long' })),
+            ], 'Lower creativity gives more predictable plans. Use "Long" if plans come back with fewer than 7 days.'),
+            ...settingsGroup('Check', [
+                settingsButton('Test the AI', testAI),
+                h('div', { id: 'testResult', class: 'settings-row settings-result', hidden: true }),
+            ]),
+        ];
+    },
+    profile() {
+        return [
+            ...settingsGroup('Daily targets', [
+                settingsRow('Calories', settingsInput('calorie_target', { type: 'number', inputmode: 'numeric', min: '1000', max: '6000' })),
+                settingsRow('Protein (g)', settingsInput('protein_target', { type: 'number', inputmode: 'numeric', min: '20', max: '400' })),
+            ]),
+            ...settingsGroup('Food', [
+                settingsRow('Diet', settingsSelect('diet', DIETS)),
+                settingsRow('Allergies', settingsInput('allergies', { placeholder: 'e.g. peanuts, shellfish' })),
+                settingsRow('Cuisines', settingsInput('cuisines', { placeholder: 'e.g. Mexican, Thai' })),
+            ], 'Allergies are never included by the AI and are filtered out of recipe searches.'),
+            ...settingsGroup('Cooking', [
+                settingsRow('Max cook time', settingsSelect('max_cook_time', { '': 'Any', 15: '15 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour' })),
+                settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6'])),
+                settingsRow('Skill', settingsSelect('skill', ['Beginner', 'Intermediate', 'Advanced'])),
+                settingsRow('Budget', settingsSelect('budget', { Any: 'Any', 'Budget-friendly': 'Budget-friendly', Moderate: 'Moderate', 'No limit': 'No limit' })),
+                settingsRow('Units', settingsSelect('units', { US: 'US (cups, oz)', Metric: 'Metric (g, ml)' })),
+            ], 'Your profile is used for every AI meal plan and chat.'),
+        ];
+    },
+    sources() {
+        const brave = settings.web_engine === 'brave';
+        return [
+            ...settingsGroup('🌐 Web search', [
+                settingsRow('Search with', settingsSelect('web_engine', { duckduckgo: 'DuckDuckGo', brave: 'Brave Search' }, { onchange: () => renderSettings() })),
+                brave ? settingsRow('Brave key', settingsInput('brave_api_key', { type: 'password', placeholder: 'from brave.com/search/api' })) : null,
+            ], 'Finds real recipes on recipe websites and reads them in full: ingredients, steps, time and (when the site lists it) nutrition. DuckDuckGo needs no key but sometimes limits searches; Brave\'s free plan is more reliable. "+ From link" on the Plan tab adds any single recipe page.'),
+            ...settingsGroup('Spoonacular', [
+                settingsRow('API key', settingsInput('spoonacular_api_key', { type: 'password', placeholder: 'free key' })),
+            ], 'Recipes with nutrition, filtered by your diet, allergies and cook time. Free key: spoonacular.com/food-api.'),
+            ...settingsGroup('TheMealDB', [
+                h('div', { class: 'settings-row' }, h('span', { class: 'settings-label', text: 'Ready to use' }), h('span', { class: 'settings-value', text: 'no key needed' })),
+            ], 'A free collection of recipes from around the world. It has no nutrition data.'),
+        ];
+    },
+    server() {
+        return [
+            ...settingsGroup('Connection', [
+                h('div', { class: 'settings-row' },
+                    h('span', { class: 'settings-label', text: 'Status' }),
+                    h('span', { id: 'serverStatus', class: 'settings-value' })),
+                h('div', { id: 'serverInfo' }),
+                settingsButton('Check again', () => checkBackend().then(ok => { if (ok) { loadServerInfo(); renderModelControl(true); } })),
+            ], 'Your phone and PC must be on the same Wi-Fi, and Nourish must be running on the PC.'),
+        ];
+    },
+    updates() {
+        return [
+            ...settingsGroup('This version', [
+                h('div', { class: 'settings-row' }, h('span', { class: 'settings-label', text: 'Installed' }),
+                    h('span', { class: 'settings-value', text: serverInfo?.version ? `v${serverInfo.version}` : '…' })),
+                settingsRow('Check for updates', settingsSelect('auto_update_check', { on: 'When the app opens', off: 'Only when I tap' })),
+                settingsRow('Include', settingsSelect('update_prereleases', { on: 'Test versions too', off: 'Stable only' })),
+                settingsButton('Check now', () => checkForUpdates({ manual: true })),
+            ]),
+            h('div', { id: 'updateResult' }),
+        ];
+    },
+    data() {
+        return [
+            ...settingsGroup('Your data', [
+                settingsButton('Export meal plan', exportPlan),
+                settingsButton('Clear chat history', clearChat),
+                settingsButton('Clear meal plan', clearPlan, 'danger'),
+                settingsButton('Reset all settings', resetSettings, 'danger'),
+            ], 'Your plan, chat, settings and API keys are stored only on this device, and sent only to your own Nourish server. Nothing goes anywhere else except the AI and recipe services you choose.'),
+        ];
+    },
+};
 
 function renderModelControl(refresh = false) {
     const box = document.getElementById('modelControl');
@@ -603,9 +796,14 @@ function initSheets() {
     document.querySelectorAll('[data-action="new-plan"]').forEach(b => b.addEventListener('click', showGenerateSheet));
     document.getElementById('closeGenerateBtn').addEventListener('click', closeGenerateSheet);
     document.getElementById('generateBtn').addEventListener('click', generateMealPlan);
-    document.getElementById('editProfileBtn').addEventListener('click', () => { closeGenerateSheet(); switchTab('settings'); });
+    document.getElementById('editProfileBtn').addEventListener('click', () => { closeGenerateSheet(); switchTab('settings'); openSettingsPage('profile'); });
+    document.getElementById('settingsBack').addEventListener('click', () => openSettingsPage(null));
+    document.getElementById('importLinkBtn').addEventListener('click', showImportSheet);
+    document.getElementById('importSheetBackdrop').addEventListener('click', closeImportSheet);
+    document.getElementById('closeImportBtn').addEventListener('click', closeImportSheet);
+    document.getElementById('importBtn').addEventListener('click', importFromLink);
     document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') { closeRecipeSheet(); closeGenerateSheet(); }
+        if (e.key === 'Escape') { closeRecipeSheet(); closeGenerateSheet(); closeImportSheet(); }
     });
 
     document.querySelectorAll('.segment-btn').forEach(btn => {
@@ -665,6 +863,8 @@ function openRecipeSheet(mealType, meal) {
                 h('div', { class: 'recipe-step-number', text: idx + 1 }),
                 h('div', { class: 'recipe-step-text', text: s }))))) : null,
         h('div', { class: 'recipe-section' },
+            meal.source_url ? h('a', { class: 'btn btn-secondary recipe-source', href: meal.source_url, target: '_blank', rel: 'noopener noreferrer' },
+                `🔗 Original recipe on ${meal.source_name || 'the web'}`) : null,
             h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => askAboutMeal(meal) }, '💬 Ask the chef about this meal')),
     );
     content.scrollTop = 0;
@@ -876,7 +1076,18 @@ function normalizeMeal(m) {
         nutrition: n ? { calories: toNumber(n.calories), protein_g: toNumber(n.protein_g), carbs_g: toNumber(n.carbs_g), fat_g: toNumber(n.fat_g) } : null,
         ingredients: toStringList(m.ingredients),
         steps: toStringList(m.steps),
+        ...safeSource(m),
     };
+}
+
+function safeSource(m) {
+    try {
+        const url = new URL(m.source_url);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return {};
+        return { source_url: url.href, source_name: String(m.source_name || url.hostname.replace(/^www\./, '')).slice(0, 60) };
+    } catch (e) {
+        return {};
+    }
 }
 
 // Returns a clean array of days. With strict=true, throws a user-readable error if unusable.
@@ -913,9 +1124,11 @@ async function generateMealPlan() {
     closeGenerateSheet();
 
     if (source !== 'aiChef') {
-        showJobBar('busy', `Searching ${source === 'themealdb' ? 'TheMealDB' : 'Spoonacular'}…`);
+        const names = { themealdb: 'TheMealDB', spoonacular: 'Spoonacular', web: 'the web (this can take a minute)' };
+        showJobBar('busy', `Searching ${names[source] || source}…`);
         try {
-            applyPlan(source === 'themealdb' ? await generateWithTheMealDB(likes, hates) : await generateWithSpoonacular(likes, hates));
+            const generators = { themealdb: generateWithTheMealDB, spoonacular: generateWithSpoonacular, web: generateWithWeb };
+            applyPlan(await (generators[source] || generateWithTheMealDB)(likes, hates));
             showJobBar(null);
         } catch (err) {
             showJobBar('error', err?.message || 'Something went wrong');
@@ -961,6 +1174,9 @@ async function runPlanJob(messages, resume = null) {
         planJob = null;
         unstore('nourish_pending_plan');
         renderChat();
+        const btn = document.getElementById('generateBtn');
+        btn.disabled = false;
+        btn.textContent = 'Generate Plan';
     }
 }
 
@@ -1025,6 +1241,70 @@ async function generateWithSpoonacular(likes, hates) {
             steps: (r?.analyzedInstructions?.[0]?.steps || []).map(s => s?.step).slice(0, 12),
         };
     });
+}
+
+async function generateWithWeb(likes, hates) {
+    const base = [likes || 'healthy', settings.diet !== 'No restriction' ? settings.diet : '', settings.cuisines].filter(Boolean).join(' ');
+    const body = mealType => ({
+        query: `${base} ${mealType} recipe`, number: 7, exclude: joinList(hates, settings.allergies),
+        brave_key: settings.web_engine === 'brave' ? settings.brave_api_key || undefined : undefined,
+    });
+    const results = await Promise.allSettled(MEAL_TYPES.map(t => api('/api/recipes/web', { method: 'POST', timeoutMs: 120000, body: body(t) })));
+    const byType = Object.fromEntries(MEAL_TYPES.map((t, i) => [t, results[i].status === 'fulfilled' ? results[i].value?.recipes || [] : []]));
+    if (!MEAL_TYPES.some(t => byType[t].length)) {
+        const err = results.find(r => r.status === 'rejected');
+        throw new Error(err?.reason?.message || 'No recipes found on the web for those foods. Try different "likes".');
+    }
+    // Fill each slot from its own search; borrow from the others if one came back empty.
+    const all = MEAL_TYPES.flatMap(t => byType[t]);
+    return {
+        days: Array.from({ length: 7 }, (_, d) => Object.fromEntries(MEAL_TYPES.map(t => {
+            const pool = byType[t].length ? byType[t] : all;
+            return [t, pool[d % pool.length]];
+        }))),
+    };
+}
+
+function showImportSheet() {
+    const days = Math.max(daysData.length, 1);
+    setChildren(document.getElementById('importDay'), Array.from({ length: Math.min(days + (days < 7 ? 1 : 0), 7) }, (_, i) =>
+        h('option', { value: String(i), selected: i === selectedDay }, `Day ${i + 1} · ${DAY_NAMES[i].slice(0, 3)}${i >= daysData.length ? ' (new)' : ''}`)));
+    document.getElementById('importError').hidden = true;
+    document.getElementById('importSheet').classList.add('active');
+}
+
+function closeImportSheet() {
+    document.getElementById('importSheet').classList.remove('active');
+}
+
+async function importFromLink() {
+    const url = document.getElementById('importUrl').value.trim();
+    const errorBox = document.getElementById('importError');
+    const btn = document.getElementById('importBtn');
+    errorBox.hidden = true;
+    if (!url) { errorBox.textContent = 'Paste the address of a recipe page first.'; errorBox.hidden = false; return; }
+    btn.disabled = true;
+    btn.textContent = 'Reading the recipe…';
+    try {
+        const recipe = normalizeMeal(await api('/api/recipes/import', { method: 'POST', timeoutMs: 45000, body: { url } }));
+        if (!recipe) throw new Error('No recipe was found on that page.');
+        const dayIndex = Number(document.getElementById('importDay').value) || 0;
+        const mealType = document.getElementById('importMeal').value;
+        while (daysData.length <= dayIndex) daysData.push({ breakfast: null, lunch: null, dinner: null });
+        daysData[dayIndex][mealType] = recipe;
+        store('nourish_plan', daysData);
+        document.getElementById('importUrl').value = '';
+        closeImportSheet();
+        selectedDay = dayIndex;
+        renderAll();
+        showToast(`Added "${recipe.name}" to Day ${dayIndex + 1}`, false);
+    } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.hidden = false;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Add recipe';
+    }
 }
 
 // === CHAT ===
