@@ -11,12 +11,13 @@ import time
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 
+import store
 import updater
 import web_recipes
 
@@ -104,7 +105,7 @@ app.add_middleware(
         r"|[A-Za-z0-9-]+\.local"
         r")(:\d+)?$"
     ),
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -257,14 +258,14 @@ async def call_provider(req: GenerateRequest) -> dict:
         headers = {"Content-Type": "application/json"}
         body = {"model": req.model, "messages": req.messages, "max_tokens": req.max_tokens}
     elif req.provider == "openai":
-        key = req.api_key or os.getenv("OPENAI_API_KEY")
+        key = req.api_key or store.secret("openai_api_key") or os.getenv("OPENAI_API_KEY")
         if not key:
             raise HTTPException(status_code=400, detail="No OpenAI API key. Add one in Settings.")
         who, url = "OpenAI", "https://api.openai.com/v1/chat/completions"
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
         body = {"model": req.model, "messages": req.messages, "max_tokens": req.max_tokens}
     elif req.provider == "claude":
-        key = req.api_key or os.getenv("ANTHROPIC_API_KEY")
+        key = req.api_key or store.secret("claude_api_key") or os.getenv("ANTHROPIC_API_KEY")
         if not key:
             raise HTTPException(status_code=400, detail="No Claude API key. Add one in Settings.")
         who, url = "Claude", "https://api.anthropic.com/v1/messages"
@@ -375,7 +376,7 @@ async def recipes_themealdb(req: RecipeSearchRequest):
 
 @app.post("/api/recipes/spoonacular")
 async def recipes_spoonacular(req: RecipeSearchRequest):
-    key = req.api_key or os.getenv("SPOONACULAR_API_KEY")
+    key = req.api_key or store.secret("spoonacular_api_key") or os.getenv("SPOONACULAR_API_KEY")
     if not key:
         raise HTTPException(status_code=400, detail="Spoonacular needs a free API key. Add one in Settings.")
     params = {
@@ -409,7 +410,7 @@ async def recipes_web(req: WebRecipeRequest):
     exclude = [w.strip().lower() for w in (req.exclude or "").split(",") if w.strip()]
     try:
         return await web_recipes.search_recipes(req.query, exclude, max(1, min(req.number or 7, 21)),
-                                                req.brave_key or os.getenv("BRAVE_API_KEY"))
+                                                req.brave_key or store.secret("brave_api_key") or os.getenv("BRAVE_API_KEY"))
     except web_recipes.WebRecipeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -426,6 +427,27 @@ async def recipes_import(req: ImportRequest):
         raise HTTPException(status_code=422, detail=str(e))
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Couldn't load that page ({type(e).__name__})")
+
+
+# --- shared data (settings, plan, grocery list, chat) --------------------------------------
+
+@app.get("/api/state")
+def state_get():
+    return store.get_all()
+
+
+@app.put("/api/state/{section}")
+async def state_put(section: str, request: Request):
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Expected JSON")
+    if not isinstance(body, dict) or "value" not in body:
+        raise HTTPException(status_code=400, detail='Expected {"value": ...}')
+    try:
+        return store.put(section, body["value"])
+    except store.StoreError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # --- updates ------------------------------------------------------------------------------

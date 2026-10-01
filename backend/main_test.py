@@ -8,7 +8,13 @@ import unittest
 import httpx
 from fastapi.testclient import TestClient
 
+import tempfile
+from pathlib import Path
+
 import main
+
+# Keep the tests' shared data away from any real nourish-data.json.
+main.store.reset_for_tests(Path(tempfile.mkdtemp()) / "nourish-data.json")
 
 SECRET = "sk-ant-TEST-SECRET-do-not-log"
 _RealAsyncClient = httpx.AsyncClient
@@ -404,6 +410,77 @@ class UpdateTest(unittest.TestCase):
         main._last_update_info.clear()
         r = TestClient(main.app).post("/api/update/install")
         self.assertEqual(r.status_code, 409)
+
+
+
+class StateTest(unittest.TestCase):
+    def setUp(self):
+        self.path = Path(tempfile.mkdtemp()) / "nourish-data.json"
+        main.store.reset_for_tests(self.path)
+        self.client = TestClient(main.app)
+
+    def put(self, section, value):
+        return self.client.put(f"/api/state/{section}", json={"value": value})
+
+    def test_round_trip_and_revisions(self):
+        self.assertEqual(self.client.get("/api/state").json(), {})
+        r1 = self.put("plan", [{"breakfast": {"name": "Oats"}}]).json()
+        r2 = self.put("plan", [{"breakfast": {"name": "Eggs"}}]).json()
+        self.assertEqual((r1["rev"], r2["rev"]), (1, 2))
+        state = self.client.get("/api/state").json()
+        self.assertEqual(state["plan"]["value"][0]["breakfast"]["name"], "Eggs")
+        self.assertEqual(state["plan"]["rev"], 2)
+
+    def test_api_keys_are_never_sent_back(self):
+        self.put("settings", {"diet": "Vegan", "claude_api_key": SECRET})
+        text = self.client.get("/api/state").text
+        self.assertNotIn(SECRET, text)
+        settings = self.client.get("/api/state").json()["settings"]["value"]
+        self.assertEqual(settings["diet"], "Vegan")
+        self.assertTrue(settings["_secrets_set"]["claude_api_key"])
+        self.assertFalse(settings["_secrets_set"]["openai_api_key"])
+        self.assertEqual(main.store.secret("claude_api_key"), SECRET)
+
+    def test_blank_key_keeps_saved_key_and_clear_removes_it(self):
+        self.put("settings", {"claude_api_key": SECRET})
+        self.put("settings", {"diet": "Keto", "claude_api_key": ""})  # another device saving other settings
+        self.assertEqual(main.store.secret("claude_api_key"), SECRET)
+        self.put("settings", {"diet": "Keto", "_clear": ["claude_api_key"]})
+        self.assertEqual(main.store.secret("claude_api_key"), "")
+
+    def test_saved_to_disk_and_reloaded(self):
+        self.put("chat", [{"role": "user", "content": "hi"}])
+        self.assertTrue(self.path.exists())
+        main.store.reset_for_tests(self.path)  # like restarting the server
+        self.assertEqual(self.client.get("/api/state").json()["chat"]["value"][0]["content"], "hi")
+
+    def test_damaged_file_does_not_stop_the_app(self):
+        self.path.write_text("{not json", encoding="utf-8")
+        main.store.reset_for_tests(self.path)
+        self.assertEqual(self.client.get("/api/state").json(), {})
+        self.assertTrue(self.path.with_suffix(".damaged.json").exists())
+
+    def test_rejects_bad_input(self):
+        self.assertEqual(self.put("passwords", {}).status_code, 400)
+        self.assertEqual(self.put("settings", ["not", "an", "object"]).status_code, 400)
+        self.assertEqual(self.put("chat", "x" * (3 * 1024 * 1024)).status_code, 400)
+        self.assertEqual(self.client.put("/api/state/plan", json={"nope": 1}).status_code, 400)
+
+    def test_ai_uses_key_saved_on_the_pc(self):
+        self.put("settings", {"claude_api_key": SECRET})
+        up = FakeUpstream()
+
+        class Client(_RealAsyncClient):
+            def __init__(self, *a, **kw):
+                kw["transport"] = httpx.MockTransport(up)
+                super().__init__(*a, **kw)
+        main.httpx.AsyncClient = Client
+        try:
+            r = self.client.post("/api/generate", json={"provider": "claude", "model": "m", "messages": []})
+        finally:
+            main.httpx.AsyncClient = _RealAsyncClient
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(up.requests[-1].headers["x-api-key"], SECRET)
 
 
 if __name__ == "__main__":
