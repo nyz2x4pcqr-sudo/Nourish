@@ -28,12 +28,19 @@ xcrun simctl install "$UDID" build-sim/Debug-iphonesimulator/Nourish.app
 DATA=$(xcrun simctl get_app_container "$UDID" $APP data)
 PROBE="$DATA/Documents/probe.json"
 
-# Launches the app with a JavaScript probe and waits (up to $2 s) for its result.
+# Launches the app with a JavaScript probe and waits (up to $2 s) for its result. With a third
+# argument "retry", a launch that gives no answer is tried once more: right after a slow simulator
+# start (seen on a busy CI machine: 3:42 to boot, waiting on the system app) the first launch can stall.
 probe() {
-  rm -f "$PROBE"
-  xcrun simctl terminate "$UDID" $APP 2>/dev/null || true
-  xcrun simctl launch "$UDID" $APP -mode local -js_probe "$1"
-  for i in $(seq 1 "$2"); do [ -f "$PROBE" ] && break; sleep 1; done
+  for attempt in 1 2; do
+    rm -f "$PROBE"
+    xcrun simctl terminate "$UDID" $APP 2>/dev/null || true
+    xcrun simctl launch "$UDID" $APP -mode local -js_probe "$1"
+    for i in $(seq 1 "$2"); do [ -f "$PROBE" ] && break; sleep 1; done
+    [ -f "$PROBE" ] && break
+    [ "${3:-}" = retry ] && [ $attempt = 1 ] || break
+    echo "No answer after $2 s; launching the app once more"
+  done
   [ -f "$PROBE" ] || fail "no answer from the app's probe"
   cat "$PROBE" | cut -c1-800; echo
 }
@@ -47,7 +54,7 @@ start_probe() {
 
 echo "== 1. First launch: Nourish on the phone, no PC"
 BEFORE=$(wc -l < "$LOG")
-probe "localStorage.setItem('probe_saved', 'kept'); const s = await getSpecs(); return JSON.stringify({ local: LOCAL_MODE, native: nativeAvailable(), title: document.title, specs: s });" 60
+probe "localStorage.setItem('probe_saved', 'kept'); const s = await getSpecs(); return JSON.stringify({ local: LOCAL_MODE, native: nativeAvailable(), title: document.title, specs: s });" 180 retry
 python3 -c "
 import json; r = json.load(open('$PROBE')); assert r['ok'], r; v = json.loads(r['value'])
 assert v['local'] and v['native'], v; assert v['specs']['ram'] > 0 and v['specs']['platform'] == 'ios', v
