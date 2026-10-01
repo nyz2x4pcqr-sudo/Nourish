@@ -282,6 +282,26 @@ All of these pass.
 
 **Not verified:** the status-bar colour change in the phone apps (needs the CI build/real device); the edit prompt with real models (small local models may ignore the `changes` format — the app then shows an error in the chat instead of changing anything).
 
+## Round 5 (v0.4.0-pre-alpha): Nourish on the phone, with on-device AI
+
+**Asked for:** phone apps that work on their own with AI running on the phone. They should check the phone's specs, ask Hugging Face for the best models, and show a personal top 5 with tags ("we don't want to melt the phone"). Also a Hugging Face login, and the PC option kept but not the default.
+
+**Built:**
+- **Phone-only by default.** The web app is built into both apps (Android: `appassets.androidplatform.net`; iOS: `nourish://app/`). `ondevice.js` stands in for the server: recipe search/import ported from `web_recipes.py`, cloud AI calls, and update checks. The PC option is in Settings → Server & devices.
+- **Engine.** `mobile/shared/llm` is a small C interface over llama.cpp (pinned commit `0c1e570`), with JNI on Android (CPU) and an xcframework on iOS (Metal). Each request starts from an empty context. GBNF formats force valid JSON, and plans are made one day at a time.
+- **Live model ranking.** The app reads the specs: on iOS `os_proc_available_memory()`, which includes a raised limit such as LiveContainer's; on Android `availMem`. It then queries Hugging Face (conversational GGUF; downloads and trending; known publishers), filters and dedupes, reads real file sizes, picks the best quantisation that fits, and scores. Cached 12 h. The built-in list is shown only when offline.
+- **Native security.** The bridge blocks home-network addresses on every redirect. The Hugging Face token is only sent to huggingface.co and is dropped on redirects to download servers. Model file names are restricted, and downloads are only allowed from Hugging Face and must be GGUF.
+
+**Bugs found while building (fixed):** leading zeros in grammar numbers (invalid JSON); a CMake option unsupported by Android's CMake 3.22; nested children rendered as "[object HTMLButtonElement]"; Gemma's "E2B" sizes not read; tiny models filling lists with punctuation.
+
+**Verified:**
+- On Linux: the engine and the Java↔C++ link, with a random-weight model. It always produced valid JSON, cancelled within ~300 ms, gave readable errors, and handled invalid UTF-8.
+- In the browser, with a stand-in bridge: the whole phone-only flow.
+- On GitHub: the Android emulator ran a real SmolLM2 model with the app's engine and produced a valid day of meals. The iOS simulator ran a real model through app JS → bridge → engine; storage survived a restart; PC mode still worked.
+- 26 frontend and 41 backend tests pass.
+
+**Not verified:** real phones (performance, heat, memory limits, LiveContainer); Metal on a device (the simulator runs on the CPU); downloads of multi-GB files on a phone; the live Hugging Face ranking from inside the app on a phone (CI checks the same code with Node against the real API).
+
 ## UNVERIFIED (and why)
 
 - **Live TheMealDB, Spoonacular and USDA calls** — those hosts are blocked by this sandbox's network policy. The endpoints were tested against faked responses in the documented format.
