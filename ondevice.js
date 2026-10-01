@@ -694,9 +694,17 @@ const HF_PUBLISHERS = ['unsloth', 'bartowski', 'lmstudio-community', 'ggml-org',
 const HF_SKIP = /omni|agent|computer-?use|\bgui\b|ui-mate|ui-tars|fara\d|tool-?call|function-?call|coder|code-|embed|rerank|guard|abliterat|uncensor|nsfw|roleplay|\brp\b|[-_]base\b|base-gguf|\bmtp\b|draft|math|ocr|tts|audio|speech|whisper|[-_]vl\b|[-_]vl[-_]|vision|reward|heretic|merge|test|tiny-random|\d{2,}b-a\d/i;
 const QUANT_ORDER = ['Q4_K_M', 'Q4_K_S', 'IQ4_XS', 'IQ4_NL', 'Q4_0', 'Q3_K_L', 'Q3_K_M', 'IQ3_M', 'Q3_K_S'];
 const KNOWN_GOOD = /qwen-?3|qwen2\.5|gemma-?[34]|llama-?3\.[123]|phi-?4|smollm|granite-?4|lfm2|mistral|ministral/i;
+// Measured with Nourish's own plan code (mobile/ci/ios-bench.sh, same prompt, 3 days each, iOS
+// simulator, 2026-10-01): Qwen3.5-2B 1445 s vs LFM2.5-2.6B 1704 s, 0% junk lines for both, and
+// Qwen's file is 0.4 GB smaller. Models that did better in that test get a small lift.
+const PLAN_TESTED = [[/qwen3\.5-2b\b/i, 1.2]];
+function planTestedBonus(id) {
+    const hit = PLAN_TESTED.find(([re]) => re.test(id));
+    return hit ? hit[1] : 0;
+}
 // Reasoning-style models "think" at length before answering: slow and hot on a phone.
 const THINKERS = /distill|reason|thinking|\br1\b|mimo/i;
-const LIVE_CACHE_KEY = 'nourish_hf_top_v2';   // bumped when the ranking rules change, so old lists aren't reused
+const LIVE_CACHE_KEY = 'nourish_hf_top_v3';   // bumped when the ranking rules change, so old lists aren't reused
 const LIVE_CACHE_MS = 12 * 60 * 60 * 1000;
 
 function paramsFromName(name) {
@@ -766,7 +774,7 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
     const budget = memoryBudget(specs);
     const bucket = Math.round(budget / GB * 2) / 2;
     mlog(`Building the model list for ${specs.device || 'this phone'}: budget ${formatBytes(budget)}${force ? ' (refresh)' : ''}`);
-    try { localStorage.removeItem('nourish_hf_top'); } catch (e) { /* the old list (older ranking rules) */ }
+    try { localStorage.removeItem('nourish_hf_top'); localStorage.removeItem('nourish_hf_top_v2'); } catch (e) { /* older lists (older ranking rules) */ }
     if (!force) {
         try {
             const cached = JSON.parse(localStorage.getItem(LIVE_CACHE_KEY) || 'null');
@@ -833,7 +841,7 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
             // Squeezed versions (3-bit) lose quality; proven chat families and newer models gain.
             quality: Math.min(10, capability(params) + recencyBonus(r.created) + (KNOWN_GOOD.test(r.id) ? 1 : -0.5)
                 - (THINKERS.test(r.id) ? 1 : 0) - (params < 0.5 ? 2 : 0) - ({ Q4_K_S: 0.2, IQ4_XS: 0.3, IQ4_NL: 0.3, Q4_0: 0.4, Q3_K_L: 1, Q3_K_M: 1.2, IQ3_M: 1.3, Q3_K_S: 1.5 }[f.quant] || 0)
-                + Math.log10(r.downloads + 10) / 6),
+                + Math.log10(r.downloads + 10) / 6 + planTestedBonus(r.id)),
             blurb: `${compactCount(r.downloads)} downloads${r.created ? ' · ' + new Date(r.created).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : ''} · ${f.quant}`,
             live: true,
         };
