@@ -55,6 +55,8 @@ jobs:
           pip install -r backend/requirements-core.txt
           cd backend && nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$GITHUB_WORKSPACE/server.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
+      - name: Live check - ask Hugging Face for each phone's top 5
+        run: node mobile/ci/hf-live-check.js
       - name: Get a tiny real model and the app's meal format
         run: |
           curl -sSfL -o test-model.gguf "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf"

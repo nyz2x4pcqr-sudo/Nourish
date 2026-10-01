@@ -196,7 +196,7 @@ function stripThinking(text) {
 // Output formats that small models are forced to follow, so their answers always parse.
 const GBNF_COMMON = String.raw`
 meal ::= "{" ws "\"name\":" ws str "," ws "\"time_minutes\":" ws int "," ws "\"nutrition\":" ws "{" ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}" "," ws "\"ingredients\":" ws "[" ws str ("," ws str){1,7} ws "]" "," ws "\"steps\":" ws "[" ws str ("," ws str){1,4} ws "]" ws "}"
-str ::= "\"" [^"\\\x7F\x00-\x1F]{2,90} "\""
+str ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{1,89} "\""
 int ::= "0" | [1-9] [0-9]{0,3}
 ws ::= [ \n]{0,2}`;
 const GBNF_DAY = String.raw`root ::= "{" ws "\"breakfast\":" ws meal "," ws "\"lunch\":" ws meal "," ws "\"dinner\":" ws meal ws "}"` + GBNF_COMMON;
@@ -490,8 +490,8 @@ function assessModel(model, specs) {
 }
 
 // The personal top-5 list: the best models that fit this phone, with tags.
-function rankModels(specs) {
-    const rated = MODEL_CATALOG.map(m => Object.assign({}, m, { a: assessModel(m, specs) }));
+function rankModels(specs, models = MODEL_CATALOG) {
+    const rated = models.map(m => Object.assign({}, m, { a: assessModel(m, specs) }));
     const fits = rated.filter(m => m.a.fit !== 'too-big').sort((x, y) => y.a.score - x.a.score);
     const top = fits.slice(0, 5);
     const tooBig = rated.filter(m => m.a.fit === 'too-big').sort((x, y) => x.size - y.size);
@@ -509,6 +509,126 @@ function rankModels(specs) {
         });
     }
     return { top, more: fits.slice(5), tooBig };
+}
+
+// === LIVE: ASK HUGGING FACE WHICH MODELS ARE BEST FOR THIS PHONE ===
+// 1. Ask Hugging Face for popular and trending chat models in the GGUF format phones can run.
+// 2. Drop ones that aren't for chatting (code, embeddings…), copies of the same model, and any that are
+//    clearly too big for the memory this phone allows.
+// 3. Look up the real file sizes of the best candidates and pick the largest-quality version that fits.
+// 4. Score by capability (size), how new and how popular it is, speed on this phone and heat.
+const HF_API = 'https://huggingface.co/api/models';
+const HF_PUBLISHERS = ['unsloth', 'bartowski', 'lmstudio-community', 'ggml-org', 'Qwen'];
+const HF_SKIP = /coder|code-|embed|rerank|guard|abliterat|uncensor|nsfw|roleplay|\brp\b|[-_]base\b|base-gguf|\bmtp\b|draft|math|ocr|tts|audio|speech|whisper|[-_]vl\b|[-_]vl[-_]|vision|reward|heretic|merge|test|tiny-random|\d{2,}b-a\d/i;
+const QUANT_ORDER = ['Q4_K_M', 'Q4_K_S', 'IQ4_XS', 'IQ4_NL', 'Q4_0', 'Q3_K_L', 'Q3_K_M', 'IQ3_M', 'Q3_K_S'];
+const KNOWN_GOOD = /qwen3|gemma-?[34]|llama-?3\.[123]|phi-?4|smollm3|granite-?4|ling/i;
+const LIVE_CACHE_KEY = 'nourish_hf_top';
+const LIVE_CACHE_MS = 12 * 60 * 60 * 1000;
+
+function paramsFromName(name) {
+    const m = String(name).match(/(?:^|[-_ ])e?(\d+(?:\.\d+)?)\s*b(?![a-z])/i);
+    return m ? Number(m[1]) : null;
+}
+
+// Rough "how capable" from size: 0.5B ≈ 1, 1B ≈ 3, 2B ≈ 5, 4B ≈ 7.4, 8B ≈ 9.6 (capped).
+function capability(params) {
+    return Math.max(1, Math.min(9.5, 3 + 2.2 * Math.log2(Math.max(params, 0.3))));
+}
+
+function recencyBonus(date) {
+    const t = Date.parse(date || '');
+    if (!t) return 0;
+    const months = (Date.now() - t) / (30 * 864e5);
+    return months < 6 ? 1.5 : months < 12 ? 1 : months < 24 ? 0.4 : 0;
+}
+
+function baseKey(r) {
+    const tag = (r.tags || []).filter(t => /^base_model:/.test(t)).map(t => t.replace(/^base_model:(quantized:|finetune:)?/, ''))[0];
+    const name = (tag || r.id.split('/').pop()).toLowerCase();
+    return name.replace(/[-_.]?gguf$/, '').replace(/[-_.](q\d.*|i?mat.*)$/, '');
+}
+
+// "bartowski/google_gemma-3-4b-it-GGUF" -> "gemma-3-4b-it"
+function prettyModelName(id) {
+    const name = id.split('/').pop().replace(/[-_.]?GGUF$/i, '');
+    const cut = name.indexOf('_');
+    return cut > 0 && name.slice(0, cut).indexOf('-') < 0 ? name.slice(cut + 1) : name;
+}
+
+function pickQuant(files, params, specs) {
+    const ggufs = (files || [])
+        .filter(f => f && f.type !== 'directory' && /\.gguf$/i.test(f.path) && !/mmproj|-\d{5}-of-\d{5}|\//i.test(f.path))
+        .map(f => ({ file: f.path, size: (f.lfs && f.lfs.size) || f.size }));
+    for (const want of ['good', 'tight']) {
+        for (const q of QUANT_ORDER) {
+            const re = new RegExp('(^|[-_.])' + q + '([-_.]|$)', 'i');
+            const f = ggufs.find(g => re.test(g.file.replace(/\.gguf$/i, '')));
+            if (f && f.size && assessModel({ size: f.size, params }, specs).fit === want) return Object.assign(f, { quant: q });
+        }
+    }
+    return null;
+}
+
+async function mapLimit(items, limit, fn) {
+    const out = new Array(items.length);
+    let next = 0;
+    const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i]).catch(() => null); } };
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+    return out;
+}
+
+function compactCount(n) {
+    n = Number(n) || 0;
+    return n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
+}
+
+async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth: 'hf' }), force = false } = {}) {
+    const budget = memoryBudget(specs);
+    const bucket = Math.round(budget / GB * 2) / 2;
+    if (!force) {
+        try {
+            const cached = JSON.parse(localStorage.getItem(LIVE_CACHE_KEY) || 'null');
+            if (cached && cached.bucket === bucket && Date.now() - cached.at < LIVE_CACHE_MS && cached.models.length) return cached;
+        } catch (e) { /* no cache */ }
+    }
+    const q = 'filter=gguf&filter=conversational&direction=-1&full=false';
+    const lists = await Promise.all([
+        fetchJSON(`${HF_API}?${q}&sort=downloads&limit=100`),
+        fetchJSON(`${HF_API}?${q}&sort=trendingScore&limit=60`).catch(() => []),
+    ].concat(HF_PUBLISHERS.map(a => fetchJSON(`${HF_API}?${q}&author=${a}&sort=downloads&limit=40`).catch(() => []))));
+    // Biggest model worth looking at: about what fits in this phone's memory at 4-bit.
+    const maxParams = budget / (0.62 * GB);
+    const seen = {};
+    lists.forEach(list => (Array.isArray(list) ? list : []).forEach(r => {
+        if (!r || !r.id || r.private || r.gated || HF_SKIP.test(r.id)) return;
+        const params = paramsFromName(r.id);
+        if (params && params > maxParams * 1.15) return;
+        const key = baseKey(r);
+        const entry = { id: r.id, params, downloads: r.downloads || 0, likes: r.likes || 0, created: r.lastModified || r.createdAt, key };
+        if (!seen[key] || entry.downloads > seen[key].downloads) seen[key] = entry;
+    }));
+    const pre = Object.keys(seen).map(k => seen[k]).map(r => Object.assign(r, {
+        pre: capability(r.params || 3) + recencyBonus(r.created) + Math.log10(r.downloads + 10) / 3 + (KNOWN_GOOD.test(r.id) ? 0.5 : 0),
+    })).sort((a, b) => b.pre - a.pre).slice(0, 14);
+    if (!pre.length) throw new Error('Hugging Face returned no suitable models.');
+
+    const picked = await mapLimit(pre, 4, async r => {
+        const tree = await fetchJSON(`${HF_API}/${r.id}/tree/main`);
+        const f = pickQuant(tree, r.params, specs);
+        if (!f) return null;
+        const params = r.params || Math.max(0.3, f.size / (0.6 * GB));
+        return {
+            id: 'hf:' + r.id + '/' + f.file, name: prettyModelName(r.id), repo: r.id, file: f.file, size: f.size, params,
+            quality: Math.min(10, capability(params) + recencyBonus(r.created) + (KNOWN_GOOD.test(r.id) ? 0.5 : 0) + Math.log10(r.downloads + 10) / 6),
+            blurb: `${compactCount(r.downloads)} downloads${r.created ? ' · ' + new Date(r.created).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : ''} · ${f.quant}`,
+            live: true,
+        };
+    });
+    const models = picked.filter(Boolean);
+    if (!models.length) throw new Error('None of the models found on Hugging Face fit this phone.');
+    const result = { at: Date.now(), bucket, models };
+    try { localStorage.setItem(LIVE_CACHE_KEY, JSON.stringify(result)); } catch (e) { /* not cached */ }
+    return result;
 }
 
 // === DOWNLOADS ===
@@ -711,7 +831,18 @@ function deviceSummary(specs) {
     ];
 }
 
-let ondeviceState = { specs: null, error: '', loading: false, showTooBig: false };
+let ondeviceState = { specs: null, error: '', loading: false, showTooBig: false, live: null, liveError: '', liveBusy: false };
+
+function loadLiveModels(force) {
+    if (!ondeviceState.specs || ondeviceState.liveBusy) return;
+    ondeviceState.liveBusy = true;
+    ondeviceState.liveError = '';
+    if (settingsPage === 'ai') renderSettings();
+    discoverModels(ondeviceState.specs, { force })
+        .then(r => { ondeviceState.live = r; })
+        .catch(e => { ondeviceState.liveError = e.message; })
+        .then(() => { ondeviceState.liveBusy = false; if (settingsPage === 'ai') renderSettings(); });
+}
 
 function renderOnDeviceSection() {
     const box = h('div', { id: 'onDeviceSection' });
@@ -724,14 +855,21 @@ function renderOnDeviceSection() {
         Promise.all([getSpecs(true), listDownloaded(), refreshHfUser()])
             .then(([specs]) => { ondeviceState.specs = specs; })
             .catch(e => { ondeviceState.error = e.message; })
-            .then(() => { ondeviceState.loading = false; if (settingsPage === 'ai') renderSettings(); });
+            .then(() => { ondeviceState.loading = false; if (settingsPage === 'ai') renderSettings(); loadLiveModels(false); });
     }
     const specs = ondeviceState.specs;
     if (!specs) {
         setChildren(box, h('p', { class: 'settings-note', text: ondeviceState.error || 'Checking this phone…' }));
         return box;
     }
-    const ranked = rankModels(specs);
+    // The live list from Hugging Face; the built-in list only while it loads or when offline.
+    const live = ondeviceState.live && ondeviceState.live.models.length ? ondeviceState.live : null;
+    const ranked = rankModels(specs, live ? live.models : MODEL_CATALOG);
+    const sourceNote = ondeviceState.liveBusy
+        ? 'Checking Hugging Face for the best models for this phone…'
+        : live
+            ? `Live from Hugging Face · ${new Date(live.at).toLocaleString(undefined, { hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' })}`
+            : `Couldn't reach Hugging Face${ondeviceState.liveError ? ' (' + ondeviceState.liveError + ')' : ''}, so this is Nourish's built-in list.`;
     const hfInput = h('input', { type: 'password', class: 'settings-input', placeholder: 'hf_…', autocomplete: 'off', 'aria-label': 'Hugging Face token' });
     const searchInput = h('input', { type: 'search', class: 'settings-input', placeholder: 'e.g. qwen, llama, gemma', value: hfSearch.query, 'aria-label': 'Search Hugging Face',
         onkeydown: e => { if (e.key === 'Enter' && e.target.value.trim()) runHfSearch(e.target.value.trim()); } });
@@ -761,12 +899,22 @@ function renderOnDeviceSection() {
     setChildren(box,
         deviceSummary(specs),
         h('div', { class: 'settings-group-label', text: 'Your top 5 for this phone' }),
+        h('div', { class: 'live-note' },
+            ondeviceState.liveBusy ? h('span', { class: 'job-bar-spinner', 'aria-hidden': 'true' }) : icon(live ? 'i-globe' : 'i-book'),
+            h('span', { text: sourceNote }),
+            ondeviceState.liveBusy ? null : h('button', { type: 'button', class: 'link-btn', onclick: () => loadLiveModels(true) }, 'Refresh')),
         ranked.top.length
             ? h('div', { class: 'model-list' }, ranked.top.map(m => modelCard(m, specs)))
             : h('p', { class: 'settings-note', text: 'None of the listed models fit in the memory this phone allows. Try searching for a smaller one below, or use a cloud AI.' }),
         ranked.more.length || ranked.tooBig.length ? h('button', { type: 'button', class: 'link-btn', onclick: () => { ondeviceState.showTooBig = !ondeviceState.showTooBig; renderSettings(); } },
             ondeviceState.showTooBig ? 'Hide other models' : `Show ${ranked.more.length + ranked.tooBig.length} other models`) : null,
         ondeviceState.showTooBig ? h('div', { class: 'model-list' }, ranked.more.concat(ranked.tooBig).map(m => modelCard(m, specs))) : null,
+        downloadedFiles.length ? settingsGroup('Downloaded on this phone', downloadedFiles.map(f => h('div', { class: 'settings-row' },
+            h('span', { class: 'settings-label' }, f.file.replace(/\.gguf$/i, ''), h('span', { class: 'settings-hint', text: formatBytes(f.size) + (settings.local_model === f.file ? ' · in use' : '') })),
+            h('span', { class: 'header-actions' },
+                settings.local_model === f.file ? null : h('button', { type: 'button', class: 'link-btn', onclick: () => { setSetting('local_model', f.file); renderSettings(); } }, 'Use'),
+                h('button', { type: 'button', class: 'link-btn', style: 'color: var(--danger)', onclick: () => deleteModel(f.file) }, 'Delete')))),
+            `${formatBytes(downloadedFiles.reduce((n, f) => n + (f.size || 0), 0))} used by models.`) : null,
         settingsGroup('Search Hugging Face', [
             h('div', { class: 'settings-row' }, searchInput,
                 h('button', { type: 'button', class: 'icon-btn accent', 'aria-label': 'Search', onclick: () => { if (searchInput.value.trim()) runHfSearch(searchInput.value.trim()); } }, icon('i-globe'))),
@@ -797,5 +945,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, MODEL_CATALOG, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
+    module.exports = { discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, MODEL_CATALOG, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
 }

@@ -798,3 +798,6 @@ a.settings-button { display: flex; text-decoration: none; }
 .settings-row input[type="search"] { text-align: left; }
 #onDeviceSection { display: flex; flex-direction: column; gap: 22px; }
 #onDeviceSection > .link-btn { align-self: flex-start; margin: -10px 0 -6px 4px; }
+.live-note { display: flex; align-items: center; gap: 8px; margin: -4px 4px -10px; font-size: 0.85rem; color: var(--text-3); }
+.live-note > span:nth-child(2) { flex: 1; }
+.live-note svg { width: 1rem; height: 1rem; flex-shrink: 0; }
