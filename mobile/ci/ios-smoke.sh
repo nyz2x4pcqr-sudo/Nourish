@@ -38,6 +38,13 @@ probe() {
   cat "$PROBE" | cut -c1-800; echo
 }
 
+# Same, without waiting for the result.
+start_probe() {
+  rm -f "$PROBE"
+  xcrun simctl terminate "$UDID" $APP 2>/dev/null || true
+  xcrun simctl launch "$UDID" $APP -mode local -js_probe "$1"
+}
+
 echo "== 1. First launch: Nourish on the phone, no PC"
 BEFORE=$(wc -l < "$LOG")
 probe "localStorage.setItem('probe_saved', 'kept'); const s = await getSpecs(); return JSON.stringify({ local: LOCAL_MODE, native: nativeAvailable(), title: document.title, specs: s });" 60
@@ -150,24 +157,81 @@ print("Valid day of meals:", [day[m]["name"] for m in ("breakfast", "lunch", "di
 PY
 cp "$PROBE" shots/ios-ai-probe.json
 
-echo "== 6. A whole 7-day meal plan made on the phone, through the app's own Generate Plan code"
-probe "Object.assign(settings, { active_provider: 'local', local_model: 'test-model.gguf', local_ctx: '2048', local_gpu: 'off' });
-  await runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
+echo "== 6a. A 7-day plan on the phone through the app's own Generate Plan code; the app is killed after day 2"
+probe "Object.assign(settings, { active_provider: 'local', local_model: 'test-model.gguf', local_ctx: '2048', local_gpu: 'off' }); changed('settings');
+  runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
     { role: 'user', content: 'Goal: eat balanced. Likes: anything. Avoids: nothing. Generate the 7-day meal plan JSON.' }] });
+  await new Promise(r => { const t = setInterval(() => { const s = JSON.parse(localStorage.getItem('nourish_plan_progress') || '{}'); if ((s.days || []).length >= 2) { clearInterval(t); r(); } }, 300); });
+  return localStorage.getItem('nourish_plan_progress');" 1200
+python3 -c "
+import json; r = json.load(open('$PROBE')); assert r['ok'], r; s = json.loads(r['value'])
+json.dump(s['days'][:2], open('saved-days.json', 'w')); print('Saved before the kill:', len(s['days']), 'days')" || fail "the plan wasn't saved day by day"
+sleep 3   # let WebKit write localStorage to disk
+
+echo "== 6b. Relaunch: the plan continues by itself from the saved day"
+probe "await new Promise(r => { const t = setInterval(() => { if (!planJob && daysData.length === 7 && !localStorage.getItem('nourish_plan_progress')) { clearInterval(t); r(); } }, 1000); });
   return JSON.stringify({ days: daysData, log: activityLog.filter(l => l.area === 'plan').map(l => l.level + ' ' + l.msg) });" 2400
-python3 - "$PROBE" <<'PY' || fail "the on-device 7-day plan is not valid"
+python3 - "$PROBE" <<'PY' || fail "the plan didn't continue correctly after the app was killed"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
 v = json.loads(r["value"])
 print("\n".join(v["log"]))
 assert len(v["days"]) == 7, ("days", len(v["days"]))
+saved = json.load(open("saved-days.json"))
+assert [d["breakfast"]["name"] for d in v["days"][:len(saved)]] == [d["breakfast"]["name"] for d in saved], "saved days changed"
+assert any("Found a plan stopped at day" in l for l in v["log"]), "no resume in the log"
+junk = ("ingredients", "steps", "name", "nutrition", "description")
 for i, day in enumerate(v["days"]):
     for meal in ("breakfast", "lunch", "dinner"):
-        m = day[meal]; assert m["name"] and m["ingredients"] and m["steps"] and "calories" in m["nutrition"], (i, meal)
-for i, day in enumerate(v["days"]):
+        m = day[meal]; assert m["name"] and m["steps"] and "calories" in m["nutrition"], (i, meal)
+        for item in m["ingredients"]:
+            assert item.strip().lower() not in junk and not item.lower().startswith(("use ", "description of ")) and item.count(",") <= 2, ("junk got through", item)
     print(f"Day {i + 1}:", " | ".join(day[m]["name"] for m in ("breakfast", "lunch", "dinner")))
+print("Resumed after the kill at day", len(saved) + 1, "and kept the first", len(saved), "days")
 PY
 cp "$PROBE" shots/ios-plan-probe.json
+
+echo "== 6c. In the background part-way through a plan: how much time iOS gives (logged every 5 s)"
+start_probe "localStorage.removeItem('nourish_plan_progress');
+  await runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
+    { role: 'user', content: 'Goal: eat balanced. Generate the 7-day meal plan JSON.' }] });
+  return JSON.stringify({ days: daysData.length, log: activityLog.filter(l => /background|paused|Paused|Day [0-9] done|Screen stays/.test(l.msg)).map(l => new Date(l.t).toISOString().slice(11, 19) + ' ' + l.level + ' ' + l.msg) });"
+sleep 20
+echo "-- sending Nourish to the background for 45 s"
+xcrun simctl launch "$UDID" com.apple.Preferences
+sleep 45
+echo "-- bringing Nourish back"
+xcrun simctl launch "$UDID" $APP
+for i in $(seq 1 2400); do [ -f "$PROBE" ] && break; sleep 1; done
+python3 - "$PROBE" <<'PY' || fail "the plan didn't finish after a trip to the background"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"])
+print("\n".join(v["log"]))
+assert v["days"] == 7, v["days"]
+print("Background lines:", sum("background" in l for l in v["log"]))
+PY
+
+echo "== 7. Screen headers stay below the status bar on all five tabs"
+probe "const out = [];
+  const probeEl = document.createElement('div'); probeEl.style.cssText = 'position:fixed;top:0;height:var(--safe-top)'; document.body.appendChild(probeEl);
+  const safeTop = probeEl.getBoundingClientRect().height;
+  for (const tab of ['today', 'plan', 'chat', 'grocery', 'settings']) {
+    document.querySelector('.tab[data-tab=\"' + tab + '\"]').click();
+    await new Promise(r => setTimeout(r, 500)); window.scrollTo(0, 0);
+    const header = document.querySelector('.screen.active .screen-header');
+    out.push({ tab, headerTop: Math.round(header.getBoundingClientRect().top), safeTop });
+  }
+  return JSON.stringify(out);" 120
+xcrun simctl io "$UDID" screenshot shots/ios-5-settings-header.png
+python3 - "$PROBE" <<'PY' || fail "a screen header overlaps the status bar"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+rows = json.loads(r["value"])
+for row in rows: print(f"{row['tab']}: header top {row['headerTop']} px, status bar {row['safeTop']} px")
+assert rows[0]["safeTop"] > 20, "the simulator should report a status bar height"
+assert all(row["headerTop"] >= row["safeTop"] for row in rows)
+PY
 xcrun simctl io "$UDID" screenshot shots/ios-4-plan.png
 xcrun simctl io "$UDID" screenshot shots/ios-3-after-ai.png
 echo "SMOKE TEST PASSED"

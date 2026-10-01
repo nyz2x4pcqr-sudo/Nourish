@@ -1,0 +1,41 @@
+# Started by hand: compares on-phone models on the same meal-plan prompt in the iOS simulator.
+name: Compare phone models
+on:
+  push:
+    paths:
+      - "mobile/ci/ios-bench.sh"
+      - ".github/workflows/bench-models.yml"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Days per model
+        default: "3"
+jobs:
+  ios-bench:
+    runs-on: macos-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Restore llama.cpp for iOS
+        id: llama-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: mobile/ios/Frameworks
+          key: llama-xcframework-${{ hashFiles('mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/ci/prepare-ios.sh') }}
+      - name: Copy the web app in and build llama.cpp
+        run: bash mobile/ci/prepare-ios.sh
+      - name: Generate the Xcode project
+        working-directory: mobile/ios
+        run: xcodegen generate
+      - name: Compare models
+        working-directory: mobile/ios
+        env:
+          BENCH_DAYS: ${{ inputs.days || '3' }}
+        run: bash ../ci/ios-bench.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: model-comparison
+          path: mobile/ios/bench/
