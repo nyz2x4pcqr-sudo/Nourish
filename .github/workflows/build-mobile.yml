@@ -6,7 +6,13 @@ on:
   push:
     branches: [main, "claude/**"]
     paths:
+      # The phone apps display the web app from the server, so test them when either changes.
       - "mobile/**"
+      - "backend/**"
+      - "index.html"
+      - "app.js"
+      - "json-repair.js"
+      - "styles.css"
       - ".github/workflows/build-mobile.yml"
   workflow_dispatch:
   workflow_call:
