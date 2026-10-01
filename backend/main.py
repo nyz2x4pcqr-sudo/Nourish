@@ -85,6 +85,7 @@ async def require_kb(need_embedder: bool = True):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Nourish starting. LM Studio: {LMSTUDIO_URL}  Ollama: {OLLAMA_URL}  Frontend: {FRONTEND_DIR}")
+    asyncio.get_running_loop().run_in_executor(None, lan_urls)  # warm the cache without delaying startup
     yield
 
 
@@ -178,8 +179,17 @@ def frontend_file(name: str):
     return FileResponse(FRONTEND_DIR / name)
 
 
+_lan_cache = {"at": 0.0, "urls": []}
+
+
 def lan_urls() -> list:
-    """Addresses a phone on the same Wi-Fi can use to open the app."""
+    """Addresses a phone on the same Wi-Fi can use to open the app (cached for a minute)."""
+    if time.time() - _lan_cache["at"] > 60:
+        _lan_cache.update(at=time.time(), urls=_find_lan_urls())
+    return _lan_cache["urls"]
+
+
+def _find_lan_urls() -> list:
     if os.path.exists("/.dockerenv"):
         return []  # inside Docker we only see the container's own address
     ips = set()
@@ -189,10 +199,13 @@ def lan_urls() -> list:
             ips.add(sock.getsockname()[0])
     except OSError:
         pass
-    try:
-        ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
-    except OSError:
-        pass
+    # Looking up our own hostname can stall for ~5 s on some machines (mDNS), so only do it
+    # when the quick method above found nothing.
+    if not ips:
+        try:
+            ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
+        except OSError:
+            pass
     private = [ip for ip in ips if ip.startswith(("192.168.", "10.")) or
                (ip.startswith("172.") and 16 <= int(ip.split(".")[1]) <= 31)]
     return [f"http://{ip}:{PORT}" for ip in sorted(private)]

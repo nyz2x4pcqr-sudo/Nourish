@@ -104,9 +104,11 @@ function h(tag, props = {}, ...children) {
     return el;
 }
 
-// Like el.replaceChildren(), but skips null/false (replaceChildren would print them as text).
+// Replaces an element's children, skipping null/false (they would otherwise print as text).
+// Written without el.replaceChildren() so older phone browsers (Android WebView < 86) work too.
 function setChildren(el, ...children) {
-    el.replaceChildren(...children.flat().filter(c => c != null && c !== false));
+    while (el.firstChild) el.removeChild(el.firstChild);
+    el.append(...children.flat().filter(c => c != null && c !== false));
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -1010,7 +1012,9 @@ function groceryItems() {
         const key = ing.toLowerCase();
         if (seen.has(key)) return;
         seen.add(key);
-        (items[categorizeIngredient(ing)] ||= []).push(ing);
+        const category = categorizeIngredient(ing);
+        if (!items[category]) items[category] = [];
+        items[category].push(ing);
     })));
     return items;
 }
@@ -1223,7 +1227,8 @@ async function generateWithTheMealDB(likes, hates) {
             const ing = r?.[`strIngredient${i}`];
             if (ing && ing.trim()) ingredients.push(`${r[`strMeasure${i}`] || ''} ${ing}`.trim());
         }
-        const steps = (r?.strInstructions || '').split(/\r?\n|(?<=\.)\s+/).map(s => s.trim()).filter(s => s.length > 3).slice(0, 12);
+        // Split into sentences without regex lookbehind (unsupported before iOS 16.4).
+        const steps = (r?.strInstructions || '').replace(/\.\s+/g, '.\n').split(/\r?\n/).map(s => s.trim()).filter(s => s.length > 3).slice(0, 12);
         // TheMealDB has no nutrition or cooking-time data; leave them unknown rather than invent numbers.
         return { name: r?.strMeal, time_minutes: null, nutrition: null, ingredients, steps };
     });
