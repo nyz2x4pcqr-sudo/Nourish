@@ -3,6 +3,9 @@
 // (any port: NOURISH_PORT can change it). Opened as a file, fall back to the default server.
 const API_BASE = location.protocol === 'file:' ? 'http://localhost:8000' : '';
 
+// True inside the Nourish Android/iOS app (it adds "NourishApp" to the browser's user agent).
+const IN_PHONE_APP = /\bNourishApp\//.test(navigator.userAgent);
+
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
 const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
 const MEAL_EMOJI = { breakfast: '🍳', lunch: '🥗', dinner: '🍝' };
@@ -660,6 +663,7 @@ const SETTINGS_RENDERERS = {
                     h('span', { id: 'serverStatus', class: 'settings-value' })),
                 h('div', { id: 'serverInfo' }),
                 settingsButton('Check again', () => checkBackend().then(ok => { if (ok) { loadServerInfo(); renderModelControl(true); } })),
+                IN_PHONE_APP ? settingsButton('Connect to a different PC', () => { location.href = 'nourishapp://connect'; }) : null,
             ], 'Your phone and PC must be on the same Wi-Fi, and Nourish must be running on the PC.'),
         ];
     },

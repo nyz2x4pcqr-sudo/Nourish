@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Connect to Nourish</title>
+<style>
+    :root { --bg: #14110F; --surface: #1F1B18; --raised: #2A2521; --border: #38312D; --text: #FAF7F5; --dim: #A8A09B; --faint: #6E6560; --accent: #FF7043; --error: #F06292; --ok: #7CB342; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font: 16px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+           padding: calc(32px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom)); min-height: 100vh; }
+    main { max-width: 430px; margin: 0 auto; }
+    .logo { width: 72px; height: 72px; border-radius: 18px; background: var(--accent); display: grid; place-items: center; margin-bottom: 20px; }
+    .logo span { width: 46px; height: 46px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 10px #fff, inset 0 0 0 23px #FFE0D6; }
+    h1 { font-size: 30px; font-weight: 800; margin-bottom: 8px; }
+    p { color: var(--dim); margin-bottom: 20px; }
+    label { display: block; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 8px; }
+    input { width: 100%; min-height: 48px; padding: 12px 16px; border-radius: 18px; border: 1px solid var(--border); background: var(--raised);
+            color: var(--text); font: inherit; font-size: 17px; margin-bottom: 16px; }
+    input:focus { outline: none; border-color: var(--accent); }
+    button { width: 100%; min-height: 50px; border: none; border-radius: 18px; font: inherit; font-weight: 600; margin-bottom: 12px; cursor: pointer; }
+    .primary { background: var(--accent); color: #fff; }
+    .secondary { background: var(--raised); color: var(--text); border: 1px solid var(--border); }
+    button:disabled { opacity: .6; }
+    .status { min-height: 24px; margin: 4px 0 16px; font-size: 15px; color: var(--dim); }
+    .status.error { color: var(--error); }
+    .status.ok { color: var(--ok); }
+    .help { margin-top: 24px; padding: 16px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); font-size: 15px; color: var(--dim); }
+    .help b { color: var(--text); }
+    [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+    <div class="logo" aria-hidden="true"><span></span></div>
+    <h1>Connect to Nourish</h1>
+    <p>Nourish runs on your PC. Connect this phone to it once and the app remembers it.</p>
+
+    <button type="button" class="primary" id="scanBtn" hidden>🔍 Find my PC automatically</button>
+
+    <label for="address">Or type the address</label>
+    <input id="address" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="192.168.1.23:8000" enterkeyhint="go" />
+    <button type="button" class="secondary" id="connectBtn">Connect</button>
+    <button type="button" class="secondary" id="anywayBtn" hidden>Connect anyway</button>
+
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+
+    <div class="help">
+        <b>Where's the address?</b> Start Nourish on your PC. Its window shows it next to "On your phone", for example <b>http://192.168.1.23:8000</b>.
+        Your phone and PC must be on the same Wi-Fi. If Windows asks about network access, allow <b>Private networks</b>.
+    </div>
+</main>
+<script>
+    const $ = id => document.getElementById(id);
+    const status = $('status');
+    let deviceIp = null;
+    let pending = null;
+
+    function setStatus(text, kind) {
+        status.textContent = text || '';
+        status.className = 'status' + (kind ? ' ' + kind : '');
+    }
+
+    // Called by the app (Android/iOS) once this page has loaded.
+    window.nourishInit = info => {
+        info = info || {};
+        if (info.last) $('address').value = info.last.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        if (info.error) setStatus(info.error, 'error');
+        deviceIp = /^\d+\.\d+\.\d+\.\d+$/.test(info.ip || '') ? info.ip : null;
+        $('scanBtn').hidden = !deviceIp;
+    };
+
+    function normalize(value) {
+        value = (value || '').trim();
+        if (!value) return null;
+        if (!/^https?:\/\//i.test(value)) value = 'http://' + value;
+        try {
+            const url = new URL(value);
+            if (!url.port && url.protocol === 'http:') url.port = '8000';
+            return url.origin + '/';
+        } catch (e) {
+            return null;
+        }
+    }
+
+    async function reachable(base, ms) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), ms || 3000);
+        try {
+            await fetch(base + 'health', { mode: 'no-cors', cache: 'no-store', signal: controller.signal });
+            return true;
+        } catch (e) {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    function open(base) {
+        setStatus('Connecting…', 'ok');
+        location.href = 'nourishapp://open?url=' + encodeURIComponent(base);
+    }
+
+    async function connect() {
+        const base = normalize($('address').value);
+        if (!base) { setStatus('Type the address shown in the Nourish window on your PC.', 'error'); return; }
+        $('connectBtn').disabled = true;
+        $('anywayBtn').hidden = true;
+        setStatus('Checking ' + base + ' …');
+        const ok = await reachable(base, 4000);
+        $('connectBtn').disabled = false;
+        if (ok) return open(base);
+        pending = base;
+        $('anywayBtn').hidden = false;
+        setStatus("Couldn't reach Nourish at " + base + '. Is it running on your PC, and is this phone on the same Wi-Fi?', 'error');
+    }
+
+    async function scan() {
+        if (!deviceIp) return;
+        const prefix = deviceIp.split('.').slice(0, 3).join('.');
+        const hosts = [];
+        for (let i = 1; i < 255; i++) if (prefix + '.' + i !== deviceIp) hosts.push(prefix + '.' + i);
+        $('scanBtn').disabled = true;
+        let next = 0, done = 0, found = null;
+        async function worker() {
+            while (!found && next < hosts.length) {
+                const host = hosts[next++];
+                if (await reachable('http://' + host + ':8000/', 1500)) found = found || host;
+                done++;
+                if (!found) setStatus('Looking for Nourish on your Wi-Fi… ' + Math.round(done / hosts.length * 100) + '%');
+            }
+        }
+        await Promise.all(Array.from({ length: 32 }, worker));
+        $('scanBtn').disabled = false;
+        if (found) {
+            $('address').value = found + ':8000';
+            setStatus('Found Nourish at ' + found + ' ✓', 'ok');
+            open('http://' + found + ':8000/');
+        } else {
+            setStatus("Couldn't find Nourish on this Wi-Fi. Make sure it's running on your PC, then try again or type the address.", 'error');
+        }
+    }
+
+    $('connectBtn').addEventListener('click', connect);
+    $('anywayBtn').addEventListener('click', () => pending && open(pending));
+    $('scanBtn').addEventListener('click', scan);
+    $('address').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+</script>
+</body>
+</html>

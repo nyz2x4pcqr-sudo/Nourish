@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A plate with a leaf, matching the web app icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M54,30a24,24 0 1,0 0.01,0z" />
+    <path android:fillColor="#FFE0D6"
+        android:pathData="M54,39.5a14.5,14.5 0 1,0 0.01,0z" />
+    <path android:fillColor="#7CB342"
+        android:pathData="M60,33 C64,27 72,26 76,28 C74,33 67,37 60,33 Z" />
+</vector>

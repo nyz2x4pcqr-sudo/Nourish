@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nourish runs on a PC on your home network over plain http (there is no certificate for a
+     home IP address), so cleartext traffic has to be allowed. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

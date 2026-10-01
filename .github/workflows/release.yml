@@ -1,0 +1,52 @@
+name: Release
+
+# Builds every download (Windows .exe, Android .apk, unsigned iPhone .ipa) and publishes them
+# on a GitHub Release.
+# - Actions tab → "Release" → "Run workflow", enter a tag like v0.2.0-pre-alpha. The release
+#   notes come from release-notes/<tag>.md.
+# - Or publish a release on GitHub's website: the files are attached to it (your notes are kept).
+# Tags with a dash (-pre-alpha, -beta, ...) are marked as pre-releases.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag, e.g. v0.2.0-pre-alpha"
+        required: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    uses: ./.github/workflows/build-exe.yml
+  phones:
+    uses: ./.github/workflows/build-mobile.yml
+
+  publish:
+    needs: [windows, phones]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: Nourish-*
+          merge-multiple: true
+      - name: List files
+        run: ls -la dist
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ github.event_name == 'workflow_dispatch' && format('Nourish {0}', env.TAG) || '' }}
+          body_path: ${{ github.event_name == 'workflow_dispatch' && format('release-notes/{0}.md', env.TAG) || '' }}
+          prerelease: ${{ contains(env.TAG, '-') }}
+          files: |
+            dist/Nourish.exe
+            dist/Nourish.apk
+            dist/Nourish-unsigned.ipa
