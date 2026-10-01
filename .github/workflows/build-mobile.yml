@@ -39,6 +39,17 @@ jobs:
           name: Nourish-android
           path: Nourish.apk
 
+  # Asks the real Hugging Face API for each phone profile's top 5, the same way the apps do.
+  hf-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Live check - ask Hugging Face for each phone's top 5
+        run: node mobile/ci/hf-live-check.js
+
   android-test:
     needs: android
     runs-on: ubuntu-latest
@@ -55,8 +66,6 @@ jobs:
           pip install -r backend/requirements-core.txt
           cd backend && nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$GITHUB_WORKSPACE/server.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
-      - name: Live check - ask Hugging Face for each phone's top 5
-        run: node mobile/ci/hf-live-check.js
       - name: Get a tiny real model and the app's meal format
         run: |
           curl -sSfL -o test-model.gguf "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf"
@@ -68,7 +77,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Run in the emulator
-        timeout-minutes: 20
+        timeout-minutes: 35
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30

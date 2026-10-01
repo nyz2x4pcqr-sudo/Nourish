@@ -47,7 +47,8 @@ adb shell run-as $APP sh -c "'mkdir -p files/models && cp /data/local/tmp/test-m
 adb logcat -c
 adb shell am start -W -n $APP/io.github.nourish.MainActivity --ez local true --es selftest_model test-model.gguf --es selftest_grammar day.gbnf
 RESULT=""
-for i in $(seq 1 60); do
+# The emulator has no fast maths instructions, so even a tiny model takes minutes here.
+for i in $(seq 1 150); do
   RESULT=$(adb logcat -d -s Nourish:* | grep -E "NOURISH_SELFTEST_(OK|FAIL)" | head -n 1)
   [ -n "$RESULT" ] && break
   sleep 5
