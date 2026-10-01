@@ -35,7 +35,7 @@ logger = logging.getLogger("nourish")
 # httpx logs full request URLs at INFO, which can include query-string API keys.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-VERSION = "0.4.6-pre-alpha"
+VERSION = "0.4.7-pre-alpha"
 PORT = int(os.getenv("NOURISH_PORT", "8000"))
 LMSTUDIO_URL = os.getenv("LMSTUDIO_URL", "http://localhost:1234").rstrip("/")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
@@ -44,7 +44,7 @@ SPOONACULAR_URL = os.getenv("SPOONACULAR_URL", "https://api.spoonacular.com").rs
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", Path(__file__).resolve().parent.parent))
 # Only these files are served. Never mount the repo root as a static directory:
 # it would expose backend/.env and .git to anyone on the network.
-FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "grocery.js", "styles.css",
+FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "grocery.js", "units.js", "styles.css",
                   "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"}
 
 @asynccontextmanager

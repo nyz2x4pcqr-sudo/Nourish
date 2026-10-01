@@ -116,16 +116,40 @@
     }
 
     // The list for a plan: [{ key, text, category, uses }], one per thing to buy, junk left out.
-    function buildList(days, mealTypes) {
+    const Units = root.NourishUnits || (typeof require === 'function' ? require('./units.js') : null);
+
+    // The key that says two lines are the same thing to buy ("2 large eggs" and "4 eggs" → "egg").
+    function ingredientKey(line) {
+        const item = parseIngredient(line);
+        return item ? item.key : String(line).trim().toLowerCase();
+    }
+
+    // A recipe's ingredient lines with any later line for the same thing dropped (the first one stays).
+    function dedupeIngredients(list) {
+        const seen = new Set();
+        return (list || []).filter(line => {
+            const key = ingredientKey(line);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
+    // The list for a plan: [{ key, text, category, uses }], one per thing to buy, junk left out.
+    // Amounts are added up in millilitres / grams and shown in `system` ('imperial' or 'metric').
+    function buildList(days, mealTypes, system) {
         const rows = {};
         const order = [];
         (days || []).forEach(day => (mealTypes || ['breakfast', 'lunch', 'dinner']).forEach(type => {
             const meal = day && day[type];
-            const list = meal && Array.isArray(meal.ingredients) ? meal.ingredients : [];
+            const list = meal && Array.isArray(meal.ingredients) ? dedupeIngredients(meal.ingredients) : [];
             list.forEach(line => {
                 if (typeof line !== 'string' || junkReason(line)) return;
-                const item = parseIngredient(line);
+                const capped = Units.clampIngredient(line).line;
+                const item = parseIngredient(capped);
                 if (!item) return;
+                const amount = Units.splitIngredient(capped);
+                item.base = Units.toBase(amount.qty, amount.unit);
                 if (!rows[item.key]) { rows[item.key] = { key: item.key, name: item.name, parts: [] }; order.push(item.key); }
                 rows[item.key].parts.push(item);
             });
@@ -133,29 +157,28 @@
         return order.map(key => {
             const row = rows[key];
             const title = row.name.charAt(0).toUpperCase() + row.name.slice(1);
-            // Add up the amounts per unit: "2 tomatoes" + "1 tomato" + "1 can tomatoes" → "3 + 1 can".
+            // Add up per kind: "2 tomatoes" + "1 tomato" + "1 can tomatoes" → "3 + 1 can"; cups + ml → one volume.
             const totals = {};
-            const unitOrder = [];
+            const kinds = [];
             let uncounted = 0;
             row.parts.forEach(p => {
-                if (p.qty == null) { uncounted++; return; }
-                if (!(p.unit in totals)) { totals[p.unit] = 0; unitOrder.push(p.unit); }
-                totals[p.unit] += p.qty;
+                if (!p.base) { uncounted++; return; }
+                if (!(p.base.kind in totals)) { totals[p.base.kind] = 0; kinds.push(p.base.kind); }
+                totals[p.base.kind] += p.base.value;
             });
             let amount = '';
-            if (unitOrder.length === 1 && !uncounted) {
-                const u = unitOrder[0];
-                amount = u ? `${formatQty(totals[u])} ${unitFor(u, totals[u])}` : `×${formatQty(totals[u])}`;
-            } else if (unitOrder.length && unitOrder.length <= 3) {
-                amount = unitOrder.map(u => `${formatQty(totals[u])}${u ? ' ' + unitFor(u, totals[u]) : ''}`).join(' + ');
+            if (kinds.length && kinds.length <= 3) {
+                amount = kinds.map(k => Units.formatBase(k, totals[k], system || 'imperial')).join(' + ');
+                if (kinds.length === 1 && kinds[0] === 'count' && uncounted) amount = '';
             } else if (row.parts.length > 1) {
                 amount = `×${row.parts.length}`;
             }
+            if (amount === '' && row.parts.length > 1) amount = `×${row.parts.length}`;
             return { key, text: amount ? `${title} ${amount.charAt(0) === '×' ? amount : '— ' + amount}` : title, category: categorize(key), uses: row.parts.length };
         });
     }
 
-    const api = { junkReason, parseIngredient, buildList, categorize, CATEGORIES };
+    const api = { junkReason, parseIngredient, ingredientKey, dedupeIngredients, buildList, categorize, CATEGORIES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.NourishGrocery = api;
 })(typeof window !== 'undefined' ? window : this);

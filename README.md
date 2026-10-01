@@ -140,6 +140,7 @@ Nourish/
 ├── app.js            # app logic
 ├── json-repair.js    # reads messy AI output as JSON
 ├── grocery.js        # the shopping list: merges ingredient lines, drops junk
+├── units.js          # kitchen units: imperial ↔ metric, amounts in recipe text, sanity caps
 ├── styles.css
 ├── tests/            # frontend tests:  node --test
 ├── docker-compose.yml
