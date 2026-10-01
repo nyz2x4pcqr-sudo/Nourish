@@ -139,6 +139,7 @@ Nourish/
 ├── index.html        # the app (one page, four tabs)
 ├── app.js            # app logic
 ├── json-repair.js    # reads messy AI output as JSON
+├── grocery.js        # the shopping list: merges ingredient lines, drops junk
 ├── styles.css
 ├── tests/            # frontend tests:  node --test
 ├── docker-compose.yml

@@ -12,6 +12,7 @@ on:
       - "index.html"
       - "app.js"
       - "json-repair.js"
+      - "grocery.js"
       - "ondevice.js"
       - "styles.css"
       - ".github/workflows/build-mobile.yml"
