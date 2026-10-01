@@ -141,7 +141,7 @@ jobs:
       - name: Get a tiny real model
         run: curl -sSfL -o test-model.gguf "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf"
       - name: Run in the simulator
-        timeout-minutes: 60
+        timeout-minutes: 75
         working-directory: mobile/ios
         run: bash ../ci/ios-smoke.sh
       - uses: actions/upload-artifact@v4

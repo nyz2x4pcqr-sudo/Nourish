@@ -198,25 +198,30 @@ print("Resumed after the kill at day", len(saved) + 1, "and kept the first", len
 PY
 cp "$PROBE" shots/ios-plan-probe.json
 
-echo "== 6c. In the background part-way through a plan: how much time iOS gives (logged every 5 s)"
+echo "== 6c. In the background part-way through a plan: the time iOS gives (logged), then the plan is finished"
+# simctl can't reliably bring a running app back to the front (earlier runs kept logging "in the
+# background" after "simctl launch"), so after 45 s away the app is reopened the way iOS would after
+# closing it: the plan continues from its last saved day.
 start_probe "localStorage.removeItem('nourish_plan_progress');
-  await runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
+  runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
     { role: 'user', content: 'Goal: eat balanced. Generate the 7-day meal plan JSON.' }] });
-  return JSON.stringify({ days: daysData.length, log: activityLog.filter(l => /background|paused|Paused|Day [0-9] done|Screen stays/.test(l.msg)).map(l => new Date(l.t).toISOString().slice(11, 19) + ' ' + l.level + ' ' + l.msg) });"
+  return 'started';"
+for i in $(seq 1 120); do [ -f "$PROBE" ] && break; sleep 1; done
 sleep 20
 echo "-- sending Nourish to the background for 45 s"
 xcrun simctl launch "$UDID" com.apple.Preferences
 sleep 45
-echo "-- bringing Nourish back"
-xcrun simctl launch "$UDID" $APP
-for i in $(seq 1 2400); do [ -f "$PROBE" ] && break; sleep 1; done
+sleep 3   # let WebKit write localStorage (the plan and the activity log) to disk
+echo "-- reopening Nourish; the plan should continue from its saved day"
+probe "await new Promise(r => { const t = setInterval(() => { if (!planJob && daysData.length === 7 && !localStorage.getItem('nourish_plan_progress')) { clearInterval(t); r(); } }, 1000); });
+  return JSON.stringify({ days: daysData.length, log: activityLog.filter(l => /background|Background|paused|Paused|Found a plan|Day [0-9] done|Screen stays/.test(l.msg)).map(l => new Date(l.t).toISOString().slice(11, 19) + ' ' + l.level + ' ' + l.msg) });" 2400
 python3 - "$PROBE" <<'PY' || fail "the plan didn't finish after a trip to the background"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
 v = json.loads(r["value"])
 print("\n".join(v["log"]))
 assert v["days"] == 7, v["days"]
-print("Background lines:", sum("background" in l for l in v["log"]))
+print("Background-time lines:", sum("background" in l.lower() for l in v["log"]))
 PY
 
 echo "== 7. Screen headers stay below the status bar on all five tabs"
