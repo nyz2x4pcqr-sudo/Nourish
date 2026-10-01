@@ -139,3 +139,23 @@ test('agent / computer-use models are not offered for meal planning', async () =
     const live = await discoverModels(phones.bigAndroid, { fetchJSON: fakeHF2, force: true });
     assert.ok(!live.models.some(m => /UI-Mate|Fara/.test(m.repo)));
 });
+
+test('second live run: duplicates by suffix, little-known uploads, omni models, tiny models', async () => {
+    assert.equal(baseKey({ id: 'google/gemma-4-E2B-it-qat-q4_0-gguf', tags: [] }), baseKey({ id: 'unsloth/gemma-4-E2B-it-GGUF', tags: [] }));
+    assert.equal(prettyModelName('CMSManhattan/JiRackUltra_1b'), 'JiRackUltra_1b');
+    const list = [
+        { id: 'someone/Obscure_1b', downloads: 40, tags: [], createdAt: recent },
+        { id: 'ggml-org/Qwen2.5-Omni-7B-GGUF', downloads: 90000, tags: [], createdAt: recent },
+        { id: 'LiquidAI/LFM2.5-230M-GGUF', downloads: 90000, tags: [], createdAt: recent },
+        { id: 'unsloth/Qwen3.5-0.8B-GGUF', downloads: 200000, tags: [], createdAt: recent },
+    ];
+    const fetchJSON = url => {
+        const t = url.match(/\/api\/models\/(.+)\/tree\/main$/);
+        if (!t) return Promise.resolve(list);
+        const base = t[1].split('/')[1].replace(/-GGUF$/, '');
+        return Promise.resolve([{ type: 'file', path: base + '-Q4_K_M.gguf', lfs: { size: Math.round((paramsFromName(base) || 1) * 0.6 * GB) } }]);
+    };
+    const live = await discoverModels(phones.oldAndroid, { fetchJSON, force: true });
+    assert.ok(!live.models.some(m => /Obscure|Omni/.test(m.repo)), live.models.map(m => m.repo).join());
+    assert.equal(rankModels(phones.oldAndroid, live.models).top[0].repo, 'unsloth/Qwen3.5-0.8B-GGUF');
+});

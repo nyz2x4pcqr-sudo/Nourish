@@ -520,7 +520,7 @@ function rankModels(specs, models = MODEL_CATALOG) {
 // 4. Score by capability (size), how new and how popular it is, speed on this phone and heat.
 const HF_API = 'https://huggingface.co/api/models';
 const HF_PUBLISHERS = ['unsloth', 'bartowski', 'lmstudio-community', 'ggml-org', 'Qwen'];
-const HF_SKIP = /agent|computer-?use|\bgui\b|ui-mate|ui-tars|fara\d|tool-?call|function-?call|coder|code-|embed|rerank|guard|abliterat|uncensor|nsfw|roleplay|\brp\b|[-_]base\b|base-gguf|\bmtp\b|draft|math|ocr|tts|audio|speech|whisper|[-_]vl\b|[-_]vl[-_]|vision|reward|heretic|merge|test|tiny-random|\d{2,}b-a\d/i;
+const HF_SKIP = /omni|agent|computer-?use|\bgui\b|ui-mate|ui-tars|fara\d|tool-?call|function-?call|coder|code-|embed|rerank|guard|abliterat|uncensor|nsfw|roleplay|\brp\b|[-_]base\b|base-gguf|\bmtp\b|draft|math|ocr|tts|audio|speech|whisper|[-_]vl\b|[-_]vl[-_]|vision|reward|heretic|merge|test|tiny-random|\d{2,}b-a\d/i;
 const QUANT_ORDER = ['Q4_K_M', 'Q4_K_S', 'IQ4_XS', 'IQ4_NL', 'Q4_0', 'Q3_K_L', 'Q3_K_M', 'IQ3_M', 'Q3_K_S'];
 const KNOWN_GOOD = /qwen-?3|qwen2\.5|gemma-?[34]|llama-?3\.[123]|phi-?4|smollm|granite-?4|lfm2|mistral|ministral/i;
 // Reasoning-style models "think" at length before answering: slow and hot on a phone.
@@ -549,14 +549,15 @@ function recencyBonus(date) {
 function baseKey(r) {
     const tag = (r.tags || []).filter(t => /^base_model:/.test(t)).map(t => t.replace(/^base_model:(quantized:|finetune:)?/, ''))[0];
     const name = (tag || r.id).split('/').pop().toLowerCase();
-    return name.replace(/[-_.]?gguf$/, '').replace(/[-_.](q\d.*|i?mat.*)$/, '');
+    return name.replace(/[-_.]?gguf$/, '').replace(/[-_.](qat|q\d|i?mat).*$/, '');
 }
 
 // "bartowski/google_gemma-3-4b-it-GGUF" -> "gemma-3-4b-it"
 function prettyModelName(id) {
     const name = id.split('/').pop().replace(/[-_.]?GGUF$/i, '');
+    // Re-uploaders like bartowski put the original publisher in front: "google_gemma-…".
     const cut = name.indexOf('_');
-    return cut > 0 && name.slice(0, cut).indexOf('-') < 0 ? name.slice(cut + 1) : name;
+    return cut > 0 && /^(bartowski|lmstudio-community|mradermacher)\//i.test(id) ? name.slice(cut + 1) : name;
 }
 
 function pickQuant(files, params, specs) {
@@ -604,7 +605,8 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
     const maxParams = budget / (0.62 * GB);
     const seen = {};
     lists.forEach(list => (Array.isArray(list) ? list : []).forEach(r => {
-        if (!r || !r.id || r.private || r.gated || HF_SKIP.test(r.id)) return;
+        // Skip private, gated, unsuitable and little-known uploads (fewer than 2,000 downloads).
+        if (!r || !r.id || r.private || r.gated || HF_SKIP.test(r.id) || (r.downloads || 0) < 2000) return;
         const params = paramsFromName(r.id);
         if (params && params > maxParams * 1.15) return;
         const key = baseKey(r);
@@ -634,7 +636,7 @@ async function discoverModels(specs, { fetchJSON = url => nativeJSON(url, { auth
             id: 'hf:' + r.id + '/' + f.file, name: prettyModelName(r.id), repo: r.id, file: f.file, size: f.size, params,
             // Squeezed versions (3-bit) lose quality; proven chat families and newer models gain.
             quality: Math.min(10, capability(params) + recencyBonus(r.created) + (KNOWN_GOOD.test(r.id) ? 1 : -0.5)
-                - (THINKERS.test(r.id) ? 1 : 0) - ({ Q4_K_S: 0.2, IQ4_XS: 0.3, IQ4_NL: 0.3, Q4_0: 0.4, Q3_K_L: 1, Q3_K_M: 1.2, IQ3_M: 1.3, Q3_K_S: 1.5 }[f.quant] || 0)
+                - (THINKERS.test(r.id) ? 1 : 0) - (params < 0.5 ? 2 : 0) - ({ Q4_K_S: 0.2, IQ4_XS: 0.3, IQ4_NL: 0.3, Q4_0: 0.4, Q3_K_L: 1, Q3_K_M: 1.2, IQ3_M: 1.3, Q3_K_S: 1.5 }[f.quant] || 0)
                 + Math.log10(r.downloads + 10) / 6),
             blurb: `${compactCount(r.downloads)} downloads${r.created ? ' · ' + new Date(r.created).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : ''} · ${f.quant}`,
             live: true,
