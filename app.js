@@ -232,6 +232,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('online', () => { checkBackend(); syncNow(); });
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) return;
+        if (isLocalMode()) resumeLocalPlan();
         if (backendOnline === false) checkBackend();
         syncNow();
     });
@@ -1735,31 +1736,15 @@ function initGrocery() {
     $('groceryResetBtn').addEventListener('click', resetGrocery);
 }
 
-const GROCERY_CATEGORIES = [
-    ['Protein', ['chicken', 'beef', 'pork', 'fish', 'salmon', 'tuna', 'cod', 'shrimp', 'prawn', 'turkey', 'egg', 'tofu', 'tempeh', 'lamb', 'bacon', 'sausage', 'ham', 'lentil', 'chickpea', 'bean']],
-    ['Dairy', ['milk', 'cheese', 'yogurt', 'yoghurt', 'butter', 'cream', 'feta', 'parmesan', 'mozzarella']],
-    ['Grains & bakery', ['rice', 'pasta', 'noodle', 'bread', 'oat', 'flour', 'quinoa', 'tortilla', 'couscous', 'bagel', 'wrap', 'granola']],
-    ['Produce', ['tomato', 'onion', 'garlic', 'lettuce', 'spinach', 'broccoli', 'carrot', 'apple', 'banana', 'berr', 'lemon', 'lime', 'bell pepper', 'mushroom', 'potato', 'zucchini', 'cucumber', 'celery', 'kale', 'cabbage', 'avocado', 'ginger', 'cilantro', 'parsley', 'basil', 'herb', 'pea', 'corn', 'squash', 'asparagus', 'fruit', 'orange', 'vegetable', 'veggie', 'salad']],
-    ['Pantry', ['oil', 'salt', 'pepper', 'spice', 'sauce', 'vinegar', 'soy', 'honey', 'sugar', 'stock', 'broth', 'paprika', 'cumin', 'mustard', 'nut', 'seed', 'syrup']],
-];
-
-function categorizeIngredient(ing) {
-    const lower = ing.toLowerCase();
-    for (const [cat, words] of GROCERY_CATEGORIES) if (words.some(w => lower.includes(w))) return cat;
-    return 'Other';
-}
+// One row per thing to buy, merged across the week (grocery.js). Ticks are kept by the row's key.
+const GROCERY_ORDER = NourishGrocery.CATEGORIES.map(c => c[0]).concat(['Other']);
 
 function groceryItems() {
     const items = {};
-    const seen = new Set();
-    daysData.forEach(day => MEAL_TYPES.forEach(t => ((day[t] && day[t].ingredients) || []).forEach(ing => {
-        const key = ing.toLowerCase();
-        if (seen.has(key)) return;
-        seen.add(key);
-        const category = categorizeIngredient(ing);
-        if (!items[category]) items[category] = [];
-        items[category].push(ing);
-    })));
+    NourishGrocery.buildList(daysData, MEAL_TYPES).forEach(row => {
+        if (!items[row.category]) items[row.category] = [];
+        items[row.category].push(row);
+    });
     return items;
 }
 
@@ -1767,13 +1752,12 @@ function updateGroceryScreen() {
     const container = $('groceryContainer');
     if (!container) return;
     const items = groceryItems();
-    const order = GROCERY_CATEGORIES.map(c => c[0]).concat(['Other']);
-    const categories = order.filter(c => items[c]);
+    const categories = GROCERY_ORDER.filter(c => items[c]);
     const checked = new Set(grocery.checked);
     const hide = on('grocery_hide_checked');
     const planCount = categories.reduce((n, c) => n + items[c].length, 0);
     const total = planCount + grocery.custom.length;
-    const done = categories.reduce((n, c) => n + items[c].filter(i => checked.has(i)).length, 0) + grocery.custom.filter(c => c.checked).length;
+    const done = categories.reduce((n, c) => n + items[c].filter(i => checked.has(i.key)).length, 0) + grocery.custom.filter(c => c.checked).length;
 
     const input = h('input', { type: 'text', id: 'groceryAddInput', placeholder: 'Add an item…', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Add an item',
         onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); addCustomItem(input); } } });
@@ -1805,8 +1789,8 @@ function updateGroceryScreen() {
     }
     for (const cat of categories) {
         sections.push(h('section', { class: 'card grocery-category' },
-            h('div', { class: 'category-header' }, h('span', { text: cat }), h('span', { class: 'count', text: `${items[cat].filter(i => checked.has(i)).length}/${items[cat].length}` })),
-            items[cat].map(item => itemRow(item, checked.has(item), box => toggleGrocery(item, box)))));
+            h('div', { class: 'category-header' }, h('span', { text: cat }), h('span', { class: 'count', text: `${items[cat].filter(i => checked.has(i.key)).length}/${items[cat].length}` })),
+            items[cat].map(item => itemRow(item.text, checked.has(item.key), box => toggleGrocery(item.key, box)))));
     }
     const pct = total ? Math.round(done / total * 100) : 0;
     setChildren(container,
@@ -1884,9 +1868,9 @@ function groceryText() {
     const lines = ['Nourish grocery list'];
     const custom = grocery.custom.filter(c => !c.checked);
     if (custom.length) lines.push('', 'Added by you', ...custom.map(c => `• ${c.text}`));
-    for (const cat of GROCERY_CATEGORIES.map(c => c[0]).concat(['Other'])) {
-        const left = (items[cat] || []).filter(i => !checked.has(i));
-        if (left.length) lines.push('', cat, ...left.map(i => `• ${i}`));
+    for (const cat of GROCERY_ORDER) {
+        const left = (items[cat] || []).filter(i => !checked.has(i.key));
+        if (left.length) lines.push('', cat, ...left.map(i => `• ${i.text}`));
     }
     return lines.length > 1 ? lines.join('\n') : '';
 }
@@ -2058,16 +2042,38 @@ async function runPlanJob(job, resume = null) {
         let parsed;
         const onPhone = !resume && settings.active_provider === 'local';
         if (onPhone && kind === 'plan') {
-            // On the phone: one day at a time, each forced into the right format.
+            // On the phone: one day at a time, each forced into the right format. Each finished day is
+            // saved (nourish_plan_progress), so an interrupted plan continues where it stopped.
             if (!settings.local_model) throw new Error('Download a model first: Settings → AI model.');
             localPlanCancelled = false;
+            const saved = job.continueSaved ? loadJSON(PLAN_PROGRESS_KEY, null) : null;
+            const state = saved && Array.isArray(saved.days) ? saved : { days: [], messages: job.messages, origin, started: Date.now() };
+            if (!saved) store(PLAN_PROGRESS_KEY, state);
+            const resumeFrom = state.days.length;
             planJob = { id: 'on-device', started: Date.now(), provider: 'local', kind, origin, local: true };
             if (origin === 'chat') { chatBusy = true; chatBusyLabel = 'Cooking your plan…'; chatError = ''; }
             renderChat();
-            parsed = await generatePlanOnDevice(job.messages,
-                d => { showJobBar('busy', `Cooking day ${d + 1} of 7…`); if (origin === 'chat') { chatBusyLabel = `Cooking day ${d + 1} of 7…`; renderChat(); } },
-                () => localPlanCancelled);
+            if (state.days.length) nlog('plan', `Resuming from day ${state.days.length + 1} of 7 (${state.days.length} saved)`);
+            nativeCall('keepAwake', { on: true }).catch(() => {});   // once for the whole plan
+            nativeCall('notify', { permission: true }).catch(() => {});
+            const busy = text => { showJobBar('busy', text); if (origin === 'chat') { chatBusyLabel = text; renderChat(); } };
+            try {
+                parsed = await generatePlanOnDevice(state.messages || job.messages, {
+                    onDay: d => busy(saved && d === resumeFrom ? `Resuming from day ${d + 1} of 7…` : `Cooking day ${d + 1} of 7…`),
+                    onStatus: busy,
+                    isCancelled: () => localPlanCancelled,
+                    save: st => store(PLAN_PROGRESS_KEY, st),
+                }, state);
+            } finally {
+                nativeCall('keepAwake', { on: false }).catch(() => {});
+            }
             if (!parsed.days.length) { const e = new Error('Cancelled'); e.cancelled = true; throw e; }
+            const times = parsed.stats.map(x => `${x.seconds}s`).join(', ');
+            if (times) nlog('plan', `Seconds per day: ${times}; prompt sizes: ${parsed.stats.map(x => x.promptChars).join(', ')} characters`);
+            unstore(PLAN_PROGRESS_KEY);
+            if (document.visibilityState !== 'visible') {
+                nativeCall('notify', { title: 'Your meal plan is ready', body: `${parsed.days.length} days are waiting in Nourish.` }).catch(() => {});
+            }
         } else {
             if (resume) {
                 planJob = resume;
@@ -2106,6 +2112,12 @@ async function runPlanJob(job, resume = null) {
         showJobBar(null);
     } catch (err) {
         const message = (err && err.message) || 'unknown error';
+        if (err && err.cancelled) unstore(PLAN_PROGRESS_KEY);
+        if (err && err.paused) waitToCoolThenResume();
+        else if (err && !err.cancelled) {
+            const saved = loadJSON(PLAN_PROGRESS_KEY, null);
+            if (saved) { saved.failed = message; store(PLAN_PROGRESS_KEY, saved); }   // don't retry this by itself
+        }
         nlog('plan', err && err.cancelled ? 'Cancelled' : `Failed after ${Math.round((Date.now() - jobStarted) / 1000)} s: ${message}`, err && err.stack, err && err.cancelled ? 'info' : 'error');
         if (err && err.cancelled) { showJobBar(null); showToast(kind === 'edit' ? 'Change cancelled' : 'Meal plan cancelled', false); }
         else if (origin === 'chat') { showJobBar(null); chatError = kind === 'edit' ? `Couldn't change the plan: ${message}` : `Couldn't make the plan: ${message}`; }
@@ -2122,6 +2134,29 @@ async function runPlanJob(job, resume = null) {
 }
 
 let localPlanCancelled = false;
+const PLAN_PROGRESS_KEY = 'nourish_plan_progress';
+
+// An on-phone plan that stopped part-way (the app was closed, iOS stopped it, the phone got too hot)
+// continues by itself the next time Nourish is open.
+function resumeLocalPlan() {
+    if (!isLocalMode() || planJob || settings.active_provider !== 'local') return;
+    const saved = loadJSON(PLAN_PROGRESS_KEY, null);
+    if (!saved || saved.failed || !Array.isArray(saved.days) || saved.days.length >= 7 || !Array.isArray(saved.messages)) return;
+    nlog('plan', `Found a plan stopped at day ${saved.days.length} of 7; continuing`);
+    showJobBar('busy', `Resuming from day ${saved.days.length + 1} of 7…`);
+    runPlanJob({ kind: 'plan', origin: saved.origin || 'sheet', messages: saved.messages, continueSaved: true });
+}
+
+// After a "too hot" stop: check every minute, continue once the phone is back to nominal or fair.
+let coolTimer = null;
+function waitToCoolThenResume() {
+    clearInterval(coolTimer);
+    coolTimer = setInterval(async () => {
+        if (planJob || !loadJSON(PLAN_PROGRESS_KEY, null)) { clearInterval(coolTimer); return; }
+        const specs = await nativeCall('specs', {}, { timeoutMs: 10000 }).catch(() => null);
+        if (specs && (specs.thermal === 'nominal' || specs.thermal === 'fair')) { clearInterval(coolTimer); resumeLocalPlan(); }
+    }, 60000);
+}
 async function cancelPlan() {
     if (!planJob) return;
     if (planJob.id === 'on-device') {
@@ -2134,7 +2169,7 @@ async function cancelPlan() {
 }
 
 function resumePendingJobs() {
-    if (isLocalMode()) return;   // on-device requests don't survive the app restarting
+    if (isLocalMode()) { resumeLocalPlan(); return; }   // other on-device requests don't survive a restart
     const plan = loadJSON('nourish_pending_plan', null);
     if (plan && plan.id && !planJob) runPlanJob(null, plan);
     const chat = loadJSON('nourish_pending_chat', null);

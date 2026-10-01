@@ -201,9 +201,10 @@ async function callCloud(req) {
 }
 
 // === RUNNING A MODEL ON THE PHONE ===
-async function runOnDevice(req, id) {
+// `manageAwake: false` when the caller (a whole plan) keeps the screen on itself.
+async function runOnDevice(req, id, { manageAwake = true } = {}) {
     if (!req.model) throw new Error('Download a model first: Settings → AI model.');
-    if (on('keep_awake')) nativeCall('keepAwake', { on: true }).catch(() => {});
+    if (manageAwake && on('keep_awake')) nativeCall('keepAwake', { on: true }).catch(() => {});
     const started = Date.now();
     try {
         const res = await nativeCall('generate', {
@@ -211,12 +212,16 @@ async function runOnDevice(req, id) {
             temperature: Number(req.temperature), max_tokens: req.max_tokens || 1024,
             n_ctx: Number(settings.local_ctx) || 4096, gpu: on('local_gpu'),
         }, { timeoutMs: 0 });
+        if (res && res.suspended) {
+            // iOS paused Nourish (in the background) mid-answer; the caller can try again later.
+            const e = new Error('Paused because Nourish was in the background'); e.suspended = true; throw e;
+        }
         if (res && res.cancelled) { const e = new Error('Cancelled'); e.cancelled = true; throw e; }
         const text = (res && res.text) || '';
         if (typeof nlog === 'function') nlog('ai', `${req.model}: ${text.length} characters in ${((Date.now() - started) / 1000).toFixed(1)} s${req.grammar ? ' (structured)' : ''}`, text.slice(0, 300), 'debug');
         return stripThinking(text);
     } finally {
-        if (on('keep_awake')) nativeCall('keepAwake', { on: false }).catch(() => {});
+        if (manageAwake && on('keep_awake')) nativeCall('keepAwake', { on: false }).catch(() => {});
     }
 }
 
@@ -226,42 +231,181 @@ function stripThinking(text) {
 }
 
 // Output formats that small models are forced to follow, so their answers always parse.
+// Every text starts with a letter or digit. An ingredient is one short item (up to 48 characters,
+// no commas, so no lists squashed into one line), 3 to 10 per meal; a step is 10 to 160 characters.
 const GBNF_COMMON = String.raw`
-meal ::= "{" ws "\"name\":" ws str "," ws "\"time_minutes\":" ws int "," ws "\"nutrition\":" ws "{" ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}" "," ws "\"ingredients\":" ws "[" ws str ("," ws str){1,7} ws "]" "," ws "\"steps\":" ws "[" ws str ("," ws str){1,4} ws "]" ws "}"
-str ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{1,89} "\""
+meal ::= "{" ws "\"name\":" ws name "," ws "\"time_minutes\":" ws int "," ws "\"nutrition\":" ws "{" ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}" "," ws "\"ingredients\":" ws "[" ws item ("," ws item){2,9} ws "]" "," ws "\"steps\":" ws "[" ws step ("," ws step){1,4} ws "]" ws "}"
+name ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{2,59} "\""
+item ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F,]{2,47} "\""
+step ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{9,159} "\""
 int ::= "0" | [1-9] [0-9]{0,3}
 ws ::= [ \n]{0,2}`;
 const GBNF_DAY = String.raw`root ::= "{" ws "\"breakfast\":" ws meal "," ws "\"lunch\":" ws meal "," ws "\"dinner\":" ws meal ws "}"` + GBNF_COMMON;
+const GBNF_MEAL = String.raw`root ::= meal` + GBNF_COMMON;
 const GBNF_EDIT = String.raw`root ::= "{" ws "\"changes\":" ws "[" ws change ("," ws change){0,6} ws "]" ws "}"
 change ::= "{" ws "\"day\":" ws [1-7] "," ws "\"meal\":" ws ("\"breakfast\"" | "\"lunch\"" | "\"dinner\"") "," ws "\"recipe\":" ws meal ws "}"` + GBNF_COMMON;
 
+const PLAN_MEALS = ['breakfast', 'lunch', 'dinner'];
+const Grocery = typeof NourishGrocery !== 'undefined' ? NourishGrocery : require('./grocery.js');
+
+// The ingredient lines in a day that are junk (see grocery.js), as [{ meal, item, reason }].
+function junkRows(day) {
+    const bad = [];
+    PLAN_MEALS.forEach(t => {
+        const meal = day && day[t];
+        if (!meal) { bad.push({ meal: t, item: '(missing)', reason: 'no meal' }); return; }
+        (Array.isArray(meal.ingredients) ? meal.ingredients : []).forEach(item => {
+            const reason = Grocery.junkReason(item);
+            if (reason) bad.push({ meal: t, item: String(item), reason });
+        });
+    });
+    return bad;
+}
+
+// The same day without junk ingredient lines (and without an item listed twice in one meal).
+function dropJunk(day) {
+    PLAN_MEALS.forEach(t => {
+        const meal = day && day[t];
+        if (!meal || !Array.isArray(meal.ingredients)) return;
+        const seen = new Set();
+        meal.ingredients = meal.ingredients.filter(item => {
+            const key = String(item).trim().toLowerCase();
+            if (Grocery.junkReason(item) || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    });
+    return day;
+}
+
+// "Avocado & Spinach Pancakes" and "Spinach and Avocado Pancake" count as the same dish.
+const NAME_FILLER = ['with', 'and', 'the', 'a', 'an', 'of', 'in', 'on', 'style', 'homemade', 'easy', 'quick', 'healthy', 'simple', 'classic'];
+function dishWords(name) {
+    return String(name || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+        .filter(w => w && NAME_FILLER.indexOf(w) === -1).map(w => (w.length > 3 && /[^s]s$/.test(w) ? w.slice(0, -1) : w));
+}
+function sameDish(a, b) {
+    const x = new Set(dishWords(a));
+    const y = new Set(dishWords(b));
+    if (!x.size || !y.size) return false;
+    let both = 0;
+    x.forEach(w => { if (y.has(w)) both++; });
+    return both / (x.size + y.size - both) >= 0.6;
+}
+
+const CUISINES = ['Mediterranean', 'Mexican', 'Japanese', 'Indian', 'Thai', 'Middle Eastern', 'Italian', 'Korean', 'Greek', 'American', 'French', 'Vietnamese', 'Spanish', 'Moroccan'];
+
 // Small phone models do far better one day at a time than with a whole week in one go.
-async function generatePlanOnDevice(messages, onDay, isCancelled) {
-    const conversation = messages.filter(m => m.role !== 'system').slice(-8).map(m => `${m.role === 'user' ? 'They said' : 'You said'}: ${m.content}`).join('\n').slice(-2500);
-    const system = 'You are a meal-planning chef. Plan ONE day of meals as JSON: breakfast, lunch and dinner, each with name, time_minutes, nutrition (calories, protein_g, carbs_g, fat_g for one serving), ingredients with quantities and short steps. ' +
-        'Use real, appetising dish names. Spread the daily calorie and protein targets over the three meals.\n\nThe person:\n' + profileText();
-    const days = [];
-    const used = [];
-    for (let d = 0; d < 7; d++) {
-        if (isCancelled()) break;
-        onDay(d);
-        const req = await buildAIRequest([
-            { role: 'system', content: system },
-            { role: 'user', content: `${conversation}\n\nPlan Day ${d + 1} (${dayName(d)}).${used.length ? ' Already planned this week (do not repeat): ' + used.join(', ') + '.' : ''} Return only the JSON for this day.` },
-        ], { maxTokens: 1100 });
-        req.grammar = GBNF_DAY;
-        let text;
-        try {
-            text = await runOnDevice(req, 'plan-day-' + d + '-' + Date.now());
-        } catch (e) {
-            if (e.cancelled && days.length) break;   // keep the days already made
-            throw e;
+// `state` is the plan so far ({ days, cuisineOffset, stats }) and is saved after every day
+// (hooks.save), so a plan interrupted at day 5 continues at day 5. The prompt is the same size
+// every day: the profile, the end of the chat, a cuisine for the day and only the last 3 dish
+// names. Repeats are caught in code instead (sameDish), and that one meal is made again.
+async function generatePlanOnDevice(messages, hooks, state) {
+    const h = Object.assign({ onDay() {}, onStatus() {}, isCancelled: () => false, save() {}, totalDays: 7 }, hooks || {});
+    const st = state || {};
+    st.days = st.days || [];
+    st.stats = st.stats || [];
+    if (st.cuisineOffset == null) st.cuisineOffset = Math.floor(Math.random() * CUISINES.length);
+    const conversation = messages.filter(m => m.role !== 'system').slice(-8).map(m => `${m.role === 'user' ? 'They said' : 'You said'}: ${m.content}`).join('\n').slice(-1200);
+    const system = 'You are a meal-planning chef. Plan ONE day of meals as JSON: breakfast, lunch and dinner, each with name, time_minutes, nutrition (calories, protein_g, carbs_g, fat_g for one serving), ingredients and short steps. ' +
+        'Each ingredient is ONE item with its amount, like "2 large eggs" or "1 cup spinach". Use real, appetising dish names. Spread the daily calorie and protein targets over the three meals.\n\nThe person:\n' + profileText();
+    const usedNames = () => st.days.reduce((all, day) => all.concat(PLAN_MEALS.map(t => day && day[t] && day[t].name).filter(Boolean)), []);
+
+    for (let d = st.days.length; d < h.totalDays; d++) {
+        if (h.isCancelled()) break;
+        await coolDownIfHot(d, h, st);
+        h.onDay(d);
+        const cuisine = CUISINES[(st.cuisineOffset + d) % CUISINES.length];
+        const recent = usedNames().slice(-3);
+        const ask = `${conversation}\n\nPlan Day ${d + 1} (${dayName(d)}). Today's cuisine: ${cuisine}.${recent.length ? ' Recent dishes (make different ones): ' + recent.join(', ') + '.' : ''} Return only the JSON for this day.`;
+        const promptChars = system.length + ask.length;
+        const started = Date.now();
+        const stat = { day: d + 1, promptChars, thermal: st.lastThermal || '?', junkRows: 0, retried: false, repeatsFixed: 0, seconds: 0 };
+
+        let day = null;
+        for (let attempt = 0; attempt < 2 && !day; attempt++) {
+            const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user', content: ask }], GBNF_DAY, 1100, `plan-day-${d}`, h);
+            if (text == null) break;   // cancelled
+            const parsed = parseLLMJSON(text);
+            const bad = junkRows(parsed);
+            if (attempt === 0) stat.junkRows = bad.length;
+            if (!bad.length) { day = parsed; break; }
+            nlog('plan', `Day ${d + 1}: ${bad.length} junk ingredient line(s)${attempt === 0 ? ', making the day again' : ', dropping them'}`, bad.slice(0, 8), 'warn');
+            if (attempt === 0) stat.retried = true;
+            else day = dropJunk(parsed);
         }
-        const day = parseLLMJSON(text);
-        days.push(day);
-        MEAL_TYPES.forEach(t => { if (day && day[t] && day[t].name) used.push(day[t].name); });
+        if (!day) break;
+
+        // Repeats of earlier dishes: make that one meal again with another cuisine.
+        const earlier = usedNames();
+        for (let m = 0; m < PLAN_MEALS.length; m++) {
+            const type = PLAN_MEALS[m];
+            const repeatOf = day[type] && earlier.find(n => sameDish(n, day[type].name));
+            if (!repeatOf || h.isCancelled()) continue;
+            const other = CUISINES[(st.cuisineOffset + d + 5 + m) % CUISINES.length];
+            nlog('plan', `Day ${d + 1} ${type}: "${day[type].name}" repeats "${repeatOf}", making a ${other} one instead`);
+            const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user',
+                content: `${conversation}\n\nMake ONE ${type} for Day ${d + 1}, ${other} cuisine. It must not be ${repeatOf} or anything like it. Return only the JSON for this meal.` }],
+            GBNF_MEAL, 450, `plan-meal-${d}-${m}`, h);
+            if (text == null) break;
+            const meal = dropJunk({ [type]: parseLLMJSON(text) })[type];
+            if (meal && meal.name && !earlier.some(n => sameDish(n, meal.name))) { day[type] = meal; stat.repeatsFixed++; }
+        }
+
+        stat.seconds = Math.round((Date.now() - started) / 100) / 10;
+        st.days.push(day);
+        st.stats.push(stat);
+        nlog('plan', `Day ${d + 1} done in ${stat.seconds} s: prompt ${promptChars} characters, thermal ${stat.thermal}, junk lines ${stat.junkRows}${stat.retried ? ' (made again)' : ''}, repeats replaced ${stat.repeatsFixed}`,
+            PLAN_MEALS.map(t => day[t] && day[t].name));
+        h.save(st);
     }
-    return { days };
+    return { days: st.days, stats: st.stats };
+}
+
+// One model call for a plan. Returns the text, or null when cancelled. When iOS paused Nourish in
+// the background mid-answer, waits until Nourish is on screen again and asks again.
+async function runPlanStep(msgs, grammar, maxTokens, id, h) {
+    for (;;) {
+        const req = await buildAIRequest(msgs, { maxTokens });
+        req.grammar = grammar;
+        try {
+            return await runOnDevice(req, id + '-' + Date.now(), { manageAwake: false });
+        } catch (e) {
+            if (e.cancelled) return null;
+            if (!e.suspended) throw e;
+            nlog('plan', 'iOS paused Nourish in the background; this step continues when Nourish is open again', null, 'warn');
+            h.onStatus('Paused: open Nourish to continue');
+            await untilVisible();
+            if (h.isCancelled()) return null;
+        }
+    }
+}
+
+function untilVisible() {
+    return new Promise(resolve => {
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') return setTimeout(resolve, 500);
+        const back = () => { if (document.visibilityState === 'visible') { document.removeEventListener('visibilitychange', back); setTimeout(resolve, 500); } };
+        document.addEventListener('visibilitychange', back);
+    });
+}
+
+// Before each day: at "serious" the phone throttles hard, so wait 20 s; at "critical", stop (the plan
+// so far is kept and continues later).
+async function coolDownIfHot(d, h, st) {
+    const specs = await nativeCall('specs', {}, { timeoutMs: 10000 }).catch(() => null);
+    const thermal = (specs && specs.thermal) || '?';
+    st.lastThermal = thermal;
+    nlog('plan', `Before day ${d + 1}: thermal ${thermal}`);
+    if (thermal === 'critical') {
+        const e = new Error(`Your phone is too hot to keep going. The plan is saved at day ${d} of ${h.totalDays}; it continues by itself once the phone cools down (keep Nourish open).`);
+        e.paused = true;
+        throw e;
+    }
+    if (thermal === 'serious') {
+        h.onStatus('Cooling down… (the phone is hot)');
+        nlog('plan', 'Thermal "serious": pausing 20 s so the phone can cool down', null, 'warn');
+        for (let i = 0; i < 20 && !h.isCancelled(); i++) await new Promise(r => setTimeout(r, 1000));
+    }
 }
 
 // === RECIPES WITHOUT THE PC ===
@@ -1027,5 +1171,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
+    module.exports = { junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
 }
