@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.View;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -52,6 +54,7 @@ public class MainActivity extends Activity {
         s.setUserAgentString(s.getUserAgentString() + " NourishApp/" + appVersion() + " (Android)");
 
         web.setWebChromeClient(new WebChromeClient());  // enables alert()/confirm() dialogs
+        web.addJavascriptInterface(new ThemeBridge(), "NourishAndroid");  // only changes the bar colours
         web.setWebViewClient(new Client());
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -113,6 +116,23 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    /** Lets the page match the status and navigation bars to its light or dark theme. */
+    private class ThemeBridge {
+        @JavascriptInterface
+        public void setTheme(String theme) {
+            final boolean light = "light".equals(theme);
+            runOnUiThread(() -> {
+                getWindow().setStatusBarColor(Color.parseColor(light ? "#F6F3F0" : "#0F0D0C"));
+                getWindow().setNavigationBarColor(Color.parseColor(light ? "#FFFFFF" : "#1A1716"));
+                web.setBackgroundColor(Color.parseColor(light ? "#F6F3F0" : "#14110F"));
+                View decor = getWindow().getDecorView();
+                int flags = decor.getSystemUiVisibility();
+                int lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                decor.setSystemUiVisibility(light ? (flags | lightBars) : (flags & ~lightBars));
+            });
+        }
     }
 
     private class Client extends WebViewClient {

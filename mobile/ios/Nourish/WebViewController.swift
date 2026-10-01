@@ -4,7 +4,7 @@ import WebKit
 /// Nourish for iPhone: a full-screen web view of the Nourish app running on your PC.
 /// The first time (or when the PC can't be reached) it shows a "connect" page that can find
 /// the PC on your Wi-Fi. The address is remembered.
-final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
+final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private static let serverKey = "server_url"   // also settable as a launch argument: -server_url <url>
     private var webView: WKWebView!
     private var serverURL: URL? {
@@ -13,8 +13,11 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
     private var connectError: String?
     private let background = UIColor(red: 0x14 / 255, green: 0x11 / 255, blue: 0x0F / 255, alpha: 1)
+    private let lightBackground = UIColor(red: 0xF6 / 255, green: 0xF3 / 255, blue: 0xF0 / 255, alpha: 1)
+    private var lightTheme = false
 
-    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+    // Dark text on the light theme, white text on the dark one (the page tells us which, see below).
+    override var preferredStatusBarStyle: UIStatusBarStyle { lightTheme ? .darkContent : .lightContent }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -24,6 +27,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         config.websiteDataStore = .default()   // keeps your plan and settings (localStorage)
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         config.applicationNameForUserAgent = "NourishApp/\(version) (iOS)"
+        config.userContentController.add(self, name: "nourishTheme")   // the page reports "light" or "dark"
 
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
@@ -106,6 +110,18 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         if let data = try? JSONSerialization.data(withJSONObject: info), let json = String(data: data, encoding: .utf8) {
             webView.evaluateJavaScript("window.nourishInit(\(json))")
         }
+    }
+
+    // MARK: Theme
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "nourishTheme", let theme = message.body as? String else { return }
+        lightTheme = theme == "light"
+        let color = lightTheme ? lightBackground : background
+        view.backgroundColor = color
+        webView.backgroundColor = color
+        webView.scrollView.backgroundColor = color
+        setNeedsStatusBarAppearanceUpdate()
     }
 
     // MARK: Dialogs and new windows

@@ -17,7 +17,7 @@
         <key>UIColorName</key><string></string>
     </dict>
     <key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
-    <key>UIViewControllerBasedStatusBarAppearance</key><false/>
+    <key>UIViewControllerBasedStatusBarAppearance</key><true/>
     <key>UISupportedInterfaceOrientations</key>
     <array><string>UIInterfaceOrientationPortrait</string></array>
     <key>UISupportedInterfaceOrientations~ipad</key>
