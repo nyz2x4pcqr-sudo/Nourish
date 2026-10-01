@@ -254,6 +254,7 @@ function junkRows(day) {
     PLAN_MEALS.forEach(t => {
         const meal = day && day[t];
         if (!meal) { bad.push({ meal: t, item: '(missing)', reason: 'no meal' }); return; }
+        if (!completeMeal(meal)) bad.push({ meal: t, item: meal.name || '(no name)', reason: 'incomplete (cut off?)' });
         (Array.isArray(meal.ingredients) ? meal.ingredients : []).forEach(item => {
             const reason = Grocery.junkReason(item);
             if (reason) bad.push({ meal: t, item: String(item), reason });
@@ -298,6 +299,14 @@ function mealProblems(meal) {
         });
     }));
     return problems.filter((p, i) => problems.indexOf(p) === i);
+}
+
+// A remade meal is only used when it's whole. An answer cut off at the length limit can still
+// parse (the JSON repair keeps what's there) but lose its steps or ingredients.
+const MEAL_TOKENS = 700;
+function completeMeal(meal) {
+    return !!(meal && meal.name && Array.isArray(meal.ingredients) && meal.ingredients.length >= 3
+        && Array.isArray(meal.steps) && meal.steps.length >= 1 && meal.nutrition && typeof meal.nutrition === 'object');
 }
 
 // The meal's ingredients without repeats and with impossible amounts capped (see units.js).
@@ -380,10 +389,11 @@ async function generatePlanOnDevice(messages, hooks, state) {
             nlog('plan', `Day ${d + 1} ${type} "${day[type].name}": ${problems.join('; ')}; making it again`, null, 'warn');
             const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user',
                 content: `${conversation}\n\nMake ONE ${type} for Day ${d + 1}, ${cuisine} cuisine. List each ingredient once. Return only the JSON for this meal.` }],
-            GBNF_MEAL, 450, `plan-fix-${d}-${m}`, h);
+            GBNF_MEAL, MEAL_TOKENS, `plan-fix-${d}-${m}`, h);
             if (text == null) break;
             const again = dropJunk({ [type]: parseLLMJSON(text) })[type];
-            if (again && again.name && mealProblems(again).length < problems.length) { day[type] = again; stat.mealsRemade++; }
+            if (completeMeal(again) && mealProblems(again).length < problems.length) { day[type] = again; stat.mealsRemade++; }
+            else if (again && !completeMeal(again)) nlog('plan', `Day ${d + 1} ${type}: the remade meal came back incomplete; keeping the first one`, null, 'warn');
         }
 
         // Repeats of earlier dishes: make that one meal again with another cuisine.
@@ -396,10 +406,10 @@ async function generatePlanOnDevice(messages, hooks, state) {
             nlog('plan', `Day ${d + 1} ${type}: "${day[type].name}" repeats "${repeatOf}", making a ${other} one instead`);
             const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user',
                 content: `${conversation}\n\nMake ONE ${type} for Day ${d + 1}, ${other} cuisine. It must not be ${repeatOf} or anything like it. Return only the JSON for this meal.` }],
-            GBNF_MEAL, 450, `plan-meal-${d}-${m}`, h);
+            GBNF_MEAL, MEAL_TOKENS, `plan-meal-${d}-${m}`, h);
             if (text == null) break;
             const meal = dropJunk({ [type]: parseLLMJSON(text) })[type];
-            if (meal && meal.name && !earlier.some(n => sameDish(n, meal.name))) { day[type] = meal; stat.repeatsFixed++; }
+            if (completeMeal(meal) && !earlier.some(n => sameDish(n, meal.name))) { day[type] = meal; stat.repeatsFixed++; }
         }
 
         PLAN_MEALS.forEach(type => {
@@ -1234,5 +1244,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
+    module.exports = { completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
 }

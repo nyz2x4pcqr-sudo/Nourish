@@ -83,18 +83,19 @@ test('catalog entries are complete', () => {
 
 test('junk ingredient lines in a day are found and dropped', () => {
     const { junkRows, dropJunk } = require('../ondevice.js');
-    const meal = ingredients => ({ name: 'Dish', ingredients, steps: ['Cook it all well.'] });
+    const meal = ingredients => ({ name: 'Dish', nutrition: { calories: 400 }, ingredients, steps: ['Cook it all well.'] });
     const day = {
         breakfast: meal(['2 cups all-purpose flour', 'use 1 cup', '1/2 cup fresh spinach', 'use 1/2 cup', '2 large eggs', 'use 2 large']),
         lunch: meal(['description of 2 eggs, 1/4 cup mashed avocado, 3 tbsp corn flour, 2 tbsp yogurt, 1', 'ingredients']),
         dinner: meal(['1 lb salmon', '1 lemon', '1 lemon']),
     };
-    assert.equal(junkRows(day).length, 5);
+    assert.equal(junkRows(day).length, 6);   // 5 junk lines, and lunch (2 lines) is incomplete
     const clean = dropJunk(day);
     assert.deepEqual(clean.breakfast.ingredients, ['2 cups all-purpose flour', '1/2 cup fresh spinach', '2 large eggs']);
     assert.deepEqual(clean.lunch.ingredients, []);
     assert.deepEqual(clean.dinner.ingredients, ['1 lb salmon', '1 lemon']);
-    assert.equal(junkRows(clean).length, 0);
+    // Lunch had nothing but junk, and dinner only 2 real items: both are now flagged as incomplete.
+    assert.deepEqual(junkRows(clean).map(b => `${b.meal}: ${b.reason}`), ['lunch: incomplete (cut off?)', 'dinner: incomplete (cut off?)']);
 });
 
 test('near-duplicate dish names are caught', () => {
@@ -126,4 +127,15 @@ test('repeated ingredients and steps that name one twice are caught; amounts are
     const caps = tidyMeal(curry);
     assert.deepEqual(curry.ingredients, ['1 lb lean beef', '2 tbsp green curry paste', '1 cup coconut milk']);
     assert.equal(caps.length, 1);
+});
+
+test('a remade meal cut off at the length limit is not used', () => {
+    const { completeMeal } = require('../ondevice.js');
+    const whole = { name: 'Curry', nutrition: { calories: 500 }, ingredients: ['1 lb beef', '2 tbsp curry paste', '1 can coconut milk'], steps: ['Simmer it all for 20 minutes.'] };
+    assert.ok(completeMeal(whole));
+    assert.ok(!completeMeal(Object.assign({}, whole, { steps: [] })));
+    assert.ok(!completeMeal(Object.assign({}, whole, { steps: undefined })));
+    assert.ok(!completeMeal(Object.assign({}, whole, { ingredients: ['1 lb beef'] })));
+    assert.ok(!completeMeal(Object.assign({}, whole, { nutrition: null })));
+    assert.ok(!completeMeal(null));
 });
