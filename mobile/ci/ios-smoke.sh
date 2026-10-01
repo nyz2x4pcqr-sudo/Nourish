@@ -1,10 +1,13 @@
 #!/bin/bash
-# Builds Nourish for the iOS simulator, launches it (connect screen, then connected to the
-# Nourish server running on this Mac) and saves screenshots. Fails unless the server saw the
-# app load Nourish and its JavaScript run.
+# Builds Nourish for the iOS simulator and checks, with screenshots:
+#  1. first launch runs the built-in app on the phone (no PC), with the native bridge working;
+#  2. what the app saves survives a restart;
+#  3. connecting to a Nourish server shows the PC's copy;
+#  4. a real model runs through the app's JavaScript → bridge → llama.cpp and writes a valid day of meals.
 set -eux
 mkdir -p shots
 LOG="$GITHUB_WORKSPACE/server.log"
+APP=io.github.nourish.app
 fail() { echo "SMOKE TEST FAILED: $*"; tail -n 40 "$LOG"; exit 1; }
 
 echo "== Building for the simulator"
@@ -20,19 +23,58 @@ xcrun simctl boot "$UDID" || true
 xcrun simctl bootstatus "$UDID" -b
 echo "== Installing"
 xcrun simctl install "$UDID" build-sim/Debug-iphonesimulator/Nourish.app
+DATA=$(xcrun simctl get_app_container "$UDID" $APP data)
+PROBE="$DATA/Documents/probe.json"
 
-echo "== 1. First launch: the connect screen"
-xcrun simctl launch "$UDID" io.github.nourish.app
-sleep 10
-xcrun simctl io "$UDID" screenshot shots/ios-1-connect.png
-xcrun simctl terminate "$UDID" io.github.nourish.app || true
+# Launches the app with a JavaScript probe and waits (up to $2 s) for its result.
+probe() {
+  rm -f "$PROBE"
+  xcrun simctl terminate "$UDID" $APP 2>/dev/null || true
+  xcrun simctl launch "$UDID" $APP -mode local -js_probe "$1"
+  for i in $(seq 1 "$2"); do [ -f "$PROBE" ] && break; sleep 1; done
+  [ -f "$PROBE" ] || fail "no answer from the app's probe"
+  cat "$PROBE" | cut -c1-800; echo
+}
 
-echo "== 2. Connected to the Nourish server"
+echo "== 1. First launch: Nourish on the phone, no PC"
 BEFORE=$(wc -l < "$LOG")
-xcrun simctl launch "$UDID" io.github.nourish.app -server_url http://127.0.0.1:8000/
+probe "localStorage.setItem('probe_saved', 'kept'); const s = await getSpecs(); return JSON.stringify({ local: LOCAL_MODE, native: nativeAvailable(), title: document.title, specs: s });" 60
+python3 -c "
+import json; r = json.load(open('$PROBE')); assert r['ok'], r; v = json.loads(r['value'])
+assert v['local'] and v['native'], v; assert v['specs']['ram'] > 0 and v['specs']['platform'] == 'ios', v
+print('Built-in app with native bridge; phone:', v['specs']['device'], v['specs']['ram'] // 2**20, 'MB RAM')" || fail "built-in app or bridge not working"
+sleep 2; xcrun simctl io "$UDID" screenshot shots/ios-1-local.png
+[ "$(tail -n +"$((BEFORE + 1))" "$LOG" | grep -c 'GET /app.js')" = "0" ] || fail "phone-only mode loaded the app from the PC"
+
+echo "== 2. Saved data survives a restart"
+probe "return localStorage.getItem('probe_saved');" 60
+python3 -c "import json; r = json.load(open('$PROBE')); assert r['value'] == 'kept', r" || fail "localStorage was not kept"
+
+echo "== 3. Connected to the Nourish server"
+xcrun simctl terminate "$UDID" $APP || true
+BEFORE=$(wc -l < "$LOG")
+xcrun simctl launch "$UDID" $APP -mode server -server_url http://127.0.0.1:8000/
 sleep 15
-xcrun simctl io "$UDID" screenshot shots/ios-2-app.png
+xcrun simctl io "$UDID" screenshot shots/ios-2-pc.png
 NEW=$(tail -n +"$((BEFORE + 1))" "$LOG"); echo "Server saw:"; echo "$NEW" | grep -oE '"(GET|POST) [^"]*"' | sort | uniq -c || true
 echo "$NEW" | grep -q '"GET /app.js' || fail "app.js never loaded"
 echo "$NEW" | grep -q '"GET /api/info' || fail "the app's JavaScript never called the server"
+
+echo "== 4. On-device AI through the app's own code"
+mkdir -p "$DATA/Library/Application Support/models"
+cp "$GITHUB_WORKSPACE/test-model.gguf" "$DATA/Library/Application Support/models/test-model.gguf"
+probe "const r = await nativeCall('generate', { model: 'test-model.gguf', grammar: GBNF_DAY, temperature: 0.7, max_tokens: 900, n_ctx: 2048, gpu: false,
+  messages: [{ role: 'system', content: 'You are a meal-planning chef. Reply with JSON only.' }, { role: 'user', content: 'Plan Day 1 (Monday): breakfast, lunch and dinner.' }] }, { timeoutMs: 0 });
+  const models = await nativeCall('models', {}); return JSON.stringify({ text: r.text, models: models.files });" 300
+python3 - "$PROBE" <<'PY' || fail "the model's day of meals is not valid"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"]); day = json.loads(v["text"])
+for meal in ("breakfast", "lunch", "dinner"):
+    m = day[meal]; assert m["name"] and m["ingredients"] and m["steps"] and "calories" in m["nutrition"], meal
+assert any(f["file"] == "test-model.gguf" for f in v["models"]), v["models"]
+print("Valid day of meals:", [day[m]["name"] for m in ("breakfast", "lunch", "dinner")])
+PY
+cp "$PROBE" shots/ios-ai-probe.json
+xcrun simctl io "$UDID" screenshot shots/ios-3-after-ai.png
 echo "SMOKE TEST PASSED"

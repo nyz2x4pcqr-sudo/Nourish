@@ -10,9 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(LLAMA_COMMIT 0c1e57098bba43ac29e6e3b677cdceebdd22334f)
 
 include(FetchContent)
-FetchContent_Declare(llama
-    URL https://github.com/ggml-org/llama.cpp/archive/${LLAMA_COMMIT}.tar.gz
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_Declare(llama URL https://github.com/ggml-org/llama.cpp/archive/${LLAMA_COMMIT}.tar.gz)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)

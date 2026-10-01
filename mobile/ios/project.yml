@@ -1,9 +1,11 @@
 # XcodeGen project description (the .xcodeproj is generated from this on the build machine).
+# Before generating, the build copies the web app into webapp/ and builds Frameworks/llama.xcframework
+# (see .github/workflows/build-mobile.yml).
 name: Nourish
 options:
   bundleIdPrefix: io.github.nourish
   deploymentTarget:
-    iOS: "15.0"
+    iOS: "16.4"   # llama.cpp's iOS framework needs 16.4+
 targets:
   Nourish:
     type: application
@@ -12,19 +14,33 @@ targets:
       - path: Nourish
         excludes:
           - Info.plist
+          - Nourish-Bridging-Header.h
       - path: ../shared/connect.html
         buildPhase: resources
+      - path: ../shared/llm
+      - path: webapp
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - framework: Frameworks/llama.xcframework
+        embed: true
+        codeSign: false
+      - sdk: Metal.framework
+      - sdk: Accelerate.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.nourish.app
         PRODUCT_NAME: Nourish
-        MARKETING_VERSION: "0.3.0"
-        CURRENT_PROJECT_VERSION: "3"
+        MARKETING_VERSION: "0.4.0"
+        CURRENT_PROJECT_VERSION: "4"
         INFOPLIST_FILE: Nourish/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Nourish/Nourish-Bridging-Header.h
+        HEADER_SEARCH_PATHS: $(SRCROOT)/../shared/llm
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGN_IDENTITY: ""

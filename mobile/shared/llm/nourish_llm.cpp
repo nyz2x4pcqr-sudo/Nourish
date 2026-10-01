@@ -1,6 +1,10 @@
 #include "nourish_llm.h"
 
+#if __has_include(<llama/llama.h>)
+#include <llama/llama.h>   // iOS: llama.cpp as llama.xcframework
+#else
 #include "llama.h"
+#endif
 
 #include <algorithm>
 #include <atomic>

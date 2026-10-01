@@ -90,6 +90,13 @@ jobs:
           python-version: "3.12"
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Cache llama.cpp for iOS
+        uses: actions/cache@v4
+        with:
+          path: mobile/ios/Frameworks
+          key: llama-xcframework-${{ hashFiles('mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/ci/prepare-ios.sh') }}
+      - name: Copy the web app in and build llama.cpp
+        run: bash mobile/ci/prepare-ios.sh
       - name: Generate the Xcode project
         working-directory: mobile/ios
         run: xcodegen generate
@@ -110,6 +117,8 @@ jobs:
           pip install -r backend/requirements-core.txt
           cd backend && nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$GITHUB_WORKSPACE/server.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
+      - name: Get a tiny real model
+        run: curl -sSfL -o test-model.gguf "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf"
       - name: Run in the simulator
         timeout-minutes: 20
         working-directory: mobile/ios
