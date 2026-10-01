@@ -11,8 +11,10 @@ import Foundation
 /// 3. Check the file: the right number of bytes (the size Hugging Face lists) and a GGUF header.
 ///    Only then is it moved into the models folder.
 ///
-/// If the background session fails before any data arrives, the same download is tried once more in
-/// a normal session. Progress numbers are the bytes actually written, nothing else.
+/// Since 0.4.3 the normal (foreground) session is used: on a real iPhone (0.4.2) the background session
+/// accepted the task and then never started it, with no callback at all. A watchdog stops any download
+/// that hasn't received a byte after 30 seconds and says so. Progress numbers are the bytes actually
+/// written, nothing else.
 final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
     static let shared = ModelDownloads()
     static let sessionID = (Bundle.main.bundleIdentifier ?? "io.github.nourish.app") + ".models"
@@ -40,6 +42,8 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         var failure: String?
         var saved = false
         var cancelled = false
+        var stalled: String?           // set by the watchdog when no data arrived in time
+        var logged5: Int64 = -1        // last 5% step written to the log
         var received: Int64 { resumeOffset + sinceStart }
     }
 
@@ -64,11 +68,19 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         config.isDiscretionary = false          // start now, not when iOS finds it convenient
         config.sessionSendsLaunchEvents = true
         config.allowsCellularAccess = true
+        config.allowsExpensiveNetworkAccess = true
+        config.allowsConstrainedNetworkAccess = true
+        config.timeoutIntervalForResource = 6 * 3600
         return URLSession(configuration: config, delegate: self, delegateQueue: queue)
     }()
     private lazy var foreground: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForRequest = 60              // longest wait for the next piece of data
+        config.timeoutIntervalForResource = 6 * 3600       // a whole 1–5 GB model on a slow connection
+        config.waitsForConnectivity = true                 // wait for a network instead of failing at once
+        config.allowsCellularAccess = true
+        config.allowsExpensiveNetworkAccess = true
+        config.allowsConstrainedNetworkAccess = true       // Low Data Mode
         return URLSession(configuration: config, delegate: self, delegateQueue: queue)
     }()
     private let resolver = URLSession(configuration: .ephemeral, delegate: RefuseRedirects(), delegateQueue: nil)
@@ -82,13 +94,28 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
 
     private static func resumeURL(_ file: String) -> URL { NativeBridge.modelsDir.appendingPathComponent(file + ".resume") }
 
-    /// Reconnects to downloads iOS carried on while Nourish was closed (they report as they finish).
+    /// Background downloads are no longer started (see the top). Any left over from 0.4.2, which may be
+    /// stuck in iOS's queue without ever starting, are listed in the log and cancelled.
     func reconnect() {
         queue.addOperation {
             self.background.getAllTasks { tasks in
-                let running = tasks.compactMap { $0.taskDescription?.components(separatedBy: "|").first }
-                if !running.isEmpty { self.log("Downloads still running in the background: \(running.joined(separator: ", "))", "info") }
+                for task in tasks {
+                    self.log("Cancelling a background download left over from an older Nourish: \(task.taskDescription ?? "?"), state \(Self.stateName(task.state)), \(task.countOfBytesReceived) bytes received", "info")
+                    task.cancel()
+                }
             }
+        }
+    }
+
+    private static let useBackground = false
+
+    static func stateName(_ state: URLSessionTask.State) -> String {
+        switch state {
+        case .running: return "running"
+        case .suspended: return "suspended"
+        case .canceling: return "cancelling"
+        case .completed: return "completed"
+        @unknown default: return "unknown"
         }
     }
 
@@ -98,10 +125,7 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         queue.addOperation {
             if let old = self.jobs[file]?.task { old.cancel() }   // its callbacks are ignored from now on
             self.jobs[file] = Job(file: file, expected: expected, source: url, token: token)
-            if self.backgroundBroken {
-                self.jobs[file]?.foreground = true
-                self.log("Download \(file): using a normal download (background downloads didn't work on this phone)", "info")
-            }
+            self.jobs[file]?.foreground = !Self.useBackground || self.backgroundBroken
             // A leftover partial file from Nourish 0.4.0–0.4.2 (they downloaded differently).
             try? FileManager.default.removeItem(at: NativeBridge.modelsDir.appendingPathComponent(file + ".part"))
             if let data = try? Data(contentsOf: Self.resumeURL(file)) {
@@ -221,7 +245,29 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
         job.sinceStart = 0
         jobs[file] = job
         task.resume()
+        log("Download \(file): task \(task.taskIdentifier) resumed, state \(Self.stateName(task.state))", "info")
         send(file, "running")
+        for seconds in [2.0, 10.0, 30.0] {
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { [weak self, weak task] in
+                guard let self, let task else { return }
+                self.queue.addOperation { self.check(file, task, after: seconds) }
+            }
+        }
+    }
+
+    /// The 2 s and 10 s checks only report; at 30 s with no data the download is stopped (the watchdog).
+    private func check(_ file: String, _ task: URLSessionDownloadTask, after seconds: Double) {
+        guard let job = jobs[file], job.task === task, !job.saved else { return }
+        log(String(format: "Download %@: after %.0f s: state %@, %lld bytes received, %.1f%% done", file, seconds,
+                   Self.stateName(task.state), task.countOfBytesReceived, task.progress.fractionCompleted * 100), "info")
+        guard seconds >= 30, job.received == 0, task.countOfBytesReceived == 0, task.state != .completed else { return }
+        log("Download \(file): no data in 30 s, stopping it", "warn")
+        jobs[file]?.stalled = "The download didn't start (no data from the download server in 30 seconds). Check the internet connection and tap Download to try again."
+        task.cancel()
+    }
+
+    func urlSession(_ session: URLSession, taskIsWaitingForConnectivity task: URLSessionTask) {
+        log("Download \(task.taskDescription ?? "?"): waiting for an internet connection", "warn")
     }
 
     /// The job a task belongs to. Tasks of a replaced download are ignored; tasks iOS finished while
@@ -244,11 +290,20 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard let file = file(for: downloadTask), var job = jobs[file] else { return }
+        guard let file = file(for: downloadTask), var job = jobs[file] else {
+            log("Download \(downloadTask.taskDescription ?? "?"): data for a download that was replaced or stopped (\(totalBytesWritten) bytes)", "debug")
+            return
+        }
         if job.sinceStart == 0, let response = downloadTask.response as? HTTPURLResponse {
             log("Download \(file): server answered HTTP \(response.statusCode) from \(response.url?.host ?? "?"), sending \(response.expectedContentLength) bytes", "info")
         }
         job.sinceStart += bytesWritten
+        let total = job.expected > 0 ? job.expected : totalBytesExpectedToWrite
+        let step = total > 0 ? job.received * 20 / total : -1   // 5% steps
+        if job.logged5 < 0 || step > job.logged5 {
+            job.logged5 = max(step, 0)
+            log("Download \(file): \(job.received) of \(total > 0 ? String(total) : "?") bytes (\(total > 0 ? String(job.received * 100 / total) : "?")%)", "info")
+        }
         if job.resumeOffset == 0, totalBytesExpectedToWrite > 0 { job.serverTotal = totalBytesExpectedToWrite }   // only used when Hugging Face listed no size
         let report = Date().timeIntervalSince(job.lastReport) > 0.4
         if report { job.lastReport = Date() }
@@ -260,6 +315,7 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         // iOS deletes `location` when this returns, so everything happens right here.
+        log("Download \(downloadTask.taskDescription ?? "?"): iOS finished the transfer (task \(downloadTask.taskIdentifier))", "info")
         guard let file = file(for: downloadTask), let job = jobs[file] else { return }
         let response = downloadTask.response as? HTTPURLResponse
         let status = response?.statusCode ?? 0
@@ -299,7 +355,12 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        log("Download \(task.taskDescription ?? "?"): task \(task.taskIdentifier) ended \(error == nil ? "without an error" : "with: " + Self.describe(error! as NSError)), \(task.countOfBytesReceived) bytes received", error == nil ? "info" : "warn")
         guard let file = file(for: task), let job = jobs[file] else { return }
+        if let stalled = job.stalled {
+            jobs[file]?.failure = stalled
+            return finish(file, "error")
+        }
         if let error = error as NSError? {
             if let data = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
                 try? data.write(to: Self.resumeURL(file))
@@ -361,6 +422,7 @@ final class ModelDownloads: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        log("Background download events delivered", "info")
         DispatchQueue.main.async {
             self.backgroundEventsDone?()
             self.backgroundEventsDone = nil

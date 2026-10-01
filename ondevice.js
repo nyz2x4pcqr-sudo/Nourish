@@ -729,7 +729,9 @@ nativeOn('download', ev => {
     if (bar && ev.state === 'running') {
         const pct = ev.total ? Math.round(ev.received / ev.total * 100) : 0;
         bar.querySelector('.progress-fill').style.width = pct + '%';
-        bar.querySelector('.progress-label').textContent = `Downloading… ${pct}% · ${formatBytes(ev.received)} of ${formatBytes(ev.total)}`;
+        bar.querySelector('.progress-label').textContent = ev.received > 0
+            ? `Downloading… ${pct}% · ${formatBytes(ev.received)} of ${formatBytes(ev.total)}`
+            : `Starting… waiting for the download server (stops after 30 s if nothing arrives)`;
         return;
     }
     if (ev.state === 'done' || ev.state === 'error' || ev.state === 'cancelled') {
