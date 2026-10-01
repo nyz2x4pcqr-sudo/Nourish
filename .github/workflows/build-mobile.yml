@@ -43,10 +43,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Start a Nourish server
+      - name: Start a Nourish server (logging every request)
         run: |
           pip install -r backend/requirements-core.txt
-          NOURISH_NO_BROWSER=1 nohup python backend/nourish_app.py > server.log 2>&1 &
+          cd backend && nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$GITHUB_WORKSPACE/server.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
       - name: Enable KVM
         run: |
@@ -54,6 +54,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Run in the emulator
+        timeout-minutes: 20
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -64,7 +65,9 @@ jobs:
         if: always()
         with:
           name: phone-screenshots-android
-          path: shots/
+          path: |
+            shots/
+            server.log
 
   ios:
     runs-on: macos-latest
@@ -90,16 +93,19 @@ jobs:
         with:
           name: Nourish-ios
           path: Nourish-unsigned.ipa
-      - name: Start a Nourish server
+      - name: Start a Nourish server (logging every request)
         run: |
           pip install -r backend/requirements-core.txt
-          NOURISH_NO_BROWSER=1 nohup python backend/nourish_app.py > server.log 2>&1 &
+          cd backend && nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$GITHUB_WORKSPACE/server.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
       - name: Run in the simulator
+        timeout-minutes: 20
         working-directory: mobile/ios
         run: bash ../ci/ios-smoke.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: phone-screenshots-ios
-          path: mobile/ios/shots/
+          path: |
+            mobile/ios/shots/
+            server.log
