@@ -36,7 +36,9 @@ probe() {
     rm -f "$PROBE"
     xcrun simctl terminate "$UDID" $APP 2>/dev/null || true
     xcrun simctl launch "$UDID" $APP -mode local -js_probe "$1"
+    { set +x; } 2>/dev/null   # waiting quietly keeps the log readable
     for i in $(seq 1 "$2"); do [ -f "$PROBE" ] && break; sleep 1; done
+    set -x
     [ -f "$PROBE" ] && break
     [ "${3:-}" = retry ] && [ $attempt = 1 ] || break
     echo "No answer after $2 s; launching the app once more"
@@ -168,15 +170,19 @@ echo "== 6a. A 7-day plan on the phone through the app's own Generate Plan code;
 probe "Object.assign(settings, { active_provider: 'local', local_model: 'test-model.gguf', local_ctx: '4096', local_gpu: 'off' }); changed('settings');
   runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
     { role: 'user', content: 'Goal: eat balanced. Likes: anything. Avoids: nothing. Generate the 7-day meal plan JSON.' }] });
-  await new Promise(r => { const t = setInterval(() => { const s = JSON.parse(localStorage.getItem('nourish_plan_progress') || '{}'); if ((s.days || []).length >= 2) { clearInterval(t); r(); } }, 300); });
-  return localStorage.getItem('nourish_plan_progress');" 2700
+  await new Promise(r => { const t = setInterval(() => { const s = JSON.parse(localStorage.getItem('nourish_plan_progress') || '{}'); if ((s.days || []).length >= 2 || s.failed) { clearInterval(t); r(); } }, 300); });
+  const s = JSON.parse(localStorage.getItem('nourish_plan_progress') || '{}');
+  if (s.failed) throw new Error('The plan stopped: ' + s.failed + ' | ' + activityLog.filter(l => l.area === 'plan').slice(-12).map(l => l.level + ' ' + l.msg).join(' | '));
+  return JSON.stringify(s);" 2700
 python3 -c "
 import json; r = json.load(open('$PROBE')); assert r['ok'], r; s = json.loads(r['value'])
 json.dump(s['days'][:2], open('saved-days.json', 'w')); print('Saved before the kill:', len(s['days']), 'days')" || fail "the plan wasn't saved day by day"
 sleep 3   # let WebKit write localStorage to disk
 
 echo "== 6b. Relaunch: the plan continues by itself from the saved day"
-probe "await new Promise(r => { const t = setInterval(() => { if (!planJob && daysData.length === 7 && !localStorage.getItem('nourish_plan_progress')) { clearInterval(t); r(); } }, 1000); });
+probe "await new Promise(r => { const t = setInterval(() => { const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null'); if ((!planJob && daysData.length === 7 && !p) || (p && p.failed)) { clearInterval(t); r(); } }, 1000); });
+  const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null');
+  if (p && p.failed) throw new Error('The plan stopped: ' + p.failed + ' | ' + activityLog.filter(l => l.area === 'plan').slice(-12).map(l => l.level + ' ' + l.msg).join(' | '));
   return JSON.stringify({ days: daysData, log: activityLog.filter(l => l.area === 'plan').map(l => l.level + ' ' + l.msg) });" 3600
 python3 - "$PROBE" <<'PY' || fail "the plan didn't continue correctly after the app was killed"
 import json, sys
@@ -215,7 +221,9 @@ xcrun simctl launch "$UDID" com.apple.Preferences
 sleep 45
 sleep 3   # let WebKit write localStorage (the plan and the activity log) to disk
 echo "-- reopening Nourish; the plan should continue from its saved day"
-probe "await new Promise(r => { const t = setInterval(() => { if (!planJob && daysData.length === 7 && !localStorage.getItem('nourish_plan_progress')) { clearInterval(t); r(); } }, 1000); });
+probe "await new Promise(r => { const t = setInterval(() => { const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null'); if ((!planJob && daysData.length === 7 && !p) || (p && p.failed)) { clearInterval(t); r(); } }, 1000); });
+  const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null');
+  if (p && p.failed) throw new Error('The plan stopped: ' + p.failed + ' | ' + activityLog.filter(l => l.area === 'plan').slice(-12).map(l => l.level + ' ' + l.msg).join(' | '));
   return JSON.stringify({ days: daysData.length, log: activityLog.filter(l => /background|Background|paused|Paused|Found a plan|Day [0-9] done|Screen stays/.test(l.msg)).map(l => new Date(l.t).toISOString().slice(11, 19) + ' ' + l.level + ' ' + l.msg) });" 3600
 python3 - "$PROBE" <<'PY' || fail "the plan didn't finish after a trip to the background"
 import json, sys

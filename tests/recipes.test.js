@@ -123,6 +123,28 @@ test('a repeat of an earlier dish is made again', async () => {
     assert.equal(r.meal.name, 'Chickpea and Apricot Lamb Stew');
 });
 
+test('an unreadable first try never stops the plan: a later readable try is kept', async () => {
+    let n = 0;
+    const weak = Object.assign(copy(TAGINE), { servings: 2 });   // readable, many problems
+    const r = await makeMeal({ type: 'dinner', system: 's', ask: 'a', earlier: [] }, async () => (n++ === 0 ? 'not json at all' : JSON.stringify(weak)));
+    assert.ok(r.meal, 'a readable try must be kept');
+    assert.equal(r.meal.name, TAGINE.name);
+    assert.ok(r.meal.incomplete.length > 0);
+});
+
+test('a try with too few ingredients is kept (marked) rather than failing the plan', async () => {
+    const thin = Object.assign(copy(GOOD), { ingredients: ['10 oz boneless lamb shoulder', '1 tbsp olive oil'] });
+    const r = await makeMeal({ type: 'dinner', system: 's', ask: 'a', earlier: [] }, async () => JSON.stringify(thin));
+    assert.ok(r.meal);
+    assert.ok(r.meal.incomplete.includes('the answer was incomplete (cut off?)'));
+    assert.ok(r.meal.incomplete.some(p => /only 2 ingredients/.test(p)), r.meal.incomplete.join(' | '));
+});
+
+test('nothing readable in any try: reported, not kept', async () => {
+    const r = await makeMeal({ type: 'lunch', system: 's', ask: 'a', earlier: [] }, async () => '{"name":""}');
+    assert.equal(r.meal, null);
+});
+
 test('cancelling stops straight away', async () => {
     assert.equal(await makeMeal({ type: 'lunch', system: 's', ask: 'a' }, async () => null), null);
 });

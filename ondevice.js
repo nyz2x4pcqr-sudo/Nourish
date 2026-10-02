@@ -345,10 +345,10 @@ function tidyMeal(meal) {
 // Everything wrong with one AI-made meal: the recipe checks (recipes.js), repeated ingredients, a
 // line or step that hit the format's length limit (so it was cut off), and a repeat of an earlier dish.
 function allProblems(meal, type, earlier, limited) {
-    if (!completeMeal(meal)) return ['the answer was incomplete (cut off?)'];
-    const out = mealProblems(meal).concat(Recipes.recipeProblems(meal, { type }));
+    if (!usableMeal(meal)) return ['the answer was incomplete (cut off?)'];
+    const out = (completeMeal(meal) ? [] : ['the answer was incomplete (cut off?)']).concat(mealProblems(meal), Recipes.recipeProblems(meal, { type }));
     if (limited) {
-        meal.steps.forEach((s, i) => { if (String(s).length >= L.stepChars) out.push(`step ${i + 1} hit the length limit (cut off?)`); });
+        (meal.steps || []).forEach((s, i) => { if (String(s).length >= L.stepChars) out.push(`step ${i + 1} hit the length limit (cut off?)`); });
         meal.ingredients.forEach(s => { if (String(s).length >= L.itemChars) out.push(`"${s}" hit the length limit (cut off?)`); });
     }
     const repeat = (earlier || []).find(n => sameDish(n, meal.name));
@@ -412,12 +412,15 @@ async function makeMeal(job, run, h) {
         }
         const problems = allProblems(meal, job.type, job.earlier, !!job.grammar);
         if (firstProblems == null) firstProblems = problems;
-        if (!best || (meal && completeMeal(meal) && problems.length < best.problems.length)) best = { meal, problems };
+        const score = mealScore(meal, problems);
+        if (!best || score < best.score) best = { meal, problems, score };
         if (!problems.length) break;
         logPlan(`${job.label || job.type}: try ${attempt + 1} of ${MEAL_ATTEMPTS} has ${problems.length} problem(s)${attempt + 1 < MEAL_ATTEMPTS ? ', making it again' : ''}`, problems, 'warn');
         feedback = `\n\nYour last try "${(meal && meal.name) || '?'}" had these problems, so write it again without them: ${problems.slice(0, 6).join('; ')}.`;
     }
-    if (!best || !completeMeal(best.meal)) return { meal: null, problems: (best && best.problems) || ['no answer'], attempts, firstProblems: firstProblems || [] };
+    // Nothing readable in any try (no name, no ingredients): the caller reports it. Anything else is
+    // kept, however weak, and marked "may be incomplete", so one bad meal never stops a whole plan.
+    if (!best || !usableMeal(best.meal)) return { meal: null, problems: (best && best.problems) || ['no answer'], attempts, firstProblems: firstProblems || [] };
     // Only the calories are off: calories follow the macros (the more detailed numbers).
     if (Recipes.onlyCaloriesWrong(best.problems)) {
         logPlan(`${job.label || job.type}: calories set from the macros`, best.problems, 'warn');
@@ -427,6 +430,14 @@ async function makeMeal(job, run, h) {
     if (best.problems.length) best.meal.incomplete = best.problems;
     else delete best.meal.incomplete;
     return { meal: best.meal, problems: best.problems, attempts, firstProblems: firstProblems || [] };
+}
+
+// Which try to keep: a complete one before an incomplete one, then the one with the fewest problems.
+function usableMeal(meal) {
+    return !!(meal && typeof meal === 'object' && meal.name && Array.isArray(meal.ingredients) && meal.ingredients.length);
+}
+function mealScore(meal, problems) {
+    return (usableMeal(meal) ? 0 : 2000) + (completeMeal(meal) ? 0 : 1000) + problems.length;
 }
 
 function logPlan(msg, details, level) {
