@@ -521,7 +521,7 @@ select {
 .welcome-hero .brand-mark { width: 64px; height: 64px; margin-bottom: var(--s-5); }
 .welcome-hero h2 {
     font-family: var(--font-display); font-variation-settings: var(--display-axes);
-    font-size: 2.15rem; font-weight: 560; line-height: 1.05; letter-spacing: -0.025em; margin-bottom: var(--s-3);
+    font-size: 1.95rem; font-weight: 560; line-height: 1.08; letter-spacing: -0.025em; margin-bottom: var(--s-3);
 }
 .welcome-hero h2 em { font-style: normal; color: var(--accent-text); }
 .welcome-hero p { color: var(--text-2); margin-bottom: var(--s-6); }
@@ -535,7 +535,7 @@ select {
 .welcome-point b { color: var(--text); font-weight: 700; }
 
 /* Brand mark (inline SVG): bowl + sprout */
-.brand-mark { display: block; }
+.brand-mark { display: block; stroke: none; filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.35)); border-radius: 15px; }
 
 /* Skeleton shimmer for loading placeholders */
 .skeleton {

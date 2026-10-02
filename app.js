@@ -596,11 +596,16 @@ function showBanner(message) {
 
 // Status bar for meal-plan work. Errors stay until dismissed so they can't be missed.
 let jobBarTimer;
+let jobBarState = null;
+let jobBarMessage = '';
 function showJobBar(state, message) {
     const bar = $('jobBar');
     clearInterval(jobBarTimer);
     bar.hidden = !state;
     bar.className = 'job-bar' + (state === 'error' ? ' error' : '');
+    jobBarState = state || null;
+    jobBarMessage = message || '';
+    refreshCooking();
     if (!state) return;
     const text = h('span', { class: 'job-bar-text', text: message });
     if (state === 'busy') {
@@ -1696,6 +1701,84 @@ function hasNutrition(day) {
     return MEAL_TYPES.some(t => day[t] && day[t].nutrition && Number.isFinite(day[t].nutrition.calories));
 }
 
+// === BRAND MARK ===
+// The app icon's bowl and sprout, drawn inline (the same artwork as icon.svg).
+function brandMark(size = 64) {
+    const s = (tag, attrs, ...kids) => svgEl(tag, attrs, ...kids);
+    return s('svg', { class: 'brand-mark', viewBox: '0 0 64 64', width: String(size), height: String(size), 'aria-hidden': 'true' },
+        s('defs', {},
+            s('radialGradient', { id: 'bmBg', cx: '30%', cy: '20%', r: '90%' }, s('stop', { offset: '0%', 'stop-color': '#2E2116' }), s('stop', { offset: '100%', 'stop-color': '#0E0C0B' })),
+            s('linearGradient', { id: 'bmBowl', x1: '0', y1: '0', x2: '0', y2: '1' }, s('stop', { offset: '0%', 'stop-color': '#FFC46A' }), s('stop', { offset: '100%', 'stop-color': '#E0782A' })),
+            s('linearGradient', { id: 'bmLeaf', x1: '0', y1: '1', x2: '1', y2: '0' }, s('stop', { offset: '0%', 'stop-color': '#7DB876' }), s('stop', { offset: '100%', 'stop-color': '#C4E8A9' }))),
+        s('rect', { width: '64', height: '64', rx: '15', fill: 'url(#bmBg)' }),
+        s('path', { d: 'M32 33.5V22', stroke: '#9FD08C', 'stroke-width': '2.4', 'stroke-linecap': 'round', fill: 'none' }),
+        s('path', { d: 'M31.6 25.5C25.4 25.6 21 21.4 20.2 15.2C26.6 15 31 18.9 31.6 25.5Z', fill: 'url(#bmLeaf)' }),
+        s('path', { d: 'M32.4 22.4C33 16.6 37.2 12.6 43.4 12.4C42.8 18.4 38.6 22.3 32.4 22.4Z', fill: 'url(#bmLeaf)' }),
+        s('path', { d: 'M12 33.5H52C52 44.8 43 53 32 53S12 44.8 12 33.5Z', fill: 'url(#bmBowl)' }),
+        s('rect', { x: '10', y: '31.2', width: '44', height: '4', rx: '2', fill: '#FFE2B0' }));
+}
+
+// === PLAN BEING MADE ===
+// While a plan is made meal by meal, the Today and Plan screens show the week filling in.
+// Reads the saved progress (nourish_plan_progress) and the job bar's text; changes nothing.
+function cookingState() {
+    if (jobBarState !== 'busy' || (planJob && planJob.kind !== 'plan')) return null;
+    const saved = loadJSON(PLAN_PROGRESS_KEY, null);
+    if (!saved || saved.failed || !Array.isArray(saved.days)) return null;
+    const total = 7;
+    const cells = [];
+    const fresh = [];
+    for (let d = 0; d < total; d++) {
+        const day = saved.days[d] || (saved.current && saved.current.day === d ? saved.current.meals : null) || {};
+        for (const t of MEAL_TYPES) {
+            const meal = day[t];
+            cells.push({ d, t, done: !!(meal && meal.name) });
+            if (meal && meal.name) fresh.push({ d, t, name: String(meal.name) });
+        }
+    }
+    const now = cells.find(c => !c.done);
+    return { cells, now, done: cells.filter(c => c.done).length, total: total * MEAL_TYPES.length, fresh: fresh.slice(-3).reverse() };
+}
+
+function cookingPanel(where) {
+    const st = cookingState();
+    if (!st) return null;
+    const message = jobBarMessage.replace(/…$/, '');
+    const pct = Math.round(st.done / st.total * 100);
+    return h('section', { class: 'cooking', id: `cooking-${where}`, 'aria-live': 'polite' },
+        h('div', { class: 'cooking-head' },
+            h('div', {},
+                h('div', { class: 'eyebrow', text: 'In the kitchen' }),
+                h('div', { class: 'cooking-title', text: st.done ? 'Your week is cooking' : 'Starting your week' }),
+                h('div', { class: 'cooking-now' }, h('span', { class: 'job-bar-spinner', 'aria-hidden': 'true' }), h('span', { text: message || 'Working…' }))),
+            h('div', { class: 'cooking-count num' }, `${st.done}`, h('small', { text: `of ${st.total} meals` }))),
+        h('div', { class: 'cooking-bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(st.total), 'aria-valuenow': String(st.done), 'aria-label': 'Meals made' },
+            h('span', { style: `width:${Math.max(pct, 2)}%` })),
+        h('div', { class: 'cooking-grid', 'aria-hidden': 'true' },
+            ...[0, 1, 2, 3, 4, 5, 6].flatMap(d => [h('span', { class: 'day', text: dayName(d, true) }),
+                ...st.cells.filter(c => c.d === d).map(c => h('span', { class: `cooking-cell art-${c.t}${c.done ? ' done' : ''}${st.now === c ? ' now' : ''}` }))])),
+        st.fresh.length ? h('div', { class: 'cooking-fresh' }, h('div', { class: 'eyebrow', text: 'Just made' }),
+            st.fresh.map(f => h('div', { class: 'cooking-fresh-item' },
+                h('span', { class: `dot art-${f.t}` }, icon(MEAL_ICONS[f.t])),
+                h('span', {}, h('b', { text: f.name }), ` · ${dayName(f.d, true)} ${MEAL_LABELS[f.t].toLowerCase()}`)))) : null,
+        h('p', { class: 'cooking-note', text: 'Each meal is saved as soon as it\'s done, so nothing is lost if you leave Nourish.' }),
+        planJob ? h('div', { class: 'cooking-actions' }, h('button', { type: 'button', class: 'btn btn-secondary', onclick: cancelPlan }, icon('i-close'), 'Stop making the plan')) : null);
+}
+
+// Swaps the panels in place on every progress update (the job bar calls this).
+function refreshCooking() {
+    for (const [where, holder] of [['today', 'todayBody'], ['plan', 'planAccordions']]) {
+        const box = $(holder);
+        if (!box) continue;
+        const old = $(`cooking-${where}`);
+        const panel = cookingPanel(where);
+        const redraw = where === 'today' ? updateTodayScreen : updatePlanScreen;
+        if (old && panel) old.replaceWith(panel);
+        else if (old) { old.remove(); if (!daysData.length) redraw(); }
+        else if (panel) { if (!daysData.length) redraw(); else box.prepend(panel); }
+    }
+}
+
 // === TODAY SCREEN ===
 function greeting() {
     const hour = new Date().getHours();
@@ -1713,13 +1796,21 @@ function updateTodayScreen() {
     $('newPlanHeaderBtn').hidden = !hasPlan;
 
     if (!hasPlan) {
-        setChildren(body, h('div', { class: 'empty-state', id: 'emptyState' },
-            h('div', { class: 'empty-art' }, icon('i-leaf')),
-            h('h2', { class: 'title', text: 'No meal plan yet' }),
-            h('p', { text: 'Get a full week of breakfasts, lunches and dinners that fit your goals, made by AI or found on recipe sites.' }),
-            h('div', { class: 'empty-actions' },
-                h('button', { type: 'button', class: 'btn btn-primary', onclick: showGenerateSheet }, icon('i-sparkle'), 'Generate Meal Plan'),
-                h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => switchTab('chat') }, icon('i-chat'), 'Plan it with the chef'))));
+        const cooking = cookingPanel('today');
+        if (cooking) { setChildren(body, cooking); return; }
+        setChildren(body, h('div', { class: 'empty-state welcome', id: 'emptyState' },
+            h('div', { class: 'welcome-hero' },
+                brandMark(64),
+                h('div', { class: 'eyebrow', text: 'No meal plan yet' }),
+                h('h2', {}, 'A week of good food, ', h('em', { text: 'planned for you.' })),
+                h('p', { text: 'Breakfasts, lunches and dinners that fit your goals, with every recipe checked and a grocery list ready to go.' }),
+                h('div', { class: 'empty-actions' },
+                    h('button', { type: 'button', class: 'btn btn-primary', onclick: showGenerateSheet }, icon('i-sparkle'), 'Generate Meal Plan'),
+                    h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => switchTab('chat') }, icon('i-chat'), 'Plan it with the chef'))),
+            h('div', { class: 'welcome-points' },
+                h('div', { class: 'welcome-point' }, h('span', {}, icon('i-flame')), h('span', {}, h('b', { text: 'Made for you' }), ' · your calories, diet and tastes')),
+                h('div', { class: 'welcome-point' }, h('span', {}, icon('i-link')), h('span', {}, h('b', { text: 'Any recipe' }), ' · add one from a link, text or a screenshot')),
+                h('div', { class: 'welcome-point' }, h('span', {}, icon('i-cart')), h('span', {}, h('b', { text: 'Shopping sorted' }), ' · a grocery list that writes itself')))));
         return;
     }
     if (selectedDay >= daysData.length) selectedDay = todayIndex();
@@ -1764,13 +1855,14 @@ function updateTodayScreen() {
                 const fill = h('div', { class: `macro-fill ${cls}` });
                 requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = Math.min(total / max * 100, 100) + '%'; }));
                 return h('div', {},
-                    h('div', { class: 'macro-head' }, h('span', { text: label }), h('span', { class: 'num', text: known ? `${Math.round(total)} / ${max}g` : '—' })),
+                    h('div', { class: 'macro-head' }, h('span', {}, h('i', { class: 'macro-dot', style: `background:var(--${cls.replace('macro-', '')})` }), label), h('span', { class: 'num', text: known ? `${Math.round(total)} / ${max}g` : '—' })),
                     h('div', { class: 'macro-track' }, fill));
             })));
     }
 
     const title = isToday(selectedDay) ? "Today's meals" : `${dayName(selectedDay)}'s meals`;
     setChildren(body,
+        cookingPanel('today'),
         strip,
         summary,
         h('h2', { class: 'section-title' }, title, h('small', { text: `Day ${selectedDay + 1}` })),
@@ -1799,6 +1891,8 @@ function updatePlanScreen() {
     const container = $('planAccordions');
     if (!container) return;
     $('planEyebrow').textContent = daysData.length ? `${daysData.length} day${daysData.length === 1 ? "" : "s"} · starts ${dayName(0)}` : 'Your week';
+    const cooking = cookingPanel('plan');
+    if (!daysData.length && cooking) { setChildren(container, cooking); return; }
     if (!daysData.length) {
         setChildren(container, h('div', { class: 'empty-state' },
             h('div', { class: 'empty-art' }, icon('i-calendar')),
@@ -1808,7 +1902,7 @@ function updatePlanScreen() {
                 h('button', { type: 'button', class: 'btn btn-primary', onclick: showGenerateSheet }, icon('i-sparkle'), 'Generate Meal Plan'))));
         return;
     }
-    setChildren(container, ...daysData.map((day, idx) => h('section', { class: 'card plan-day' },
+    setChildren(container, cooking, ...daysData.map((day, idx) => h('section', { class: `card plan-day${isToday(idx) ? ' is-today' : ''}` },
         h('div', { class: 'plan-day-head' },
             h('div', {},
                 h('div', { class: 'eyebrow', text: `Day ${idx + 1}${isToday(idx) ? ' · Today' : ''}` }),
