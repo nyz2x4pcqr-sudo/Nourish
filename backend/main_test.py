@@ -259,6 +259,8 @@ class WebRecipeTest(unittest.TestCase):
                 return httpx.Response(200, text=RECIPE_STRING_STEPS_PAGE)
             if url.endswith("/moved"):
                 return httpx.Response(302, headers={"location": "https://recipes.example/garlic-chicken"})
+            if url.endswith("/members-only"):
+                return httpx.Response(403, text="<html>Log in to see this</html>")
             return httpx.Response(200, text="<html>no recipe here</html>")
         self.up_handler = handler
 
@@ -317,6 +319,24 @@ class WebRecipeTest(unittest.TestCase):
             self.assertEqual(r.status_code, 422, url)
         import asyncio
         asyncio.run(main.web_recipes.check_public_url("http://8.8.8.8/"))  # a public address is allowed
+
+
+    def test_web_fetch_returns_page_status_and_final_address(self):
+        r = self.client.post("/api/web/fetch", json={"url": "recipes.example/moved"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["url"], "https://recipes.example/garlic-chicken")
+        self.assertEqual(r.json()["status"], 200)
+        self.assertIn("Lemon Chicken", r.json()["body"])
+        self.assertIn("iPhone", self.up.requests[-1].headers["user-agent"])  # a browser's identity
+        # A blocked page comes back with its status, so the app can offer "paste the text" instead.
+        r = self.client.post("/api/web/fetch", json={"url": "https://recipes.example/members-only"})
+        self.assertEqual((r.status_code, r.json()["status"]), (200, 403))
+
+    def test_web_fetch_blocks_private_addresses(self):
+        main.web_recipes.ALLOW_PRIVATE = False
+        for url in ("http://127.0.0.1:8000/api/state", "http://192.168.1.1/", "http://169.254.169.254/latest/meta-data", "file:///etc/passwd"):
+            r = self.client.post("/api/web/fetch", json={"url": url})
+            self.assertEqual(r.status_code, 422, url)
 
 
 class UpdateTest(unittest.TestCase):
@@ -459,6 +479,12 @@ class StateTest(unittest.TestCase):
         main.store.reset_for_tests(self.path)
         self.assertEqual(self.client.get("/api/state").json(), {})
         self.assertTrue(self.path.with_suffix(".damaged.json").exists())
+
+    def test_cookbook_section_is_kept(self):
+        book = {"recipes": [{"id": "r1", "source": "imported", "meal_type": "dinner", "recipe": {"name": "Tagine"}}]}
+        self.assertEqual(self.put("cookbook", book).status_code, 200)
+        main.store.reset_for_tests(self.path)  # like restarting the server
+        self.assertEqual(self.client.get("/api/state").json()["cookbook"]["value"], book)
 
     def test_rejects_bad_input(self):
         self.assertEqual(self.put("passwords", {}).status_code, 400)

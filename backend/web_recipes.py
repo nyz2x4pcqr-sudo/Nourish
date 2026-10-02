@@ -70,6 +70,32 @@ async def fetch_page(client: httpx.AsyncClient, url: str) -> tuple:
     raise WebRecipeError("Too many redirects")
 
 
+# A phone browser's identity, for pages a person would open themselves (a pasted recipe link):
+# some sites, and the social sites' public previews, answer bots with an error or a different page.
+BROWSER_AGENT = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+                 "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
+
+
+async def fetch_raw(client: httpx.AsyncClient, url: str, browser: bool = True) -> dict:
+    """Like fetch_page, but an error status is returned rather than raised, so the app can tell a
+    blocked or login-only page (401, 403, 429…) from a missing one. Returns {status, url, body}."""
+    headers = {"User-Agent": BROWSER_AGENT if browser else USER_AGENT, "Accept-Language": "en",
+               "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"}
+    for _ in range(5):
+        await check_public_url(url)
+        async with client.stream("GET", url, headers=headers) as res:
+            if res.status_code in (301, 302, 303, 307, 308) and res.headers.get("location"):
+                url = urljoin(url, res.headers["location"])
+                continue
+            body = bytearray()
+            async for chunk in res.aiter_bytes():
+                body += chunk
+                if len(body) > MAX_PAGE_BYTES:
+                    break
+            return {"status": res.status_code, "url": url, "body": body.decode(res.encoding or "utf-8", errors="replace")}
+    raise WebRecipeError("Too many redirects")
+
+
 # --- search -------------------------------------------------------------------------------
 
 class _DDGParser(HTMLParser):

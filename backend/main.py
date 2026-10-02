@@ -95,6 +95,11 @@ class ImportRequest(BaseModel):
     url: str
 
 
+class FetchRequest(BaseModel):
+    url: str
+    browser: bool = True
+
+
 class RecipeSearchRequest(BaseModel):
     query: str
     exclude: Optional[str] = ""
@@ -384,7 +389,23 @@ async def recipes_import(req: ImportRequest):
         raise HTTPException(status_code=502, detail=f"Couldn't load that page ({type(e).__name__})")
 
 
-# --- shared data (settings, plan, grocery list, chat) --------------------------------------
+@app.post("/api/web/fetch")
+async def web_fetch(req: FetchRequest):
+    """A public web page for the app's recipe importer (importer.js), which reads it in the browser:
+    the same code then works on the PC and on the phone, which fetches pages itself."""
+    url = req.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        async with web_recipes.new_client() as client:
+            return await web_recipes.fetch_raw(client, url, browser=req.browser)
+    except web_recipes.WebRecipeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Couldn't load that page ({type(e).__name__})")
+
+
+# --- shared data (settings, plan, grocery list, chat, cookbook) --------------------------------------
 
 @app.get("/api/state")
 def state_get():
