@@ -12,6 +12,10 @@ on:
       tag:
         description: "Version tag, e.g. v0.2.0-pre-alpha"
         required: true
+      skip_iphone_test:
+        description: "Publish without waiting for the iPhone simulator test (it still runs on the push build of main)"
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
 
@@ -23,6 +27,8 @@ jobs:
     uses: ./.github/workflows/build-exe.yml
   phones:
     uses: ./.github/workflows/build-mobile.yml
+    with:
+      skip_iphone_test: ${{ inputs.skip_iphone_test == true }}
 
   publish:
     needs: [windows, phones]

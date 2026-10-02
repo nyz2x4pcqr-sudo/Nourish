@@ -24,6 +24,11 @@ on:
       - ".github/workflows/build-mobile.yml"
   workflow_dispatch:
   workflow_call:
+    inputs:
+      skip_iphone_test:
+        description: "Build the iPhone app but skip its ~70-minute simulator test (the push build on main still runs it)"
+        type: boolean
+        default: false
 
 jobs:
   android:
@@ -147,6 +152,7 @@ jobs:
         run: curl -sSfL -o test-model.gguf "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf"
       - name: Run in the simulator
         # Plans are made one meal at a time, and the tiny test model's recipes usually need all 3 tries.
+        if: ${{ !inputs.skip_iphone_test }}
         timeout-minutes: 130
         working-directory: mobile/ios
         run: bash ../ci/ios-smoke.sh
