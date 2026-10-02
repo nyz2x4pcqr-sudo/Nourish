@@ -231,27 +231,41 @@ function stripThinking(text) {
 }
 
 // Output formats that small models are forced to follow, so their answers always parse.
-// Every text starts with a letter or digit. Small models tend to fill every list and string to the
-// maximum, so the maximums are kept small enough that a whole day always fits in DAY_TOKENS
+// Every text starts with a letter or digit, and every step ends with a full stop. Plans are made one
+// meal per request, so each recipe has room for specific ingredients and full steps from prep to
+// plating; the maximums are kept small enough that a meal always fits in MEAL_TOKENS
 // (tests/ondevice.test.js checks this): an answer cut off half-way can't be used.
-const PLAN_LIMITS = { nameChars: 60, itemChars: 36, minItems: 3, maxItems: 10, stepChars: 100, minSteps: 2, maxSteps: 4 };
-const DAY_TOKENS = 1700;   // one day: 3 meals
-const MEAL_TOKENS = 700;   // one meal made again
+const PLAN_LIMITS = { nameChars: 60, itemChars: 48, minItems: 3, maxItems: 14, stepChars: 200, minSteps: 3, maxSteps: 8 };
+const MEAL_TOKENS = 1400;  // one meal
+const MEAL_ATTEMPTS = 3;   // the first try and up to 2 remakes
 const L = PLAN_LIMITS;
+// The fields in the order the AI writes them: the recipe first, then its time and nutrition, so it
+// estimates those from what it actually wrote. servings is fixed to the number asked for.
+function mealRule(servings) {
+    const s = Math.max(1, Math.min(12, Math.round(Number(servings) || 1)));
+    return String.raw`meal ::= "{" ws "\"name\":" ws name "," ws "\"servings\":" ws "${s}" "," ws "\"ingredients\":" ws "[" ws item ("," ws item){${L.minItems - 1},${L.maxItems - 1}} ws "]" "," ws "\"steps\":" ws "[" ws step ("," ws step){${L.minSteps - 1},${L.maxSteps - 1}} ws "]" "," ws "\"time_minutes\":" ws int "," ws "\"nutrition\":" ws "{" ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}" ws "}"`;
+}
 const GBNF_COMMON = String.raw`
-meal ::= "{" ws "\"name\":" ws name "," ws "\"time_minutes\":" ws int "," ws "\"nutrition\":" ws "{" ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}" "," ws "\"ingredients\":" ws "[" ws item ("," ws item){${L.minItems - 1},${L.maxItems - 1}} ws "]" "," ws "\"steps\":" ws "[" ws step ("," ws step){${L.minSteps - 1},${L.maxSteps - 1}} ws "]" ws "}"
 name ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{2,${L.nameChars - 1}} "\""
 item ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F,]{2,${L.itemChars - 1}} "\""
-step ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{9,${L.stepChars - 1}} "\""
+step ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{10,${L.stepChars - 2}} [.!] "\""
 int ::= "0" | [1-9] [0-9]{0,3}
 ws ::= [ \n]{0,2}`;
-const GBNF_DAY = String.raw`root ::= "{" ws "\"breakfast\":" ws meal "," ws "\"lunch\":" ws meal "," ws "\"dinner\":" ws meal ws "}"` + GBNF_COMMON;
-const GBNF_MEAL = String.raw`root ::= meal` + GBNF_COMMON;
-const GBNF_EDIT = String.raw`root ::= "{" ws "\"changes\":" ws "[" ws change ("," ws change){0,6} ws "]" ws "}"
-change ::= "{" ws "\"day\":" ws [1-7] "," ws "\"meal\":" ws ("\"breakfast\"" | "\"lunch\"" | "\"dinner\"") "," ws "\"recipe\":" ws meal ws "}"` + GBNF_COMMON;
+function mealGrammar(servings) { return 'root ::= meal\n' + mealRule(servings) + GBNF_COMMON; }
+// Chat changes on the phone: at most 2 meals per answer, so it fits the phone's memory (4096 tokens).
+const EDIT_TOKENS = 2 * MEAL_TOKENS + 100;
+function editGrammar(servings) {
+    return String.raw`root ::= "{" ws "\"changes\":" ws "[" ws change ("," ws change){0,1} ws "]" ws "}"
+change ::= "{" ws "\"day\":" ws [1-7] "," ws "\"meal\":" ws ("\"breakfast\"" | "\"lunch\"" | "\"dinner\"") "," ws "\"recipe\":" ws meal ws "}"
+` + mealRule(servings) + GBNF_COMMON;
+}
+const GBNF_MEAL = mealGrammar(1);
+const GBNF_EDIT = editGrammar(1);
 
 const PLAN_MEALS = ['breakfast', 'lunch', 'dinner'];
+const MEAL_SHARE = { breakfast: 0.25, lunch: 0.35, dinner: 0.4 };   // of the day's calories and protein
 const Grocery = typeof NourishGrocery !== 'undefined' ? NourishGrocery : require('./grocery.js');
+const Recipes = typeof NourishRecipes !== 'undefined' ? NourishRecipes : require('./recipes.js');
 
 // The ingredient lines in a day that are junk (see grocery.js), as [{ meal, item, reason }].
 function junkRows(day) {
@@ -306,8 +320,8 @@ function mealProblems(meal) {
     return problems.filter((p, i) => problems.indexOf(p) === i);
 }
 
-// A remade meal is only used when it's whole. An answer cut off at the length limit can still
-// parse (the JSON repair keeps what's there) but lose its steps or ingredients.
+// A meal is only used when it's whole. An answer cut off at the length limit can still parse (the
+// JSON repair keeps what's there) but lose its steps or ingredients.
 function completeMeal(meal) {
     return !!(meal && meal.name && Array.isArray(meal.ingredients) && meal.ingredients.length >= 3
         && Array.isArray(meal.steps) && meal.steps.length >= 1 && meal.nutrition && typeof meal.nutrition === 'object');
@@ -327,6 +341,20 @@ function tidyMeal(meal) {
     return caps;
 }
 
+// Everything wrong with one AI-made meal: the recipe checks (recipes.js), repeated ingredients, a
+// line or step that hit the format's length limit (so it was cut off), and a repeat of an earlier dish.
+function allProblems(meal, type, earlier, limited) {
+    if (!completeMeal(meal)) return ['the answer was incomplete (cut off?)'];
+    const out = mealProblems(meal).concat(Recipes.recipeProblems(meal, { type }));
+    if (limited) {
+        meal.steps.forEach((s, i) => { if (String(s).length >= L.stepChars) out.push(`step ${i + 1} hit the length limit (cut off?)`); });
+        meal.ingredients.forEach(s => { if (String(s).length >= L.itemChars) out.push(`"${s}" hit the length limit (cut off?)`); });
+    }
+    const repeat = (earlier || []).find(n => sameDish(n, meal.name));
+    if (repeat) out.push(`same dish as "${repeat}"`);
+    return out.filter((p, i) => out.indexOf(p) === i);
+}
+
 // "Avocado & Spinach Pancakes" and "Spinach and Avocado Pancake" count as the same dish.
 const NAME_FILLER = ['with', 'and', 'the', 'a', 'an', 'of', 'in', 'on', 'style', 'homemade', 'easy', 'quick', 'healthy', 'simple', 'classic'];
 function dishWords(name) {
@@ -344,87 +372,144 @@ function sameDish(a, b) {
 
 const CUISINES = ['Mediterranean', 'Mexican', 'Japanese', 'Indian', 'Thai', 'Middle Eastern', 'Italian', 'Korean', 'Greek', 'American', 'French', 'Vietnamese', 'Spanish', 'Moroccan'];
 
-// Small phone models do far better one day at a time than with a whole week in one go.
-// `state` is the plan so far ({ days, cuisineOffset, stats }) and is saved after every day
-// (hooks.save), so a plan interrupted at day 5 continues at day 5. The prompt is the same size
-// every day: the profile, the end of the chat, a cuisine for the day and only the last 3 dish
-// names. Repeats are caught in code instead (sameDish), and that one meal is made again.
-async function generatePlanOnDevice(messages, hooks, state) {
-    const h = Object.assign({ onDay() {}, onStatus() {}, isCancelled: () => false, save() {}, totalDays: 7 }, hooks || {});
+// The rules every recipe is written to, for every AI (phone, PC and cloud).
+function recipeRules(servings) {
+    const units = typeof unitSystem === 'function' && unitSystem() === 'metric' ? 'metric units (g, ml, °C), with tsp and tbsp for small amounts' : 'US kitchen units (cups, tbsp, tsp, oz, lb, °F)';
+    return `Write ONE complete recipe that someone can cook from start to finish:\n` +
+        `- servings: ${servings}. Ingredient amounts are for all ${servings} serving${servings > 1 ? 's' : ''}. nutrition (calories, protein_g, carbs_g, fat_g) is for ONE serving, and calories must equal protein_g×4 + carbs_g×4 + fat_g×9.\n` +
+        `- ingredients: every item specific, with its amount: "8 oz boneless lamb shoulder", "1 medium zucchini", "1 tsp ground cumin", "1/2 tsp salt", "1 cup low-sodium chicken broth". ` +
+        `Name the exact cut of meat, which vegetables, each spice, the salt, the oil and any liquid. Never "vegetables", "meat" or "spices". Each ingredient once.\n` +
+        `- steps: ${L.minSteps + 1} to ${L.maxSteps} steps in order, from prep (cutting, measuring, preheating) to plating. Each step starts with a verb ("Dice…", "Heat…", "Simmer…") and is one or two full sentences with times and heat. ` +
+        `Use every ingredient in the steps. The last step says how to serve it. No descriptions of the dish.\n` +
+        `- time_minutes: the total time, prep included.\n- Use ${units}. Give each temperature once (e.g. "400°F"), not in two units.`;
+}
+
+// One meal, checked, made again (up to MEAL_ATTEMPTS in all) while it has problems. Each remake is
+// told what was wrong. Returns { meal, problems, attempts, firstProblems }: the best attempt, and
+// what's still wrong with it (empty when it passed). Returns null when cancelled.
+// job: { type, system, ask, earlier (dish names it must not repeat), dish (remake this dish) }.
+// run(messages, { grammar, maxTokens, id }) → the model's text, or null when cancelled.
+async function makeMeal(job, run, h) {
+    const hooks = Object.assign({ onAttempt() {}, isCancelled: () => false }, h || {});
+    let best = null;
+    let firstProblems = null;
+    let feedback = '';
+    let attempts = 0;
+    for (let attempt = 0; attempt < MEAL_ATTEMPTS && !hooks.isCancelled(); attempt++) {
+        hooks.onAttempt(attempt);
+        attempts++;
+        const ask = job.ask + feedback;
+        const text = await run([{ role: 'system', content: job.system }, { role: 'user', content: ask }],
+            { grammar: job.grammar, maxTokens: MEAL_TOKENS, id: `${job.id || 'meal'}-${attempt}` });
+        if (text == null) return null;
+        let meal = null;
+        try { meal = (typeof parseLLMJSON === 'function' ? parseLLMJSON : require('./json-repair.js').parseLLMJSON)(text); } catch (e) { meal = null; }
+        if (meal && meal.recipe && !meal.name) meal = meal.recipe;
+        if (meal && typeof meal === 'object') {
+            dropJunk({ [job.type]: meal });
+            tidyMeal(meal);
+        }
+        const problems = allProblems(meal, job.type, job.earlier, !!job.grammar);
+        if (firstProblems == null) firstProblems = problems;
+        if (!best || (meal && completeMeal(meal) && problems.length < best.problems.length)) best = { meal, problems };
+        if (!problems.length) break;
+        logPlan(`${job.label || job.type}: try ${attempt + 1} of ${MEAL_ATTEMPTS} has ${problems.length} problem(s)${attempt + 1 < MEAL_ATTEMPTS ? ', making it again' : ''}`, problems, 'warn');
+        feedback = `\n\nYour last try "${(meal && meal.name) || '?'}" had these problems, so write it again without them: ${problems.slice(0, 6).join('; ')}.`;
+    }
+    if (!best || !completeMeal(best.meal)) return { meal: null, problems: (best && best.problems) || ['no answer'], attempts, firstProblems: firstProblems || [] };
+    // Only the calories are off: calories follow the macros (the more detailed numbers).
+    if (Recipes.onlyCaloriesWrong(best.problems)) {
+        logPlan(`${job.label || job.type}: calories set from the macros`, best.problems, 'warn');
+        Recipes.fixCalories(best.meal);
+        best.problems = [];
+    }
+    if (best.problems.length) best.meal.incomplete = best.problems;
+    else delete best.meal.incomplete;
+    return { meal: best.meal, problems: best.problems, attempts, firstProblems: firstProblems || [] };
+}
+
+function logPlan(msg, details, level) {
+    if (typeof nlog === 'function') nlog('plan', msg, details, level);
+}
+
+// The prompt for one meal of a plan, the same size every time: the profile, the end of the chat,
+// the day's cuisine, this meal's share of the day's targets, and only the last few dish names
+// (repeats of any earlier dish are caught in code: sameDish).
+function servingsWanted() {
+    return Math.max(1, Math.min(12, Math.round(Number(typeof settings !== 'undefined' && settings.servings) || 1)));
+}
+function mealFormat(servings) {
+    return `{"name":"","servings":${servings},"ingredients":[""],"steps":[""],"time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}}`;
+}
+function mealSystem(servings) {
+    return 'You are a chef writing recipes for a meal plan. Reply with ONLY raw JSON in this format, no markdown: ' + mealFormat(servings) + '\n' + recipeRules(servings) + (typeof profileText === 'function' ? '\n\nThe person:\n' + profileText() : '');
+}
+function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
+    const s = typeof settings !== 'undefined' ? settings : {};
+    const share = MEAL_SHARE[type] || 0.33;
+    const kcal = Math.round((Number(s.calorie_target) || 2000) * share / 10) * 10;
+    const protein = Math.round((Number(s.protein_target) || 100) * share);
+    return `${conversation ? conversation + '\n\n' : ''}${dish ? `Write the full recipe for "${dish}", the ${type}` : `Make the ${type}`} for Day ${d + 1}${typeof dayName === 'function' ? ` (${dayName(d)})` : ''}` +
+        `${cuisine && !dish ? `. Cuisine: ${cuisine}` : ''}. Aim for about ${kcal} kcal and ${protein} g protein per serving.` +
+        `${recent && recent.length ? ` Make it different from: ${recent.join(', ')}.` : ''}${extra ? ' ' + extra : ''} Return only the JSON for this one recipe.`;
+}
+
+// The model call for a plan on this phone: forced into the meal format.
+function phoneRunner(h) {
+    return (msgs, { grammar, maxTokens, id }) => runPlanStep(msgs, grammar, maxTokens, `plan-${id}`, h);
+}
+
+// A 7-day plan, one meal at a time (small phone models do far better with one recipe per request,
+// and every AI gets room for a whole recipe this way). `state` is the plan so far ({ days, current,
+// cuisineOffset, stats }) and is saved after every meal (hooks.save), so a plan interrupted at day 5
+// lunch continues at day 5 lunch. `run` makes one model call (phoneRunner by default; app.js passes
+// one for the PC and cloud AIs).
+async function generatePlanOnDevice(messages, hooks, state, run) {
+    const h = Object.assign({ onDay() {}, onMeal() {}, onStatus() {}, isCancelled: () => false, save() {}, totalDays: 7 }, hooks || {});
     const st = state || {};
     st.days = st.days || [];
     st.stats = st.stats || [];
     if (st.cuisineOffset == null) st.cuisineOffset = Math.floor(Math.random() * CUISINES.length);
+    const onPhone = !run;
+    run = run || phoneRunner(h);
     const conversation = messages.filter(m => m.role !== 'system').slice(-8).map(m => `${m.role === 'user' ? 'They said' : 'You said'}: ${m.content}`).join('\n').slice(-1200);
-    const system = 'You are a meal-planning chef. Plan ONE day of meals as JSON: breakfast, lunch and dinner, each with name, time_minutes, nutrition (calories, protein_g, carbs_g, fat_g for one serving), ingredients and short steps. ' +
-        'Each ingredient is ONE item with its amount, like "2 large eggs" or "1 cup spinach", and each ingredient only once. Use US kitchen units (cups, tbsp, tsp, oz, lb, °F). Use real, appetising dish names. Spread the daily calorie and protein targets over the three meals.\n\nThe person:\n' + profileText();
-    const usedNames = () => st.days.reduce((all, day) => all.concat(PLAN_MEALS.map(t => day && day[t] && day[t].name).filter(Boolean)), []);
+    const servings = servingsWanted();
+    const system = mealSystem(servings);
+    const grammar = onPhone ? mealGrammar(servings) : null;
+    const usedNames = extra => st.days.reduce((all, day) => all.concat(PLAN_MEALS.map(t => day && day[t] && day[t].name).filter(Boolean)), []).concat(extra || []);
 
     for (let d = st.days.length; d < h.totalDays; d++) {
         if (h.isCancelled()) break;
-        await coolDownIfHot(d, h, st);
+        if (onPhone) await coolDownIfHot(d, h, st);
         h.onDay(d);
         const cuisine = CUISINES[(st.cuisineOffset + d) % CUISINES.length];
-        const recent = usedNames().slice(-3);
-        const ask = `${conversation}\n\nPlan Day ${d + 1} (${dayName(d)}). Today's cuisine: ${cuisine}.${recent.length ? ' Recent dishes (make different ones): ' + recent.join(', ') + '.' : ''} Return only the JSON for this day.`;
-        const promptChars = system.length + ask.length;
-        const started = Date.now();
-        const stat = { day: d + 1, promptChars, thermal: st.lastThermal || '?', junkRows: 0, retried: false, repeatsFixed: 0, mealsRemade: 0, capped: 0, seconds: 0 };
-
-        let day = null;
-        for (let attempt = 0; attempt < 2 && !day; attempt++) {
-            const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user', content: ask }], GBNF_DAY, DAY_TOKENS, `plan-day-${d}`, h);
-            if (text == null) break;   // cancelled
-            const parsed = parseLLMJSON(text);
-            const bad = junkRows(parsed);
-            if (attempt === 0) stat.junkRows = bad.length;
-            if (!bad.length) { day = parsed; break; }
-            nlog('plan', `Day ${d + 1}: ${bad.length} junk ingredient line(s)${attempt === 0 ? ', making the day again' : ', dropping them'}`, bad.slice(0, 8), 'warn');
-            if (attempt === 0) stat.retried = true;
-            else day = dropJunk(parsed);
+        if (!st.current || st.current.day !== d) st.current = { day: d, meals: {}, started: Date.now(), stat: { day: d + 1, thermal: st.lastThermal || '?', promptChars: 0, attempts: 0, firstTryProblems: 0, remade: 0, incomplete: 0, seconds: 0 } };
+        const day = st.current.meals;
+        const stat = st.current.stat;
+        for (const type of PLAN_MEALS) {
+            if (day[type]) continue;   // made before the app was closed
+            if (h.isCancelled()) break;
+            const todays = PLAN_MEALS.map(t => day[t] && day[t].name).filter(Boolean);
+            const ask = mealAsk({ type, d, cuisine, recent: usedNames(todays).slice(-4), conversation });
+            stat.promptChars = Math.max(stat.promptChars, system.length + ask.length);
+            const r = await makeMeal({ type, system, ask, grammar, earlier: usedNames(todays), id: `${d}-${type}`, label: `Day ${d + 1} ${type}` }, run,
+                { onAttempt: a => h.onMeal(d, type, a), isCancelled: h.isCancelled });
+            if (!r) break;   // cancelled
+            if (!r.meal) throw new Error(`The AI couldn't write Day ${d + 1} ${type} (${r.problems.slice(0, 2).join('; ')}). Try again, or try another model.`);
+            day[type] = r.meal;
+            stat.attempts += r.attempts;
+            stat.firstTryProblems += r.firstProblems.length;
+            if (r.attempts > 1) stat.remade++;
+            if (r.problems.length) stat.incomplete++;
+            logPlan(`Day ${d + 1} ${type}: "${r.meal.name}" after ${r.attempts} tr${r.attempts === 1 ? 'y' : 'ies'}${r.problems.length ? `, may be incomplete: ${r.problems.join('; ')}` : ', all checks passed'}`);
+            h.save(st);
         }
-        if (!day) break;
-
-        // A meal that lists an ingredient twice, or names one twice in a step: make that meal again once.
-        for (let m = 0; m < PLAN_MEALS.length && !h.isCancelled(); m++) {
-            const type = PLAN_MEALS[m];
-            const problems = mealProblems(day[type]);
-            if (!problems.length) continue;
-            nlog('plan', `Day ${d + 1} ${type} "${day[type].name}": ${problems.join('; ')}; making it again`, null, 'warn');
-            const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user',
-                content: `${conversation}\n\nMake ONE ${type} for Day ${d + 1}, ${cuisine} cuisine. List each ingredient once. Return only the JSON for this meal.` }],
-            GBNF_MEAL, MEAL_TOKENS, `plan-fix-${d}-${m}`, h);
-            if (text == null) break;
-            const again = dropJunk({ [type]: parseLLMJSON(text) })[type];
-            if (completeMeal(again) && mealProblems(again).length < problems.length) { day[type] = again; stat.mealsRemade++; }
-            else if (again && !completeMeal(again)) nlog('plan', `Day ${d + 1} ${type}: the remade meal came back incomplete; keeping the first one`, null, 'warn');
-        }
-
-        // Repeats of earlier dishes: make that one meal again with another cuisine.
-        const earlier = usedNames();
-        for (let m = 0; m < PLAN_MEALS.length; m++) {
-            const type = PLAN_MEALS[m];
-            const repeatOf = day[type] && earlier.find(n => sameDish(n, day[type].name));
-            if (!repeatOf || h.isCancelled()) continue;
-            const other = CUISINES[(st.cuisineOffset + d + 5 + m) % CUISINES.length];
-            nlog('plan', `Day ${d + 1} ${type}: "${day[type].name}" repeats "${repeatOf}", making a ${other} one instead`);
-            const text = await runPlanStep([{ role: 'system', content: system }, { role: 'user',
-                content: `${conversation}\n\nMake ONE ${type} for Day ${d + 1}, ${other} cuisine. It must not be ${repeatOf} or anything like it. Return only the JSON for this meal.` }],
-            GBNF_MEAL, MEAL_TOKENS, `plan-meal-${d}-${m}`, h);
-            if (text == null) break;
-            const meal = dropJunk({ [type]: parseLLMJSON(text) })[type];
-            if (completeMeal(meal) && !earlier.some(n => sameDish(n, meal.name))) { day[type] = meal; stat.repeatsFixed++; }
-        }
-
-        PLAN_MEALS.forEach(type => {
-            const caps = tidyMeal(day[type]);
-            stat.capped += caps.length;
-            caps.forEach(c => nlog('plan', `Day ${d + 1} ${type}: amount capped ${c}`, null, 'warn'));
-        });
-        stat.seconds = Math.round((Date.now() - started) / 100) / 10;
+        if (PLAN_MEALS.some(t => !day[t])) break;   // cancelled part-way through the day
+        stat.seconds = Math.round((Date.now() - st.current.started) / 100) / 10;
         st.days.push(day);
         st.stats.push(stat);
-        nlog('plan', `Day ${d + 1} done in ${stat.seconds} s: prompt ${promptChars} characters, thermal ${stat.thermal}, junk lines ${stat.junkRows}${stat.retried ? ' (made again)' : ''}, meals remade for repeated ingredients ${stat.mealsRemade}, amounts capped ${stat.capped}, repeated dishes replaced ${stat.repeatsFixed}`,
+        st.current = null;
+        logPlan(`Day ${d + 1} done in ${stat.seconds} s: ${stat.attempts} model calls, problems on first tries ${stat.firstTryProblems}, meals remade ${stat.remade}, may be incomplete ${stat.incomplete}, thermal ${stat.thermal}`,
             PLAN_MEALS.map(t => day[t] && day[t].name));
         h.save(st);
     }
@@ -1248,5 +1333,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { PLAN_LIMITS, DAY_TOKENS, MEAL_TOKENS, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_DAY, GBNF_EDIT, recipeSteps };
+    module.exports = { PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT, recipeSteps };
 }

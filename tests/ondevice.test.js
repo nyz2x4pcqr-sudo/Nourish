@@ -106,11 +106,16 @@ test('near-duplicate dish names are caught', () => {
     assert.ok(!sameDish('Greek Salad', 'Greek Yogurt Parfait'));
 });
 
-test('the plan format keeps each ingredient to one short item and at most 10 per meal', () => {
-    const { GBNF_DAY, GBNF_MEAL } = require('../ondevice.js');
-    assert.match(GBNF_DAY, /item \(","\s*ws item\)\{2,9\}/);
-    assert.match(GBNF_DAY, /item ::= .*\[\^"\\\\\\x7F\\x00-\\x1F,\]\{2,35\}/);
+test('the meal format: one short item per line, up to 14, steps that end with a full stop, servings fixed', () => {
+    const { mealGrammar, GBNF_MEAL, editGrammar } = require('../ondevice.js');
     assert.match(GBNF_MEAL, /^root ::= meal/);
+    const g = mealGrammar(4);
+    assert.match(g, /item \(","\s*ws item\)\{2,13\}/);
+    assert.match(g, /item ::= .*\[\^"\\\\\\x7F\\x00-\\x1F,\]\{2,47\}/);
+    assert.match(g, /step \(","\s*ws step\)\{2,7\}/);
+    assert.match(g, /step ::= .*\{10,198\} \[\.!\] "\\""/);
+    assert.match(g, /"\\"servings\\":" ws "4"/);
+    assert.match(editGrammar(2), /change \(","\s*ws change\)\{0,1\}/);
 });
 
 test('repeated ingredients and steps that name one twice are caught; amounts are capped', () => {
@@ -140,13 +145,14 @@ test('a remade meal cut off at the length limit is not used', () => {
     assert.ok(!completeMeal(null));
 });
 
-test('a whole day at the format\'s maximum fits in the token budget (no cut-off answers)', () => {
-    const { PLAN_LIMITS: L, DAY_TOKENS, MEAL_TOKENS } = require('../ondevice.js');
-    // Longest possible meal in characters: field names and punctuation (~200), the name, every
-    // ingredient and step at full length with quotes, comma and spacing, four 4-digit numbers.
-    const meal = 200 + (L.nameChars + 2) + L.maxItems * (L.itemChars + 5) + L.maxSteps * (L.stepChars + 5) + 4 * 4;
-    const day = 3 * meal + 60;
+test('a meal at the format\'s maximum fits in the token budget (no cut-off answers)', () => {
+    const { PLAN_LIMITS: L, MEAL_TOKENS, EDIT_TOKENS } = require('../ondevice.js');
+    // Longest possible meal in characters: field names and punctuation (~220), the name, every
+    // ingredient and step at full length with quotes, comma and spacing, five 4-digit numbers.
+    const meal = 220 + (L.nameChars + 2) + L.maxItems * (L.itemChars + 5) + L.maxSteps * (L.stepChars + 5) + 5 * 4;
     // Worst case about 2 characters per token (numbers and punctuation; English text is ~4).
-    assert.ok(day / 2 <= DAY_TOKENS, `day worst case ${day} chars ≈ ${day / 2} tokens > ${DAY_TOKENS}`);
     assert.ok(meal / 2 <= MEAL_TOKENS, `meal worst case ${meal} chars ≈ ${meal / 2} tokens > ${MEAL_TOKENS}`);
+    assert.ok((2 * meal + 120) / 2 <= EDIT_TOKENS, `two changed meals don't fit in ${EDIT_TOKENS}`);
+    // …and still leaves room for the prompt in the phone's default 4096-token memory.
+    assert.ok(EDIT_TOKENS <= 4096 - 1000, 'chat changes leave no room for the prompt');
 });

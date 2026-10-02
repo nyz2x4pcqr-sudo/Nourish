@@ -13,6 +13,7 @@ on:
       - "json-repair.js"
       - "grocery.js"
       - "units.js"
+      - "recipes.js"
       - "ondevice.js"
       - "styles.css"
       - "manifest.webmanifest"
@@ -53,7 +54,7 @@ jobs:
           pyinstaller --noconfirm --onefile --console --name Nourish
           --collect-submodules uvicorn --paths backend
           --add-data "index.html;frontend" --add-data "app.js;frontend"
-          --add-data "json-repair.js;frontend" --add-data "grocery.js;frontend" --add-data "units.js;frontend" --add-data "ondevice.js;frontend" --add-data "styles.css;frontend"
+          --add-data "json-repair.js;frontend" --add-data "grocery.js;frontend" --add-data "units.js;frontend" --add-data "recipes.js;frontend" --add-data "ondevice.js;frontend" --add-data "styles.css;frontend"
           --add-data "manifest.webmanifest;frontend" --add-data "icon-192.png;frontend"
           --add-data "icon-512.png;frontend" --add-data "apple-touch-icon.png;frontend"
           backend/nourish_app.py

@@ -80,7 +80,6 @@ const SETTINGS_DEFAULTS = {
     servings: '1',
     skill: 'Intermediate',
     budget: 'Any',
-    units: 'US',
     // recipe sources
     spoonacular_api_key: '',
     web_engine: 'duckduckgo',
@@ -834,7 +833,7 @@ function profileText() {
     if (Number(s.servings) > 1) lines.push(`Cooking for ${s.servings} people: ingredient quantities for ${s.servings} servings; nutrition per person.`);
     lines.push(`Cooking skill: ${s.skill}.`);
     if (s.budget !== 'Any') lines.push(`Budget: ${s.budget}.`);
-    lines.push(`Use ${s.units === 'Metric' ? 'metric units (g, ml)' : 'US units (cups, oz, lb)'}.`);
+    lines.push(`Use ${unitSystem() === 'metric' ? 'metric units (g, ml, °C)' : 'US units (cups, oz, lb, °F)'}.`);
     return lines.join('\n');
 }
 
@@ -848,13 +847,14 @@ function planSummary(withCalories = false) {
         }).join('; ')).join('\n');
 }
 
-const RECIPE_FORMAT = '{"name":"","time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"ingredients":[""],"steps":[""]}';
+// Plans are made one meal at a time (mealSystem and recipeRules in ondevice.js); this prompt is kept
+// with a saved plan as its context (the chat part of it is used).
 
 function planSystemPrompt() {
     return 'You are a meal-planning chef. Return ONLY raw JSON, no markdown, no comments. ' +
         'Write out all 7 days in full, with varied meals (do not repeat a dish more than twice in the week). ' +
-        'Keep each meal to at most 8 ingredients (with quantities) and 5 short steps. ' +
-        `Format: {"days":[{"day":1,"breakfast":${RECIPE_FORMAT},"lunch":{same},"dinner":{same}}]}` +
+        recipeRules(servingsWanted()) + '\n' +
+        `Format: {"days":[{"day":1,"breakfast":${mealFormat(servingsWanted())},"lunch":{same},"dinner":{same}}]}` +
         '\n\nThe person you are planning for:\n' + profileText();
 }
 
@@ -862,8 +862,8 @@ function editSystemPrompt() {
     return 'You are a meal-planning chef editing an existing 7-day plan. Return ONLY raw JSON, no markdown, no comments. ' +
         'Change only the meals the person asks about; leave everything else out of your answer. ' +
         'Days are numbered 1-7 as listed below; "today", "tomorrow" and weekday names refer to those days. ' +
-        'Keep each meal to at most 8 ingredients (with quantities) and 5 short steps. ' +
-        `Format: {"changes":[{"day":1,"meal":"breakfast|lunch|dinner","recipe":${RECIPE_FORMAT}}]}` +
+        'Change at most 2 meals per answer. For each changed meal: ' + recipeRules(servingsWanted()) + '\n' +
+        `Format: {"changes":[{"day":1,"meal":"breakfast|lunch|dinner","recipe":${mealFormat(servingsWanted())}}]}` +
         '\n\nThe person:\n' + profileText() + '\n\n' + planSummary(true);
 }
 
@@ -909,8 +909,10 @@ function setSetting(key, value, { quiet = false } = {}) {
 }
 
 // Imperial (US) or metric. The phone's measurement system decides until it's changed in Settings.
+// Before 0.4.8 the profile had its own Units setting ('US' by default, or 'Metric'); it is read the same way.
 function unitSystem() {
     if (settings.units === 'imperial' || settings.units === 'metric') return settings.units;
+    if (settings.units === 'Metric') return 'metric';
     const phone = typeof specsCache !== 'undefined' && specsCache && specsCache.measurement;
     if (phone === 'imperial' || phone === 'metric') return phone;
     return NourishUnits.defaultSystem((navigator.languages && navigator.languages[0]) || navigator.language);
@@ -1216,10 +1218,9 @@ const SETTINGS_RENDERERS = {
             ], 'Allergies are never included by the AI and are filtered out of recipe searches.'),
             ...settingsGroup('Cooking', [
                 settingsRow('Max cook time', settingsSelect('max_cook_time', { '': 'Any', 15: '15 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour' })),
-                settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6'])),
+                settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6']), { hint: 'Recipes are written for this many people' }),
                 settingsRow('Skill', settingsSelect('skill', ['Beginner', 'Intermediate', 'Advanced'])),
                 settingsRow('Budget', settingsSelect('budget', { Any: 'Any', 'Budget-friendly': 'Budget-friendly', Moderate: 'Moderate', 'No limit': 'No limit' })),
-                settingsRow('Units', settingsSelect('units', { US: 'US (cups, oz)', Metric: 'Metric (g, ml)' })),
             ], 'Your profile is used for every AI meal plan and chat.'),
         ];
     },
@@ -1555,8 +1556,9 @@ function openRecipeSheet(mealType, meal, dayIndex = null) {
     const ingredients = NourishGrocery.dedupeIngredients(meal.ingredients || []).map(line => NourishUnits.formatIngredient(NourishUnits.clampIngredient(line).line, units));
     const n = meal.nutrition;
     const chips = [h('span', { class: 'chip' }, icon('i-clock'), formatMinutes(meal.time_minutes))];
+    if (meal.servings) chips.push(h('span', { class: 'chip' }, icon('i-user'), `Serves ${meal.servings}`));
     if (on('show_nutrition')) {
-        chips.push(h('span', { class: 'chip accent' }, icon('i-flame'), `${formatCalories(n && n.calories)} kcal`));
+        chips.push(h('span', { class: 'chip accent' }, icon('i-flame'), `${formatCalories(n && n.calories)} kcal${meal.servings ? ' per serving' : ''}`));
         if (n && n.protein_g != null) chips.push(h('span', { class: 'chip', text: `Protein ${Math.round(n.protein_g)}g` }));
         if (n && n.carbs_g != null) chips.push(h('span', { class: 'chip', text: `Carbs ${Math.round(n.carbs_g)}g` }));
         if (n && n.fat_g != null) chips.push(h('span', { class: 'chip', text: `Fat ${Math.round(n.fat_g)}g` }));
@@ -1571,7 +1573,16 @@ function openRecipeSheet(mealType, meal, dayIndex = null) {
         h('div', { class: 'recipe-header' },
             h('div', { class: 'meal-type', text: where }),
             h('h2', { class: 'recipe-name', text: meal.name }),
-            h('div', { class: 'recipe-meta' }, chips)),
+            h('div', { class: 'recipe-meta' }, chips),
+            meal.servings && on('show_nutrition') && n ? h('p', { class: 'recipe-note', text: `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null),
+        Array.isArray(meal.incomplete) && meal.incomplete.length ? h('div', { class: 'recipe-warning', role: 'note' },
+            h('div', { class: 'recipe-warning-title', text: 'This recipe may be incomplete' }),
+            h('p', { text: 'The AI tried 3 times but this is the best it wrote. What\'s still wrong:' }),
+            h('ul', {}, meal.incomplete.slice(0, 6).map(p => h('li', { text: p }))),
+            dayIndex != null ? h('button', {
+                type: 'button', class: 'btn btn-primary', disabled: !!planJob,
+                onclick: () => { closeRecipeSheet(); remakeMeal(dayIndex, mealType, 'retry'); },
+            }, icon('i-refresh'), 'Try again') : null) : null,
         h('div', { class: 'recipe-actions' },
             dayIndex != null ? h('button', {
                 type: 'button', class: 'btn btn-secondary', disabled: !!planJob,
@@ -1713,7 +1724,8 @@ function mealCard(type, meal, dayIndex) {
             h('div', { class: 'meal-name', text: meal.name }),
             h('div', { class: 'meal-badges' },
                 h('span', { class: 'chip' }, icon('i-clock'), formatMinutes(meal.time_minutes)),
-                on('show_nutrition') ? h('span', { class: 'chip' }, icon('i-flame'), `${formatCalories(meal.nutrition && meal.nutrition.calories)} kcal`) : null)),
+                on('show_nutrition') ? h('span', { class: 'chip' }, icon('i-flame'), `${formatCalories(meal.nutrition && meal.nutrition.calories)} kcal`) : null,
+                meal.incomplete ? h('span', { class: 'chip warn', text: 'May be incomplete' }) : null)),
         icon('i-chevron', 'chev'));
 }
 
@@ -1742,7 +1754,8 @@ function updatePlanScreen() {
                 h('span', { class: `dot art-${t}` }, icon(MEAL_ICONS[t])),
                 h('span', { class: 'plan-meal-body' },
                     h('span', { class: 'plan-meal-type', text: MEAL_LABELS[t] }),
-                    h('span', { class: 'plan-meal-name', text: day[t].name })),
+                    h('span', { class: 'plan-meal-name', text: day[t].name }),
+                    day[t].incomplete ? h('span', { class: 'plan-meal-warn', text: 'May be incomplete · tap to try again' }) : null),
                 h('span', { class: 'plan-meal-meta', text: on('show_nutrition') ? `${formatMinutes(day[t].time_minutes)} · ${formatCalories(day[t].nutrition && day[t].nutrition.calories)} kcal` : formatMinutes(day[t].time_minutes) }))
             : h('button', { type: 'button', class: 'plan-meal empty', 'data-meal-type': t, onclick: () => showImportSheet(idx, t) },
                 h('span', { class: `dot art-${t}` }, icon('i-plus')),
@@ -1954,11 +1967,14 @@ function normalizeMeal(m) {
     const ingredients = cleanIngredients(toStringList(m.ingredients), m.name);
     return Object.assign({
         name: String(m.name).trim(),
+        servings: toNumber(m.servings) >= 1 ? Math.round(toNumber(m.servings)) : undefined,
         time_minutes: toNumber(m.time_minutes),
         nutrition: n ? { calories: toNumber(n.calories), protein_g: toNumber(n.protein_g), carbs_g: toNumber(n.carbs_g), fat_g: toNumber(n.fat_g) } : null,
         ingredients,
         amounts: ingredientAmounts(ingredients),
         steps: toStringList(m.steps),
+        // What the recipe checks (recipes.js) still found wrong after the remakes; shown on the recipe.
+        incomplete: Array.isArray(m.incomplete) && m.incomplete.length ? m.incomplete.map(String).slice(0, 12) : undefined,
     }, safeSource(m));
 }
 
@@ -2065,13 +2081,85 @@ async function generatePlanFromChat() {
     await runPlanJob({ kind: 'plan', origin: 'chat', messages: chatPlanMessages() });
 }
 
-async function swapMeal(dayIndex, mealType) {
-    if (planJob) { showToast('The chef is already working on your plan'); return; }
+function swapMeal(dayIndex, mealType) {
+    return remakeMeal(dayIndex, mealType, 'swap');
+}
+
+// One meal of the plan made again by the AI, checked like a plan's meals (made again up to 2 times
+// while something's wrong). mode 'swap': a different dish; 'retry': the same dish, written out properly.
+// Returns the model's result ({ meal, problems, attempts }) or null when cancelled.
+async function makeMealFor(dayIndex, mealType, mode, onAttempt) {
+    const onPhone = settings.active_provider === 'local';
     const current = daysData[dayIndex] && daysData[dayIndex][mealType];
-    await runPlanJob({ kind: 'edit', origin: 'recipe', messages: [
-        { role: 'system', content: editSystemPrompt() },
-        { role: 'user', content: `Replace ${MEAL_LABELS[mealType].toLowerCase()} on Day ${dayIndex + 1}${current ? ` ("${current.name}")` : ''} with a different dish that fits my profile and the rest of that day.` },
-    ] });
+    const servings = servingsWanted();
+    const others = [];
+    daysData.forEach((d, i) => MEAL_TYPES.forEach(t => { if (d && d[t] && !(i === dayIndex && t === mealType)) others.push(d[t].name); }));
+    const sameDay = MEAL_TYPES.filter(t => t !== mealType).map(t => daysData[dayIndex] && daysData[dayIndex][t] && daysData[dayIndex][t].name).filter(Boolean);
+    const retry = mode === 'retry' && current;
+    const ask = mealAsk({ type: mealType, d: dayIndex, dish: retry ? current.name : '',
+        recent: retry ? [] : sameDay.concat(current ? [current.name] : []),
+        extra: !retry && current ? `It must not be ${current.name} or anything like it.` : '' });
+    const isCancelled = () => localPlanCancelled;
+    const run = onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled }) : aiRunner();
+    return makeMeal({ type: mealType, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null,
+        earlier: retry ? others : others.concat(current ? [current.name] : []), id: `${mode}-${dayIndex}-${mealType}`,
+        label: `${dayName(dayIndex)} ${mealType}` }, run, { onAttempt, isCancelled });
+}
+
+// The Swap and Try again buttons on a recipe.
+async function remakeMeal(dayIndex, mealType, mode) {
+    if (planJob) { showToast('The chef is already working on your plan'); return; }
+    const onPhone = settings.active_provider === 'local';
+    if (onPhone && !settings.local_model) { showToast('Download a model first: Settings → AI model.'); return; }
+    const label = `${isToday(dayIndex) ? 'today\'s' : dayName(dayIndex) + '\'s'} ${MEAL_LABELS[mealType].toLowerCase()}`;
+    const verb = mode === 'retry' ? 'Remaking' : 'Swapping';
+    localPlanCancelled = false;
+    planJob = { id: 'stepwise', started: Date.now(), provider: settings.active_provider, kind: 'edit', origin: 'recipe', local: onPhone };
+    nlog('plan', `${verb} ${label} with ${PROVIDERS[settings.active_provider]}`);
+    if (onPhone) nativeCall('keepAwake', { on: true }).catch(() => {});
+    try {
+        const r = await makeMealFor(dayIndex, mealType, mode, a => showJobBar('busy', `${verb} ${label}${a ? ` · try ${a + 1} of 3` : ''}…`));
+        if (!r) { showJobBar(null); showToast('Cancelled', false); return; }
+        if (!r.meal) throw new Error(r.problems.slice(0, 2).join('; ') || 'no usable answer');
+        reportCaps = true;
+        try { daysData[dayIndex][mealType] = normalizeMeal(r.meal); } finally { reportCaps = false; }
+        changed('plan');
+        updateTodayScreen();
+        updatePlanScreen();
+        updateGroceryScreen();
+        showJobBar(null);
+        showToast(r.problems.length ? `${r.meal.name}: may be incomplete` : `${mode === 'retry' ? 'Remade' : 'Swapped in'}: ${r.meal.name}`, !!r.problems.length);
+        if (openRecipe && openRecipe.dayIndex === dayIndex && openRecipe.mealType === mealType) openRecipeSheet(mealType, daysData[dayIndex][mealType], dayIndex);
+    } catch (err) {
+        nlog('plan', `${verb} failed: ${err.message}`, err.stack, 'error');
+        showJobBar('error', `Couldn't ${mode === 'retry' ? 'remake' : 'swap'} the meal: ${err.message}`);
+    } finally {
+        planJob = null;
+        if (onPhone) nativeCall('keepAwake', { on: false }).catch(() => {});
+    }
+}
+
+// Meals the chef changed from the chat get the same checks as a plan's; one that fails is written
+// out again (the same dish), up to 3 times, and kept with a "may be incomplete" note if still wrong.
+async function checkChangedMeals(changes) {
+    for (const c of changes) {
+        const meal = daysData[c.day - 1] && daysData[c.day - 1][c.meal];
+        if (!meal || localPlanCancelled) continue;
+        const problems = allProblems(meal, c.meal, [], false);
+        if (!problems.length) continue;
+        nlog('plan', `Day ${c.day} ${c.meal} "${meal.name}" from the chat has ${problems.length} problem(s); writing it out again`, problems, 'warn');
+        const r = await makeMealFor(c.day - 1, c.meal, 'retry', a => showJobBar('busy', `Checking ${dayName(c.day - 1)} ${c.meal} · try ${a + 1} of 3…`));
+        if (r && r.meal) {
+            daysData[c.day - 1][c.meal] = normalizeMeal(r.meal);
+            c.name = r.meal.name;
+        } else if (r) {
+            meal.incomplete = problems;
+        }
+    }
+    changed('plan');
+    updateTodayScreen();
+    updatePlanScreen();
+    updateGroceryScreen();
 }
 
 // Starts (or, after a reload, resumes) an AI job that makes or edits the plan, and applies the result.
@@ -2084,37 +2172,41 @@ async function runPlanJob(job, resume = null) {
     try {
         let parsed;
         const onPhone = !resume && settings.active_provider === 'local';
-        if (onPhone && kind === 'plan') {
-            // On the phone: one day at a time, each forced into the right format. Each finished day is
-            // saved (nourish_plan_progress), so an interrupted plan continues where it stopped.
-            if (!settings.local_model) throw new Error('Download a model first: Settings → AI model.');
+        if (!resume && kind === 'plan') {
+            // One meal at a time, with every AI: each recipe is checked and made again (up to 2 times)
+            // when something's wrong (ondevice.js). Each finished meal is saved (nourish_plan_progress),
+            // so an interrupted plan continues where it stopped.
+            if (onPhone && !settings.local_model) throw new Error('Download a model first: Settings → AI model.');
             localPlanCancelled = false;
             const saved = job.continueSaved ? loadJSON(PLAN_PROGRESS_KEY, null) : null;
             const state = saved && Array.isArray(saved.days) ? saved : { days: [], messages: job.messages, origin, started: Date.now() };
             if (!saved) store(PLAN_PROGRESS_KEY, state);
             const resumeFrom = state.days.length;
-            planJob = { id: 'on-device', started: Date.now(), provider: 'local', kind, origin, local: true };
+            planJob = { id: 'stepwise', started: Date.now(), provider: settings.active_provider, kind, origin, local: onPhone };
             if (origin === 'chat') { chatBusy = true; chatBusyLabel = 'Cooking your plan…'; chatError = ''; }
             renderChat();
-            if (state.days.length) nlog('plan', `Resuming from day ${state.days.length + 1} of 7 (${state.days.length} saved)`);
-            nativeCall('keepAwake', { on: true }).catch(() => {});   // once for the whole plan
-            nativeCall('notify', { permission: true }).catch(() => {});
+            if (state.days.length || state.current) nlog('plan', `Resuming from day ${state.days.length + 1} of 7 (${state.days.length} days saved)`);
+            if (onPhone) {
+                nativeCall('keepAwake', { on: true }).catch(() => {});   // once for the whole plan
+                nativeCall('notify', { permission: true }).catch(() => {});
+            }
             const busy = text => { showJobBar('busy', text); if (origin === 'chat') { chatBusyLabel = text; renderChat(); } };
             try {
                 parsed = await generatePlanOnDevice(state.messages || job.messages, {
-                    onDay: d => busy(saved && d === resumeFrom ? `Resuming from day ${d + 1} of 7…` : `Cooking day ${d + 1} of 7…`),
+                    onDay: d => { if (saved && d === resumeFrom) busy(`Resuming from day ${d + 1} of 7…`); },
+                    onMeal: (d, type, attempt) => busy(`Day ${d + 1} of 7 · ${MEAL_LABELS[type]}${attempt ? ` · remaking (try ${attempt + 1} of 3)` : ''}…`),
                     onStatus: busy,
                     isCancelled: () => localPlanCancelled,
                     save: st => store(PLAN_PROGRESS_KEY, st),
-                }, state);
+                }, state, onPhone ? undefined : aiRunner());
             } finally {
-                nativeCall('keepAwake', { on: false }).catch(() => {});
+                if (onPhone) nativeCall('keepAwake', { on: false }).catch(() => {});
             }
             if (!parsed.days.length) { const e = new Error('Cancelled'); e.cancelled = true; throw e; }
             const times = parsed.stats.map(x => `${x.seconds}s`).join(', ');
-            if (times) nlog('plan', `Seconds per day: ${times}; prompt sizes: ${parsed.stats.map(x => x.promptChars).join(', ')} characters`);
+            if (times) nlog('plan', `Seconds per day: ${times}; model calls per day: ${parsed.stats.map(x => x.attempts).join(', ')}`);
             unstore(PLAN_PROGRESS_KEY);
-            if (document.visibilityState !== 'visible') {
+            if (onPhone && document.visibilityState !== 'visible') {
                 nativeCall('notify', { title: 'Your meal plan is ready', body: `${parsed.days.length} days are waiting in Nourish.` }).catch(() => {});
             }
         } else {
@@ -2122,8 +2214,8 @@ async function runPlanJob(job, resume = null) {
                 planJob = resume;
             } else {
                 showJobBar('busy', 'Preparing…');
-                const req = await buildAIRequest(job.messages, kind === 'edit' ? { maxTokens: Math.min(Number(settings.max_tokens) || 8000, onPhone ? 1600 : 4000) } : {});
-                if (onPhone) req.grammar = GBNF_EDIT;
+                const req = await buildAIRequest(job.messages, kind === 'edit' ? { maxTokens: onPhone ? EDIT_TOKENS : Number(settings.max_tokens) || 8000 } : {});
+                if (onPhone) req.grammar = editGrammar(servingsWanted());
                 planJob = { id: await startJob(req), started: Date.now(), provider: req.provider, kind, origin, local: onPhone };
                 if (!isLocalMode()) store('nourish_pending_plan', planJob);
             }
@@ -2135,6 +2227,11 @@ async function runPlanJob(job, resume = null) {
         }
         if (kind === 'edit') {
             const result = applyEdits(parsed);
+            if (!result.replacedPlan) {
+                planJob = Object.assign({}, planJob, { id: 'stepwise', local: onPhone });
+                localPlanCancelled = false;
+                await checkChangedMeals(result.changes);
+            }
             const summary = result.replacedPlan ? 'I rewrote your plan.' : result.changes.map(c => `Day ${c.day} (${dayName(c.day - 1)}) ${c.meal}: ${c.name}`).join('\n');
             if (origin === 'chat') {
                 addAssistantMessage(result.replacedPlan
@@ -2179,10 +2276,29 @@ async function runPlanJob(job, resume = null) {
 let localPlanCancelled = false;
 const PLAN_PROGRESS_KEY = 'nourish_plan_progress';
 
+// One model call for a plan with a PC or cloud AI (the phone's own model uses phoneRunner in ondevice.js).
+// Returns the text, or null when cancelled.
+function aiRunner() {
+    return async msgs => {
+        if (localPlanCancelled) return null;
+        const req = await buildAIRequest(msgs);
+        const id = await startJob(req);
+        if (planJob) planJob.currentJob = id;
+        try {
+            return extractText(req.provider, await waitForJob(id));
+        } catch (e) {
+            if (e.cancelled || localPlanCancelled) return null;
+            throw e;
+        } finally {
+            if (planJob) planJob.currentJob = null;
+        }
+    };
+}
+
 // An on-phone plan that stopped part-way (the app was closed, iOS stopped it, the phone got too hot)
 // continues by itself the next time Nourish is open.
 function resumeLocalPlan() {
-    if (!isLocalMode() || planJob || settings.active_provider !== 'local') return;
+    if (planJob) return;
     const saved = loadJSON(PLAN_PROGRESS_KEY, null);
     if (!saved || saved.failed || !Array.isArray(saved.days) || saved.days.length >= 7 || !Array.isArray(saved.messages)) return;
     nlog('plan', `Found a plan stopped at day ${saved.days.length} of 7; continuing`);
@@ -2202,17 +2318,19 @@ function waitToCoolThenResume() {
 }
 async function cancelPlan() {
     if (!planJob) return;
-    if (planJob.id === 'on-device') {
-        // Stop after the day being made; days already made are kept.
+    if (planJob.id === 'stepwise') {
+        // Stops the meal being made; meals already made are kept.
         localPlanCancelled = true;
-        nativeCall('cancelGenerate', {}).catch(() => {});
+        if (planJob.local) nativeCall('cancelGenerate', {}).catch(() => {});
+        else if (planJob.currentJob) api(`/api/jobs/${planJob.currentJob}`, { method: 'DELETE' }).catch(() => {});
         return;
     }
     try { await api(`/api/jobs/${planJob.id}`, { method: 'DELETE' }); } catch (e) { /* the poll will report it */ }
 }
 
 function resumePendingJobs() {
-    if (isLocalMode()) { resumeLocalPlan(); return; }   // other on-device requests don't survive a restart
+    resumeLocalPlan();   // a plan made meal by meal continues from its last saved meal
+    if (isLocalMode()) return;   // other on-device requests don't survive a restart
     const plan = loadJSON('nourish_pending_plan', null);
     if (plan && plan.id && !planJob) runPlanJob(null, plan);
     const chat = loadJSON('nourish_pending_chat', null);

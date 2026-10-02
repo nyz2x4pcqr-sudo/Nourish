@@ -85,7 +85,7 @@ class ApiTest(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("<title>", r.text)
-        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js"):
+        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 200, f)
         for f in (".env", "README.md", "main.py", "nourish.log", "..%2Fbackend%2F.env"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 404, f)

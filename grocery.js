@@ -178,7 +178,7 @@
         });
     }
 
-    const api = { junkReason, parseIngredient, ingredientKey, dedupeIngredients, buildList, categorize, CATEGORIES };
+    const api = { junkReason, parseIngredient, ingredientKey, dedupeIngredients, buildList, categorize, singular, CATEGORIES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.NourishGrocery = api;
 })(typeof window !== 'undefined' ? window : this);
