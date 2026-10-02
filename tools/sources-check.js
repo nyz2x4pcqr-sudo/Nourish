@@ -67,6 +67,15 @@ const CANDIDATES = [
     ['isabeleats', 'Isabel Eats', 'isabeleats.com', 'world', 0, ''],
 ];
 const QUERY = 'chicken';
+// The owners' own terms pages, for sites whose terms live on the parent company's site.
+const TERMS_OF = {
+    allrecipes: 'https://www.dotdashmeredith.com/brands-termsofservice', seriouseats: 'https://www.dotdashmeredith.com/brands-termsofservice',
+    simplyrecipes: 'https://www.dotdashmeredith.com/brands-termsofservice', eatingwell: 'https://www.dotdashmeredith.com/brands-termsofservice',
+    epicurious: 'https://www.condenast.com/user-agreement', tasty: 'https://www.buzzfeed.com/about/useragreement',
+    bbcgoodfood: 'https://www.bbcgoodfood.com/terms-and-conditions', food52: 'https://food52.com/terms', foodnetwork: 'https://www.foodnetwork.com/terms-of-use',
+    nhs: 'https://www.nhs.uk/our-policies/terms-and-conditions/', myplate: 'https://www.myplate.gov/policies', marleyspoon: 'https://marleyspoon.com/terms',
+    dinnerly: 'https://dinnerly.com/terms', gousto: 'https://www.gousto.co.uk/legal/terms', recipetineats: 'https://www.recipetineats.com/terms-of-use/',
+};
 const TERMS_PATHS = ['/terms', '/terms-of-use', '/terms-of-service', '/terms-and-conditions', '/legal/terms', '/legal', '/about/terms-of-use', '/termsofuse', '/legal/terms-of-use'];
 // A ban on robots reading the site (not, say, an "automatic telephone dialing system").
 const TERMS_BAN = /(scrap(e|er|ers|ing)\b|crawl(er|ers|ing)\b|spiders?\b|data[- ]mining|robots?\b(?! ?\.txt)|automated (means|software|process(es)?|tools?) (to|that|for)? ?(access|collect|copy|extract|scrape|monitor))/i;
@@ -145,7 +154,7 @@ async function checkSite([id, name, domain, group, healthy, page]) {
     const home = await get(base + '/', { browser: true, timeout: 15000 });
     const termLinks = [...String(home.body).matchAll(/href=["']([^"'#]+)["'][^>]*>([^<]{0,60})</g)]
         .filter(m => /terms|conditions|legal|tos\b/i.test(m[1] + ' ' + m[2]) && !/privacy|cookie/i.test(m[1] + m[2])).map(m => { try { return new URL(m[1], base).href; } catch (e) { return null; } }).filter(Boolean);
-    for (const p of [...new Set(termLinks)].slice(0, 2).concat(TERMS_PATHS.map(x => base + x))) {
+    for (const p of (TERMS_OF[id] ? [TERMS_OF[id]] : []).concat([...new Set(termLinks)].slice(0, 2), TERMS_PATHS.map(x => base + x))) {
         const t = await get(p, { browser: true, timeout: 12000 });
         if (t.status === 200 && /terms|conditions/i.test(t.body)) {
             const text = t.body.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
@@ -181,7 +190,7 @@ async function checkSite([id, name, domain, group, healthy, page]) {
             for (const cm of childMaps.slice(0, 3)) {
                 if (pages.length) break;
                 const s2 = await get(cm, { max: 3_000_000 });
-                pages = [...s2.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim()).filter(l => !/\.xml/.test(l) && /recipe/i.test(l) && !ROUNDUP.test(l));
+                pages = [...s2.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim()).filter(l => !/\.xml/.test(l) && (recipeMaps.length || /recipe|-/i.test(l)) && !ROUNDUP.test(l) && new URL(l).pathname.length > 12);
             }
             if (pages.length) { pages = pages.filter(p => !ROUNDUP.test(p)); urls.push(...pages.filter(p => p.includes(QUERY)).slice(0, 6)); if (!urls.length) urls.push(...pages.slice(0, 6)); v.search = 'sitemap'; v.sitemap = recipeMaps[0] || base + sm; v.sitemapPages = pages.length; break; }
         }
@@ -193,7 +202,8 @@ async function checkSite([id, name, domain, group, healthy, page]) {
         let p = await get(u, { browser: true });
         let via = 'direct';
         if (p.status !== 200) { v.lastStatus = p.status || p.error;   // many sites block cloud servers (not phones at home): check the Internet Archive's copy
-            const a = await get(`https://web.archive.org/web/2025id_/${u}`, { timeout: 30000 });
+            let a = await get(`https://web.archive.org/web/2025id_/${u}`, { timeout: 30000 });
+            if (a.status !== 200) a = await get(`https://web.archive.org/web/2024id_/${u}`, { timeout: 30000 });
             if (a.status === 200) { p = a; via = 'archive (the site blocks cloud servers: ' + v.lastStatus + ')'; }
         }
         const rec = p.status === 200 ? jsonLdRecipe(p.body) : null;

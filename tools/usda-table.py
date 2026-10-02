@@ -11,7 +11,7 @@ URL = "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_sr_legacy_food_csv
 # key: (USDA description to match, extra names people write in recipes)
 FOODS = {
     # poultry, meat, fish
-    "chicken breast": ("Chicken, broilers or fryers, breast, meat only, raw", ["chicken breasts", "boneless skinless chicken breast", "chicken breast fillet"]),
+    "chicken breast": ("Chicken, broiler or fryers, breast, skinless, boneless, meat only, raw", ["chicken breasts", "boneless skinless chicken breast", "chicken breast fillet"]),
     "chicken thigh": ("Chicken, broilers or fryers, dark meat, thigh, meat only, raw", ["chicken thighs", "boneless chicken thigh"]),
     "chicken": ("Chicken, broilers or fryers, meat and skin, raw", ["whole chicken", "chicken pieces", "chicken drumsticks", "chicken wings"]),
     "ground chicken": ("Chicken, ground, raw", ["minced chicken"]),
@@ -28,7 +28,7 @@ FOODS = {
     "bacon": ("Pork, cured, bacon, unprepared", ["streaky bacon", "rashers"]),
     "ham": ("Ham, sliced, regular (approximately 11% fat)", ["deli ham"]),
     "sausage": ("Sausage, Italian, pork, raw", ["sausages", "italian sausage"]),
-    "chorizo": ("Chorizo, pork and beef", []),
+    "chorizo": ("Sausage, pork, chorizo, link or ground, raw", []),
     "lamb": ("Lamb, domestic, leg, whole (shank and sirloin), separable lean and fat, trimmed to 1/4\" fat, choice, raw", ["leg of lamb", "lamb leg"]),
     "lamb chop": ("Lamb, domestic, loin, separable lean and fat, trimmed to 1/4\" fat, choice, raw", ["lamb chops", "lamb loin"]),
     "ground lamb": ("Lamb, ground, raw", ["minced lamb", "lamb mince"]),
@@ -54,7 +54,7 @@ FOODS = {
     "whole milk": ("Milk, whole, 3.25% milkfat, with added vitamin D", []),
     "skim milk": ("Milk, nonfat, fluid, with added vitamin A and vitamin D (fat free or skim)", ["nonfat milk", "fat free milk"]),
     "almond milk": ("Beverages, almond milk, unsweetened, shelf stable", ["unsweetened almond milk"]),
-    "oat milk": ("Beverages, OATMEAL, unsweetened", []),
+    "oat milk": ("(manual)", []),
     "soy milk": ("Soymilk, original and vanilla, unfortified", []),
     "coconut milk": ("Nuts, coconut milk, canned (liquid expressed from grated meat and water)", ["canned coconut milk"]),
     "light coconut milk": ("Beverages, coconut milk, sweetened, fortified with calcium, vitamins A, B12, D2", []),
@@ -62,7 +62,7 @@ FOODS = {
     "half and half": ("Cream, fluid, half and half", []),
     "sour cream": ("Cream, sour, cultured", []),
     "greek yogurt": ("Yogurt, Greek, plain, nonfat", ["nonfat greek yogurt", "plain greek yogurt", "0% greek yogurt"]),
-    "yogurt": ("Yogurt, plain, low fat, 12 grams protein per 8 ounce", ["plain yogurt", "natural yogurt"]),
+    "yogurt": ("Yogurt, plain, low fat", ["plain yogurt", "natural yogurt"]),
     "butter": ("Butter, salted", ["unsalted butter"]),
     "ghee": ("Butter oil, anhydrous", ["clarified butter"]),
     "cheddar": ("Cheese, cheddar", ["cheddar cheese", "shredded cheddar", "cheese"]),
@@ -105,7 +105,7 @@ FOODS = {
     "tortilla": ("Tortillas, ready-to-bake or -fry, flour, refrigerated", ["flour tortilla", "flour tortillas", "tortillas", "wrap", "wraps"]),
     "corn tortilla": ("Tortillas, ready-to-bake or -fry, corn", ["corn tortillas"]),
     "pita": ("Bread, pita, whole-wheat", ["pita bread", "flatbread", "naan"]),
-    "english muffin": ("English muffins, whole-wheat", []),
+    "english muffin": ("Muffins, English, whole-wheat", []),
     "bagel": ("Bagels, plain, enriched, with calcium propionate (includes onion, poppy, sesame)", []),
     "granola": ("Cereals ready-to-eat, granola, homemade", []),
     # legumes
@@ -308,14 +308,16 @@ def main():
             if pre:
                 fid = pre[0][2]
         if not fid:
-            head = want.split(",")[0]
-            words = [w for w in re.split(r"[^a-z0-9%]+", want) if w]
-            cands = [(difflib.SequenceMatcher(None, want, d).ratio() + 0.2 * sum(w in d for w in words) / len(words), d, i)
+            head = want.split(",")[0].rstrip("s")
+            stem = lambda w: w[:-1] if len(w) > 4 and w.endswith("s") else w
+            words = [stem(w) for w in re.split(r"[^a-z0-9%]+", want) if w and w not in ("or", "and", "with", "the")]
+            # Most of the description's words present, then closest wording, then shortest.
+            cands = [(sum(w in d for w in words) / len(words), difflib.SequenceMatcher(None, want, d).ratio(), -len(d), d, i)
                      for d, i in by_desc.items() if d.startswith(head)]
             if cands:
                 best = max(cands)
-                fid = best[2]
-                sys.stderr.write(f"approx {key!r}: {desc!r} -> {best[1]!r}\n")
+                fid = best[4]
+                sys.stderr.write(f"approx {key!r}: {desc!r} -> {best[3]!r} ({best[0]:.2f})\n")
         if not fid:
             missing.append(key)
             continue
