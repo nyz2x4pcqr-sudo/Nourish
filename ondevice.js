@@ -148,6 +148,7 @@ async function localApi(path, { method = 'GET', body } = {}) {
     if (route === '/api/recipes/spoonacular') return localSpoonacular(body);
     if (route === '/api/recipes/web') return localWebSearch(body);
     if (route === '/api/recipes/import') return localImport(body);
+    if (route === '/api/web/fetch') return localFetchPage(body);
     if (route === '/api/update/check') return localUpdateCheck(params.prereleases === 'true');
     const err = new Error('That needs Nourish on your PC (Settings → Server & devices).');
     err.status = 501;
@@ -516,6 +517,89 @@ async function generatePlanOnDevice(messages, hooks, state, run) {
     return { days: st.days, stats: st.stats };
 }
 
+// === RECIPES FROM TEXT (imported pages, captions, pasted text, screenshots) ===
+// The AI copies the recipe out of the text; it doesn't write one. On the phone the answer is forced
+// into this format, sized so the source text (IMPORT_TEXT_CHARS) and the longest answer
+// (IMPORT_TOKENS) fit the phone's 4096-token memory (tests/ondevice.test.js checks the answer side).
+const IMPORT_LIMITS = { nameChars: 100, itemChars: 90, maxItems: 20, stepChars: 250, maxSteps: 12 };
+const IMPORT_TOKENS = 2700;
+const IMPORT_TEXT_CHARS = 3000;
+const IMPORT_FORMAT = '{"found":true,"name":"","servings":0,"ingredients":[""],"steps":[""],"time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"nutrition_estimated":false}';
+function importGrammar() {
+    const I = IMPORT_LIMITS;
+    return String.raw`root ::= "{" ws "\"found\":" ws ("false" ws "}" | "true" "," ws recipe)
+recipe ::= "\"name\":" ws name "," ws "\"servings\":" ws int "," ws "\"ingredients\":" ws "[" ws item ("," ws item){0,${I.maxItems - 1}} ws "]" "," ws "\"steps\":" ws "[" ws step ("," ws step){0,${I.maxSteps - 1}} ws "]" "," ws "\"time_minutes\":" ws int "," ws "\"nutrition\":" ws nutrition "," ws "\"nutrition_estimated\":" ws ("true" | "false") ws "}"
+nutrition ::= "{" ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}"
+name ::= "\"" [^"\\\x7F\x00-\x1F]{3,${I.nameChars}} "\""
+item ::= "\"" [^"\\\x7F\x00-\x1F]{2,${I.itemChars}} "\""
+step ::= "\"" [^"\\\x7F\x00-\x1F]{5,${I.stepChars}} "\""
+int ::= "0" | [1-9] [0-9]{0,3}
+ws ::= [ \n]{0,2}`;
+}
+function nutritionGrammar() {
+    return String.raw`root ::= "{" ws "\"servings\":" ws int "," ws "\"calories\":" ws int "," ws "\"protein_g\":" ws int "," ws "\"carbs_g\":" ws int "," ws "\"fat_g\":" ws int ws "}"
+int ::= "0" | [1-9] [0-9]{0,3}
+ws ::= [ \n]{0,2}`;
+}
+
+function parseAnswer(text) {
+    try { return (typeof parseLLMJSON === 'function' ? parseLLMJSON : require('./json-repair.js').parseLLMJSON)(text); } catch (e) { return null; }
+}
+const toLines = v => (Array.isArray(v) ? v : typeof v === 'string' ? v.split('\n') : [])
+    .map(x => (typeof x === 'string' ? x : (x && (x.text || x.name)) || '')).map(x => String(x).replace(/^\s*(\d+[.)]|[-•*])\s*/, '').trim()).filter(Boolean);
+
+// The recipe in `text`, or null when the text has none. ask(messages, { grammar, maxTokens }) makes
+// the model call (the app's chosen AI). image: { type, data (base64) } for a screenshot, sent to a
+// cloud AI that can see images (Claude, OpenAI).
+async function extractRecipe(text, { url = '', site = '', kind = 'page', image = null, provider = '' } = {}, ask, { onPhone = false } = {}) {
+    const source = String(text || '').slice(0, onPhone ? IMPORT_TEXT_CHARS : 15000);
+    const system = 'You copy recipes out of text into JSON. Use ONLY what the text says: copy every ingredient with its amount, and every step in order. ' +
+        'You may tidy the wording, split long steps and leave out chatter, but never invent ingredients, amounts or steps. ' +
+        'If there is no recipe (no ingredient list, or no way to make it), answer {"found":false}. ' +
+        'servings and time_minutes: from the text, or your best estimate. nutrition is per serving: copy it if the text gives it; ' +
+        'otherwise estimate it, make calories equal protein_g×4 + carbs_g×4 + fat_g×9, and set nutrition_estimated to true. ' +
+        'Reply with ONLY raw JSON in this format: ' + IMPORT_FORMAT;
+    const label = { page: 'Text of the web page', caption: 'Text of the post', paste: 'Text the person pasted', screenshot: 'Text read from a screenshot' }[kind] || 'Text';
+    const intro = `${site || url ? `Source: ${[site, url].filter(Boolean).join(' – ')}\n\n` : ''}`;
+    let content = image ? `${intro}The recipe is in this screenshot.${source ? `\n\nText read from it:\n"""\n${source}\n"""` : ''}` : `${intro}${label}:\n"""\n${source}\n"""`;
+    if (image) {
+        content = provider === 'claude'
+            ? [{ type: 'image', source: { type: 'base64', media_type: image.type, data: image.data } }, { type: 'text', text: content }]
+            : [{ type: 'image_url', image_url: { url: `data:${image.type};base64,${image.data}` } }, { type: 'text', text: content }];
+    }
+    const answer = await ask([{ role: 'system', content: system }, { role: 'user', content }], { grammar: onPhone ? importGrammar() : null, maxTokens: IMPORT_TOKENS });
+    if (answer == null) return null;
+    let r = parseAnswer(answer);
+    if (r && r.recipe && !r.name) r = Object.assign({ found: r.found }, r.recipe);
+    if (!r || r.found === false || !r.name) return null;
+    const ingredients = toLines(r.ingredients);
+    const steps = toLines(r.steps);
+    if (!ingredients.length && !steps.length) return null;
+    const n = r.nutrition && typeof r.nutrition === 'object' ? r.nutrition : null;
+    const recipe = {
+        name: String(r.name).trim().slice(0, 150), servings: Number(r.servings) >= 1 && Number(r.servings) <= 50 ? Math.round(Number(r.servings)) : null,
+        ingredients, steps, time_minutes: Number(r.time_minutes) > 0 && Number(r.time_minutes) < 2880 ? Math.round(Number(r.time_minutes)) : null,
+        nutrition: n && Number(n.calories) > 0 ? { calories: Number(n.calories), protein_g: Number(n.protein_g) || 0, carbs_g: Number(n.carbs_g) || 0, fat_g: Number(n.fat_g) || 0 } : null,
+        nutrition_estimated: !!(n && r.nutrition_estimated !== false),
+    };
+    if (recipe.nutrition && recipe.nutrition_estimated && !Recipes.macrosMatch(recipe.nutrition)) Recipes.fixCalories(recipe);
+    return recipe;
+}
+
+// Nutrition per serving for a recipe that came without it, marked as an estimate.
+async function estimateNutrition(recipe, ask, { onPhone = false } = {}) {
+    const answer = await ask([
+        { role: 'system', content: 'You estimate nutrition. Reply with ONLY raw JSON: {"servings":0,"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}. ' +
+            'Values are per serving. calories must equal protein_g×4 + carbs_g×4 + fat_g×9. servings: as given, or your best estimate.' },
+        { role: 'user', content: `Recipe: ${recipe.name}${recipe.servings ? `\nServings: ${recipe.servings}` : ''}\nIngredients:\n${(recipe.ingredients || []).slice(0, 30).join('\n')}` },
+    ], { grammar: onPhone ? nutritionGrammar() : null, maxTokens: 200 });
+    const r = answer == null ? null : parseAnswer(answer);
+    if (!r || !(Number(r.calories) > 0)) return null;
+    const nutrition = { calories: Number(r.calories), protein_g: Number(r.protein_g) || 0, carbs_g: Number(r.carbs_g) || 0, fat_g: Number(r.fat_g) || 0 };
+    if (!Recipes.macrosMatch(nutrition)) nutrition.calories = Math.round(Recipes.macroCalories(nutrition));
+    return { nutrition, servings: Number(r.servings) >= 1 && Number(r.servings) <= 50 ? Math.round(Number(r.servings)) : null };
+}
+
 // One model call for a plan. Returns the text, or null when cancelled. When iOS paused Nourish in
 // the background mid-answer, waits until Nourish is on screen again and asks again.
 async function runPlanStep(msgs, grammar, maxTokens, id, h) {
@@ -622,80 +706,13 @@ async function webSearchUrls(query, count) {
     return out.slice(0, count);
 }
 
-function cleanText(text) {
-    const doc = new DOMParser().parseFromString('<body>' + String(text == null ? '' : text) + '</body>', 'text/html');
-    return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
-}
-
-function isoMinutes(iso) {
-    const m = String(iso || '').trim().toUpperCase().match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/);
-    if (!m || !(m[1] || m[2] || m[3])) return null;
-    return (Number(m[1] || 0) * 1440 + Number(m[2] || 0) * 60 + Number(m[3] || 0)) || null;
-}
-
-function firstNumber(v) {
-    const m = String(v == null ? '' : v).replace(/,/g, '').match(/\d+(\.\d+)?/);
-    return m ? Number(m[0]) : null;
-}
-
-function recipeSteps(instr) {
-    if (typeof instr === 'string') {
-        const text = instr.replace(/<br\s*\/?>|<\/p>|<\/li>/gi, '\n');
-        return cleanTextKeepLines(text).replace(/\.\s+(?=[A-Z])/g, '.\n').split(/\n+/).map(s => s.trim()).filter(s => s.length > 3);
-    }
-    const out = [];
-    (Array.isArray(instr) ? instr : []).forEach(item => {
-        if (typeof item === 'string') out.push(cleanText(item));
-        else if (item && item.itemListElement) out.push.apply(out, recipeSteps(item.itemListElement));
-        else if (item) out.push(cleanText(item.text || item.name));
-    });
-    return out.filter(Boolean);
-}
-
-function cleanTextKeepLines(text) {
-    return String(text).split('\n').map(cleanText).join('\n');
-}
-
-function findRecipeNode(data) {
-    if (Array.isArray(data)) {
-        for (const item of data) { const f = findRecipeNode(item); if (f) return f; }
-    } else if (data && typeof data === 'object') {
-        const t = data['@type'];
-        if (t === 'Recipe' || (Array.isArray(t) && t.indexOf('Recipe') >= 0)) return data;
-        for (const key of ['@graph', 'mainEntity', 'itemListElement']) {
-            if (data[key]) { const f = findRecipeNode(data[key]); if (f) return f; }
-        }
-    }
-    return null;
-}
-
-// Reads the schema.org Recipe that most recipe sites embed for search engines.
+// Reading recipe pages lives in importer.js (NourishImport); the web search uses the same code.
 function parseRecipePage(html, url) {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    let recipe = null;
-    Array.prototype.some.call(doc.querySelectorAll('script[type="application/ld+json" i]'), s => {
-        const raw = (s.textContent || '').trim();
-        let data = null;
-        try { data = JSON.parse(raw); } catch (e) {
-            try { data = JSON.parse(raw.replace(/,\s*([}\]])/g, '$1').replace(/[\u0000-\u001F]+/g, ' ')); } catch (e2) { return false; }
-        }
-        recipe = findRecipeNode(data);
-        return !!recipe;
-    });
-    if (!recipe || !recipe.name) return null;
-    const ingredients = (recipe.recipeIngredient || recipe.ingredients || []).map(cleanText).filter(Boolean);
-    const steps = recipeSteps(recipe.recipeInstructions);
-    if (!ingredients.length && !steps.length) return null;
-    const total = isoMinutes(recipe.totalTime) || ((isoMinutes(recipe.prepTime) || 0) + (isoMinutes(recipe.cookTime) || 0)) || null;
-    const n = recipe.nutrition && typeof recipe.nutrition === 'object' ? recipe.nutrition : {};
-    const nutrition = { calories: firstNumber(n.calories), protein_g: firstNumber(n.proteinContent), carbs_g: firstNumber(n.carbohydrateContent), fat_g: firstNumber(n.fatContent) };
+    const recipe = NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url);
+    if (!recipe) return null;
     let host = '';
     try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (e) { /* keep empty */ }
-    return {
-        name: cleanText(recipe.name).slice(0, 150), time_minutes: total,
-        nutrition: Object.keys(nutrition).some(k => nutrition[k] != null) ? nutrition : null,
-        ingredients: ingredients.slice(0, 40), steps: steps.slice(0, 30), source_url: url, source_name: host,
-    };
+    return Object.assign(recipe, { source_url: url, source_name: host });
 }
 
 async function fetchRecipe(url) {
@@ -724,6 +741,18 @@ async function localWebSearch(body) {
         return true;
     });
     return { recipes: recipes.slice(0, number), pages_checked: urls.length };
+}
+
+// A page for the recipe importer (importer.js), as a phone browser would get it.
+const BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    'Accept-Language': 'en', Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+};
+async function localFetchPage(body) {
+    let url = String(body.url || '').trim();
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    const res = await nativeHttp(url, { headers: body.browser === false ? WEB_HEADERS : BROWSER_HEADERS, timeoutMs: 20000 });
+    return { status: res.status, url: res.url || url, body: res.body || '' };
 }
 
 async function localImport(body) {
@@ -1333,5 +1362,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, parseRecipePage, isoMinutes, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT, recipeSteps };
+    module.exports = { IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }

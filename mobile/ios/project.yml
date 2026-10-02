@@ -27,6 +27,7 @@ targets:
         codeSign: false
       - sdk: Metal.framework
       - sdk: Accelerate.framework
+      - sdk: Vision.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.nourish.app

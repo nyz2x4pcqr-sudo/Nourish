@@ -15,6 +15,7 @@ on:
       - "grocery.js"
       - "units.js"
       - "recipes.js"
+      - "importer.js"
       - "ondevice.js"
       - "styles.css"
       - ".github/workflows/build-mobile.yml"

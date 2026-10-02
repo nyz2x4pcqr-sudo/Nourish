@@ -122,6 +122,11 @@ final class NativeBridge: NSObject {
             }
             return [String: Any]()
         case "notify": return notify(a)
+        case "ocr":
+            let started = Date()
+            let result = try TextReader.read(base64: a["image"] as? String ?? "")
+            log("Read \(result["lines"] ?? 0) lines of text from a \(result["width"] ?? 0)×\(result["height"] ?? 0) picture in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+            return result
         case "setMode":
             let mode = a["mode"] as? String ?? "local"
             DispatchQueue.main.async { self.setMode(mode) }

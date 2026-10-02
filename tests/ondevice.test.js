@@ -156,3 +156,12 @@ test('a meal at the format\'s maximum fits in the token budget (no cut-off answe
     // …and still leaves room for the prompt in the phone's default 4096-token memory.
     assert.ok(EDIT_TOKENS <= 4096 - 1000, 'chat changes leave no room for the prompt');
 });
+
+test('an imported recipe at the format\'s maximum fits, with the source text, in the phone\'s memory', () => {
+    const { IMPORT_LIMITS: I, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar } = require('../ondevice.js');
+    const answer = 300 + (I.nameChars + 2) + I.maxItems * (I.itemChars + 5) + I.maxSteps * (I.stepChars + 5) + 4 * 4;
+    assert.ok(answer / 2 <= IMPORT_TOKENS, `answer worst case ${answer} chars ≈ ${answer / 2} tokens > ${IMPORT_TOKENS}`);
+    // The source text (~4 characters per token for English) and the instructions (~350 tokens) also fit.
+    assert.ok(IMPORT_TOKENS + IMPORT_TEXT_CHARS / 4 + 350 <= 4096, 'source text + answer exceed 4096 tokens');
+    assert.match(importGrammar(), /"\\"found\\":" ws \("false" ws "\}" \| "true"/);
+});

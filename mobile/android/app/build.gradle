@@ -43,7 +43,7 @@ android {
 def repoRoot = rootProject.file('../..')
 tasks.register('copyWebApp', Copy) {
     from(repoRoot) {
-        include 'index.html', 'styles.css', 'app.js', 'ondevice.js', 'json-repair.js', 'grocery.js', 'units.js', 'recipes.js',
+        include 'index.html', 'styles.css', 'app.js', 'ondevice.js', 'json-repair.js', 'grocery.js', 'units.js', 'recipes.js', 'importer.js',
                 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'
         into 'webapp'
     }
