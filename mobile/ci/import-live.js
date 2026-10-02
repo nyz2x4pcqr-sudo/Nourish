@@ -33,7 +33,15 @@ const LINKS = [
                     const res = await fetchForImport('https://www.reddit.com/r/recipes/top.json?t=month&limit=5', { browser: false });
                     const post = JSON.parse(res.body).data.children.find(c => c.data && c.data.is_self).data;
                     url = 'https://www.reddit.com' + post.permalink;
-                } catch (e) { return { url: 'r/recipes', result: `couldn't list posts: ${e.message}`, ok: false }; }
+                } catch (e) {
+                    // Reddit may refuse its data format here; find a post on the plain page instead.
+                    try {
+                        const res = await fetchForImport('https://old.reddit.com/r/recipes/top/?t=month', { browser: true });
+                        const link = new DOMParser().parseFromString(res.body, 'text/html').querySelector('a[href*="/comments/"]');
+                        if (!link) return { url: 'r/recipes', result: `couldn't find a post (HTTP ${res.status})`, ok: false };
+                        url = new URL(link.getAttribute('href'), 'https://www.reddit.com').href.replace('old.reddit.com', 'www.reddit.com');
+                    } catch (e2) { return { url: 'r/recipes', result: `couldn't list posts: ${e2.message}`, ok: false }; }
+                }
             }
             let sent = 0;
             const extract = async text => { sent = text.length; return { name: `(the AI would read ${text.length} characters)`, ingredients: ['x'], steps: ['x'] }; };

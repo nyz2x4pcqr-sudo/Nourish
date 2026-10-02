@@ -33,6 +33,9 @@ test("YouTube's player data is read even with braces inside strings", () => {
 test('login walls and blocks are recognised; a normal page is not', () => {
     assert.ok(I.looksBlocked(403, ''));
     assert.ok(I.looksBlocked(429, 'lots of text'));
+    assert.ok(I.looksBlocked(402, ''));   // how some big recipe sites turn away cloud machines
+    assert.ok(I.looksBlocked(503, 'Just a moment...'));
+    assert.ok(!I.looksBlocked(404, ''));   // missing, not blocked
     assert.ok(I.looksBlocked(200, 'Log in to see photos and videos from friends.'));
     assert.ok(I.looksBlocked(200, 'Checking your browser before accessing the site'));
     assert.ok(!I.looksBlocked(200, 'Ingredients: 1 cup lentils. Log in to save this recipe to your box. '.repeat(40)));

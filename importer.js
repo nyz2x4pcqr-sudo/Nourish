@@ -208,8 +208,10 @@
 
     // A login wall, a bot check or an error page instead of the recipe.
     const WALL = /\b(log ?in|sign ?in|sign up|create an account)\b.{0,40}\b(to (see|view|continue|watch|read)|for full access)|you must (log|sign) in|login_required|accounts\/login|are you a (robot|human)|captcha|unusual traffic|access denied|enable javascript to|checking your browser|request blocked/i;
+    // Any refusal counts (401, 402 and 403 from sites that turn away apps or cloud machines, 429, 451,
+    // 503 from a bot check, 999 from LinkedIn-style blocks); only "not found" doesn't.
     function looksBlocked(status, text) {
-        if ([401, 403, 407, 429, 451, 999].indexOf(status) !== -1) return true;
+        if (status >= 400 && status !== 404 && status !== 410) return true;
         return text.length < 1500 && WALL.test(text);
     }
 
@@ -297,9 +299,10 @@
         u.hostname = 'www.reddit.com';
         u.search = '';
         const res = await fetchPage(u.href.replace(/\/$/, '') + '.json?raw_json=1&limit=40', { browser: false });
-        if (looksBlocked(res.status, '')) throw blocked(`Reddit answered HTTP ${res.status}.`, 'http-' + res.status);
         let data = null;
-        try { data = JSON.parse(res.body || 'null'); } catch (e) { throw blocked("Reddit didn't share that post.", 'not-json'); }
+        try { data = res.status < 400 ? JSON.parse(res.body || 'null') : null; } catch (e) { data = null; }
+        // Reddit sometimes refuses its data format to apps; the post's own page has the text too.
+        if (!data) return redditPageText(u.href, fetchPage, note);
         const post = data && data[0] && data[0].data && data[0].data.children[0] && data[0].data.children[0].data;
         if (!post) throw new Error("That Reddit link isn't a post.");
         // A link post to a recipe site: import the recipe from there.
@@ -314,6 +317,16 @@
         if (!parts.some(p => /ingredient/i.test(p || '')) && recipeComment) parts.push(recipeComment.body);
         note(byPoster.length ? 'Read the post and the poster\'s comments' : 'Read the post');
         return { title: post.title, text: `Reddit post: ${post.title}\n\n${parts.filter(Boolean).join('\n\n').slice(0, 15000)}` };
+    }
+    async function redditPageText(url, fetchPage, note) {
+        const page = await fetchPage(url, { browser: true });
+        const doc = parseHTML(page.body);
+        const title = meta(doc, 'og:title', 'twitter:title') || (doc.querySelector('h1') && doc.querySelector('h1').textContent.trim()) || '';
+        const body = doc.querySelector('[slot="text-body"], [data-post-click-location="text-body"], .usertext-body, shreddit-post');
+        const text = (body ? cleanTextKeepLines(body.innerHTML.replace(/<\/(p|li|div)>|<br\s*\/?>/gi, '\n')) : '') || meta(doc, 'og:description', 'description');
+        if (looksBlocked(page.status, readableText(doc)) || text.trim().length < 40) throw blocked("Reddit didn't let Nourish read that post.", 'http-' + page.status);
+        note('Read the post');
+        return { title, text: `Reddit post: ${title}\n\n${text.slice(0, 15000)}` };
     }
     async function pinterestText(url, fetchPage, note, follow) {
         const page = await fetchPage(url, { browser: true });
@@ -396,7 +409,6 @@
         }
         const text = readableText(doc);
         if (looksBlocked(page.status, text)) throw blocked(`${hostOf(finalUrl)} didn't let Nourish read that page${page.status >= 400 ? ` (HTTP ${page.status})` : ''}.`, 'http-' + page.status);
-        if (page.status >= 400) throw new Error(`The page returned HTTP ${page.status}.`);
         if (text.length < 120) throw blocked(`${hostOf(finalUrl)} shows that page only after it runs in a browser, so Nourish can't read it.`, 'empty');
         note('No recipe data on the page; reading its text');
         onStatus('Asking the AI to find the recipe…');
