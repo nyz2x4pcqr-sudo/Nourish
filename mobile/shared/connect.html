@@ -5,38 +5,56 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Connect to Nourish</title>
 <style>
-    :root { --bg: #14110F; --surface: #1F1B18; --raised: #2A2521; --border: #38312D; --text: #FAF7F5; --dim: #A8A09B; --faint: #6E6560; --accent: #FF7043; --error: #F06292; --ok: #7CB342; }
+    /* Matches the app (styles.css): Ember & Herb, dark. Fonts come from the bundled app when they can be read. */
+    @font-face { font-family: "Fraunces"; src: url("webapp/font-fraunces.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+    @font-face { font-family: "Figtree"; src: url("webapp/font-figtree.woff2") format("woff2"); font-weight: 300 900; font-display: swap; }
+    :root { --bg: #0C0B0A; --surface: #171412; --raised: #211D1A; --border: rgba(246, 239, 230, 0.10); --text: #F6EFE6; --dim: #BDB2A6; --faint: #8A7F74;
+            --accent: #F4A13D; --accent-2: #FFC46A; --on-accent: #1B1107; --error: #F08B7A; --ok: #86CFA6; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--text); font: 16px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-           padding: calc(32px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom)); min-height: 100vh; }
+    body { color: var(--text); font: 17px/1.5 Figtree, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+           background: radial-gradient(110% 60% at 100% 0%, rgba(244, 161, 61, 0.16), transparent 60%), var(--bg);
+           padding: calc(40px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
     main { max-width: 430px; margin: 0 auto; }
-    .logo { width: 72px; height: 72px; border-radius: 18px; background: var(--accent); display: grid; place-items: center; margin-bottom: 20px; }
-    .logo span { width: 46px; height: 46px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 10px #fff, inset 0 0 0 23px #FFE0D6; }
-    h1 { font-size: 30px; font-weight: 800; margin-bottom: 8px; }
-    p { color: var(--dim); margin-bottom: 20px; }
-    label { display: block; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 8px; }
-    input { width: 100%; min-height: 48px; padding: 12px 16px; border-radius: 18px; border: 1px solid var(--border); background: var(--raised);
-            color: var(--text); font: inherit; font-size: 17px; margin-bottom: 16px; }
-    input:focus { outline: none; border-color: var(--accent); }
-    button { width: 100%; min-height: 50px; border: none; border-radius: 18px; font: inherit; font-weight: 600; margin-bottom: 12px; cursor: pointer; }
-    .primary { background: var(--accent); color: #fff; }
+    .logo { width: 72px; height: 72px; margin-bottom: 24px; filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.45)); }
+    h1 { font-family: Fraunces, Georgia, serif; font-variation-settings: "SOFT" 60, "WONK" 0; font-size: 34px; font-weight: 560; line-height: 1.08; letter-spacing: -0.02em; margin-bottom: 10px; }
+    p { color: var(--dim); margin-bottom: 24px; }
+    label { display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; color: var(--faint); margin-bottom: 8px; }
+    input { width: 100%; min-height: 52px; padding: 12px 18px; border-radius: 16px; border: 1px solid var(--border); background: var(--raised);
+            color: var(--text); font: inherit; font-size: 17px; margin-bottom: 14px; }
+    input::placeholder { color: var(--faint); }
+    input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(244, 161, 61, 0.18); }
+    button { width: 100%; min-height: 52px; border: none; border-radius: 16px; font: inherit; font-weight: 700; margin-bottom: 12px; cursor: pointer; transition: transform .15s; }
+    button:active { transform: scale(0.98); }
+    .primary { background: linear-gradient(180deg, var(--accent-2), var(--accent)); color: var(--on-accent); box-shadow: 0 8px 24px rgba(244, 161, 61, 0.28); }
     .secondary { background: var(--raised); color: var(--text); border: 1px solid var(--border); }
-    button:disabled { opacity: .6; }
+    button:disabled { opacity: .55; }
     .status { min-height: 24px; margin: 4px 0 16px; font-size: 15px; color: var(--dim); }
     .status.error { color: var(--error); }
     .status.ok { color: var(--ok); }
-    .help { margin-top: 24px; padding: 16px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); font-size: 15px; color: var(--dim); }
+    .help { margin-top: 24px; padding: 18px; border-radius: 20px; background: var(--surface); border: 1px solid var(--border); font-size: 15px; color: var(--dim); }
     .help b { color: var(--text); }
     [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <main>
-    <div class="logo" aria-hidden="true"><span></span></div>
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+            <radialGradient id="bg" cx="30%" cy="20%" r="90%"><stop offset="0%" stop-color="#2E2116"/><stop offset="100%" stop-color="#0E0C0B"/></radialGradient>
+            <linearGradient id="bowl" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FFC46A"/><stop offset="100%" stop-color="#E0782A"/></linearGradient>
+            <linearGradient id="leaf" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#7DB876"/><stop offset="100%" stop-color="#C4E8A9"/></linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="15" fill="url(#bg)" stroke="rgba(246,239,230,0.12)"/>
+        <path d="M32 33.5V22" stroke="#9FD08C" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+        <path d="M31.6 25.5C25.4 25.6 21 21.4 20.2 15.2C26.6 15 31 18.9 31.6 25.5Z" fill="url(#leaf)"/>
+        <path d="M32.4 22.4C33 16.6 37.2 12.6 43.4 12.4C42.8 18.4 38.6 22.3 32.4 22.4Z" fill="url(#leaf)"/>
+        <path d="M12 33.5H52C52 44.8 43 53 32 53S12 44.8 12 33.5Z" fill="url(#bowl)"/>
+        <rect x="10" y="31.2" width="44" height="4" rx="2" fill="#FFE2B0"/>
+    </svg>
     <h1>Connect to Nourish</h1>
     <p>Use Nourish from your PC to share one plan between all your devices. Connect once and the app remembers it.</p>
 
-    <button type="button" class="primary" id="scanBtn" hidden>🔍 Find my PC automatically</button>
+    <button type="button" class="primary" id="scanBtn" hidden>Find my PC automatically</button>
 
     <label for="address">Or type the address</label>
     <input id="address" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="192.168.1.23:8000" enterkeyhint="go" />
