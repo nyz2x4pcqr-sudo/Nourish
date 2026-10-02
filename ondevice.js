@@ -241,6 +241,7 @@ const PLAN_LIMITS = { nameChars: 60, itemChars: 48, minItems: 3, maxItems: 12, s
 // model can fill a step with numbers ("1200g, 1000g, …"); the answer must still fit, not be cut off.
 const MEAL_TOKENS = 2500;  // one meal
 const MEAL_ATTEMPTS = 3;   // the first try and up to 2 remakes
+const MEAL_EXTRA_ATTEMPTS = 2;   // more tries while no try is usable at all (a small model can write only junk ingredients)
 const L = PLAN_LIMITS;
 // The fields in the order the AI writes them: the recipe first, then its time and nutrition, so it
 // estimates those from what it actually wrote. servings is fixed to the number asked for.
@@ -398,7 +399,10 @@ async function makeMeal(job, run, h) {
     let firstProblems = null;
     let feedback = '';
     let attempts = 0;
-    for (let attempt = 0; attempt < MEAL_ATTEMPTS && !hooks.isCancelled(); attempt++) {
+    // Up to MEAL_ATTEMPTS tries; while none of them is usable at all, up to MEAL_EXTRA_ATTEMPTS more,
+    // so one meal a weak model can't write doesn't stop a whole plan.
+    const limit = () => MEAL_ATTEMPTS + (best && usableMeal(best.meal) ? 0 : MEAL_EXTRA_ATTEMPTS);
+    for (let attempt = 0; attempt < limit() && !hooks.isCancelled(); attempt++) {
         hooks.onAttempt(attempt);
         attempts++;
         const ask = job.ask + feedback;
@@ -417,7 +421,7 @@ async function makeMeal(job, run, h) {
         const score = mealScore(meal, problems);
         if (!best || score < best.score) best = { meal, problems, score };
         if (!problems.length) break;
-        logPlan(`${job.label || job.type}: try ${attempt + 1} of ${MEAL_ATTEMPTS} has ${problems.length} problem(s)${attempt + 1 < MEAL_ATTEMPTS ? ', making it again' : ''}`, problems, 'warn');
+        logPlan(`${job.label || job.type}: try ${attempt + 1} of ${limit()} has ${problems.length} problem(s)${attempt + 1 < limit() ? ', making it again' : ''}`, problems, 'warn');
         feedback = `\n\nYour last try "${(meal && meal.name) || '?'}" had these problems, so write it again without them: ${problems.slice(0, 6).join('; ')}.`;
     }
     // Nothing readable in any try (no name, no ingredients): the caller reports it. Anything else is
@@ -1375,5 +1379,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
+    module.exports = { IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }

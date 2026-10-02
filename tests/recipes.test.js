@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const R = require('../recipes.js');
-const { makeMeal, MEAL_ATTEMPTS } = require('../ondevice.js');
+const { makeMeal, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS } = require('../ondevice.js');
 const U = require('../units.js');
 
 // The broken recipe from the bug report.
@@ -140,9 +140,20 @@ test('a try with too few ingredients is kept (marked) rather than failing the pl
     assert.ok(r.meal.incomplete.some(p => /only 2 ingredients/.test(p)), r.meal.incomplete.join(' | '));
 });
 
+test('while no try is usable, up to 2 more tries are made: a later usable one is kept', async () => {
+    let n = 0;
+    const unusable = Object.assign(copy(GOOD), { ingredients: [] });   // no ingredients left: nothing usable
+    const r = await makeMeal({ type: 'dinner', system: 's', ask: 'a', earlier: [] }, async () => JSON.stringify(n++ < MEAL_ATTEMPTS ? unusable : GOOD));
+    assert.equal(n, MEAL_ATTEMPTS + 1);
+    assert.equal(r.meal.name, GOOD.name);
+    assert.deepEqual(r.problems, []);
+});
+
 test('nothing readable in any try: reported, not kept', async () => {
-    const r = await makeMeal({ type: 'lunch', system: 's', ask: 'a', earlier: [] }, async () => '{"name":""}');
+    let calls = 0;
+    const r = await makeMeal({ type: 'lunch', system: 's', ask: 'a', earlier: [] }, async () => { calls++; return '{"name":""}'; });
     assert.equal(r.meal, null);
+    assert.equal(calls, MEAL_ATTEMPTS + MEAL_EXTRA_ATTEMPTS);
 });
 
 test('cancelling stops straight away', async () => {

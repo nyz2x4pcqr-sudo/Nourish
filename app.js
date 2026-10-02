@@ -2424,7 +2424,7 @@ async function runPlanJob(job, resume = null) {
             try {
                 parsed = await generatePlanOnDevice(state.messages || job.messages, {
                     onDay: d => { if (saved && d === resumeFrom) busy(`Resuming from day ${d + 1} of 7…`); },
-                    onMeal: (d, type, attempt) => busy(`Day ${d + 1} of 7 · ${MEAL_LABELS[type]}${attempt ? ` · remaking (try ${attempt + 1} of 3)` : ''}…`),
+                    onMeal: (d, type, attempt) => busy(`Day ${d + 1} of 7 · ${MEAL_LABELS[type]}${attempt ? ` · remaking (try ${attempt + 1} of ${Math.max(3, attempt + 1)})` : ''}…`),
                     onStatus: busy,
                     isCancelled: () => localPlanCancelled,
                     save: st => store(PLAN_PROGRESS_KEY, st),
