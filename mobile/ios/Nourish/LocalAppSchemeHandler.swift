@@ -34,6 +34,8 @@ final class LocalAppSchemeHandler: NSObject, WKURLSchemeHandler {
         if path.hasSuffix(".css") { return "text/css; charset=utf-8" }
         if path.hasSuffix(".png") { return "image/png" }
         if path.hasSuffix(".webmanifest") { return "application/manifest+json" }
+        if path.hasSuffix(".woff2") { return "font/woff2" }
+        if path.hasSuffix(".svg") { return "image/svg+xml" }
         return "application/octet-stream"
     }
 }

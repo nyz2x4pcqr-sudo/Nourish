@@ -8,6 +8,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.StatFs;
+import android.view.HapticFeedbackConstants;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
@@ -79,6 +80,19 @@ final class NativeBridge {
     @JavascriptInterface
     public void setTheme(String theme) {
         host.setTheme(theme);
+    }
+
+    /** A light tap under the finger for taps, ticks and finished work (app.js haptic()). */
+    @JavascriptInterface
+    public void haptic(String style) {
+        main.post(() -> {
+            int kind;
+            if ("success".equals(style)) kind = Build.VERSION.SDK_INT >= 30 ? HapticFeedbackConstants.CONFIRM : HapticFeedbackConstants.LONG_PRESS;
+            else if ("warning".equals(style)) kind = Build.VERSION.SDK_INT >= 30 ? HapticFeedbackConstants.REJECT : HapticFeedbackConstants.LONG_PRESS;
+            else if ("select".equals(style)) kind = HapticFeedbackConstants.CLOCK_TICK;
+            else kind = HapticFeedbackConstants.VIRTUAL_KEY;
+            web.performHapticFeedback(kind);
+        });
     }
 
     @JavascriptInterface

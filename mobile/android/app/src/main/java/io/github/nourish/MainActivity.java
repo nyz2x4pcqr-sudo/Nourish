@@ -129,9 +129,9 @@ public class MainActivity extends Activity implements NativeBridge.Host {
     public void setTheme(String theme) {
         final boolean light = "light".equals(theme);
         runOnUiThread(() -> {
-            getWindow().setStatusBarColor(Color.parseColor(light ? "#F6F3F0" : "#0F0D0C"));
+            getWindow().setStatusBarColor(Color.parseColor(light ? "#F5EFE6" : "#0C0B0A"));
             getWindow().setNavigationBarColor(Color.parseColor(light ? "#FFFFFF" : "#1A1716"));
-            web.setBackgroundColor(Color.parseColor(light ? "#F6F3F0" : "#14110F"));
+            web.setBackgroundColor(Color.parseColor(light ? "#F5EFE6" : "#0C0B0A"));
             View decor = getWindow().getDecorView();
             int flags = decor.getSystemUiVisibility();
             int lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
@@ -184,6 +184,8 @@ public class MainActivity extends Activity implements NativeBridge.Host {
         if (path.endsWith(".css")) return "text/css";
         if (path.endsWith(".png")) return "image/png";
         if (path.endsWith(".webmanifest")) return "application/manifest+json";
+        if (path.endsWith(".woff2")) return "font/woff2";
+        if (path.endsWith(".svg")) return "image/svg+xml";
         return "application/octet-stream";
     }
 

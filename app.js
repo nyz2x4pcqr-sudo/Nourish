@@ -26,7 +26,9 @@ const DIETS = ['No restriction', 'Vegetarian', 'Vegan', 'Pescatarian', 'Keto', '
     'Mediterranean', 'Gluten-free', 'Dairy-free', 'Halal', 'Kosher'];
 const SPOONACULAR_DIETS = { Vegetarian: 'vegetarian', Vegan: 'vegan', Pescatarian: 'pescetarian', Keto: 'ketogenic', Paleo: 'paleo', 'Gluten-free': 'gluten free' };
 const GOALS = { Cut: 'Lose weight', Maintain: 'Maintain', Gain: 'Gain muscle' };
-const ACCENTS = { orange: '#FF7043', green: '#22A06B', blue: '#3B82F6', purple: '#8B5CF6', pink: '#EC4899', teal: '#0EA5A0' };
+// Accent colours. The keys are what Settings stores; the names are what people see.
+const ACCENTS = { orange: '#F4A13D', green: '#8CC084', blue: '#6FB7E6', purple: '#B69CF6', pink: '#F08BA8', teal: '#5FD0B8' };
+const ACCENT_NAMES = { orange: 'Saffron', green: 'Sage', blue: 'Lagoon', purple: 'Plum', pink: 'Rose', teal: 'Mint' };
 const CHAT_HISTORY_LIMIT = 20;
 const CHAT_LENGTHS = { short: 800, normal: 2000, long: 4000 };
 const CHAT_SUGGESTIONS = [
@@ -495,7 +497,7 @@ function applyAppearance() {
     else root.removeAttribute('data-motion');
     const light = settings.theme === 'light' || (settings.theme === 'system' && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches);
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', light ? '#F6F3F0' : '#0F0D0C');
+    if (meta) meta.setAttribute('content', light ? '#F5EFE6' : '#0C0B0A');
     // Inside the phone apps, match the phone's status bar (clock, battery) to the theme.
     try {
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nourishTheme) {
@@ -560,8 +562,24 @@ function switchTab(tabName) {
 }
 
 // === FEEDBACK ===
+// A light tap under the finger in the phone apps ("tap", "select", "success", "warning").
+// Nothing happens in a browser, or with Reduce motion on.
+function haptic(style = 'tap') {
+    if (on('reduce_motion')) return;
+    try {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nourishHaptic) window.webkit.messageHandlers.nourishHaptic.postMessage(style);
+        else if (window.NourishAndroid && window.NourishAndroid.haptic) window.NourishAndroid.haptic(style);
+    } catch (e) { /* older app without haptics */ }
+}
+const HAPTIC_TARGETS = '.tab, .day-pill, .segment-btn, .switch, .swatch, .heart-btn, .filter-chip, .choice-row button, .grocery-item, .recipe-ingredient, .recipe-step, .source-btn, .btn-primary';
+document.addEventListener('click', e => {
+    const el = e.target.closest && e.target.closest(HAPTIC_TARGETS);
+    if (el && !el.disabled) haptic(el.matches('.btn-primary') ? 'tap' : 'select');
+}, true);
+
 let toastTimer;
 function showToast(message, isError = true) {
+    haptic(isError ? 'warning' : 'success');
     const toast = $('toast');
     toast.textContent = message;
     toast.classList.toggle('error', isError);
@@ -1053,23 +1071,23 @@ function temperatureLabel(t) {
 
 // === SETTINGS: PAGES ===
 const SETTINGS_PAGES = {
-    appearance: { icon: 'i-palette', color: '#AF52DE', title: 'Appearance' },
-    ai: { icon: 'i-bot', color: '#5856D6', title: 'AI model' },
-    chat: { icon: 'i-chat', color: '#34C759', title: 'Chat' },
-    profile: { icon: 'i-user', color: '#FF9500', title: 'Your profile' },
-    sources: { icon: 'i-book', color: '#FF2D55', title: 'Recipe sources' },
-    grocery: { icon: 'i-cart', color: '#30B0C7', title: 'Grocery list' },
-    server: { icon: 'i-server', color: '#8E8E93', title: 'Server & devices' },
-    updates: { icon: 'i-update', color: '#007AFF', title: 'Updates' },
-    data: { icon: 'i-shield', color: '#636366', title: 'Data & privacy' },
-    logs: { icon: 'i-list', color: '#48484A', title: 'Activity log' },
+    appearance: { icon: 'i-palette', color: '#C07A9B', title: 'Appearance' },
+    ai: { icon: 'i-sparkle', color: '#8A79C9', title: 'AI model' },
+    chat: { icon: 'i-chat', color: '#6FA77A', title: 'Chat' },
+    profile: { icon: 'i-user', color: '#D9893A', title: 'Your profile' },
+    sources: { icon: 'i-book', color: '#C9675A', title: 'Recipe sources' },
+    grocery: { icon: 'i-cart', color: '#4E9E92', title: 'Grocery list' },
+    server: { icon: 'i-server', color: '#7C8A96', title: 'Server & devices' },
+    updates: { icon: 'i-update', color: '#5B8DBE', title: 'Updates' },
+    data: { icon: 'i-shield', color: '#8B7E6E', title: 'Data & privacy' },
+    logs: { icon: 'i-list', color: '#6E6862', title: 'Activity log' },
 };
 const SETTINGS_GROUPS = [['appearance', 'ai', 'chat'], ['profile', 'sources', 'grocery'], ['server', 'updates', 'data', 'logs']];
 
 function settingsSummary(page) {
     const s = settings;
     switch (page) {
-        case 'appearance': return `${{ dark: 'Dark', light: 'Light', system: 'Auto' }[s.theme] || 'Dark'} · ${s.accent.charAt(0).toUpperCase() + s.accent.slice(1)}`;
+        case 'appearance': return `${{ dark: 'Dark', light: 'Light', system: 'Auto' }[s.theme] || 'Dark'} · ${ACCENT_NAMES[s.accent] || 'Saffron'}`;
         case 'ai': return s.active_provider === 'local'
             ? `This phone · ${s.local_model ? s.local_model.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '') : 'no model yet'}`
             : `${PROVIDERS[s.active_provider].replace(' (local)', '')} · ${s[`${s.active_provider}_model`] || 'auto'}`;
@@ -1147,18 +1165,20 @@ const SETTINGS_RENDERERS = {
         return [
             ...settingsGroup('Look', [
                 settingsChoice('Theme', settings.theme, { dark: 'Dark', light: 'Light', system: 'Auto' }, v => setSetting('theme', v, { quiet: true })),
-                h('div', { class: 'settings-row' },
-                    h('span', { class: 'settings-label', text: 'Accent colour' }),
+                h('div', { class: 'settings-row settings-row-stack' },
+                    h('span', { class: 'settings-row-top' }, h('span', { class: 'settings-label', text: 'Accent colour' }),
+                        h('span', { class: 'settings-value', id: 'accentName', text: ACCENT_NAMES[settings.accent] || 'Saffron' })),
                     h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': 'Accent colour' }, Object.entries(ACCENTS).map(([name, color]) =>
                         h('button', {
                             type: 'button', role: 'radio', class: 'swatch' + (settings.accent === name ? ' selected' : ''),
-                            'aria-checked': String(settings.accent === name), 'aria-label': name,
+                            'aria-checked': String(settings.accent === name), 'aria-label': ACCENT_NAMES[name], title: ACCENT_NAMES[name],
                             style: `background:${color};color:${color}`,
                             onclick: e => {
                                 e.currentTarget.parentNode.querySelectorAll('.swatch').forEach(b => { b.classList.remove('selected'); b.setAttribute('aria-checked', 'false'); });
                                 e.currentTarget.classList.add('selected');
                                 e.currentTarget.setAttribute('aria-checked', 'true');
                                 setSetting('accent', name, { quiet: true });
+                                $('accentName').textContent = ACCENT_NAMES[name];
                             },
                         })))),
                 settingsChoice('Text size', settings.text_size, { small: 'Small', default: 'Default', large: 'Large' }, v => setSetting('text_size', v, { quiet: true })),

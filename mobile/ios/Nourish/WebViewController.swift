@@ -21,8 +21,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
     private var connectError: String?
     private var probeDone = false
-    private let background = UIColor(red: 0x14 / 255, green: 0x11 / 255, blue: 0x0F / 255, alpha: 1)
-    private let lightBackground = UIColor(red: 0xF6 / 255, green: 0xF3 / 255, blue: 0xF0 / 255, alpha: 1)
+    private let background = UIColor(red: 0x0C / 255, green: 0x0B / 255, blue: 0x0A / 255, alpha: 1)
+    private let lightBackground = UIColor(red: 0xF5 / 255, green: 0xEF / 255, blue: 0xE6 / 255, alpha: 1)
     private var lightTheme = false
 
     // Dark text on the light theme, white text on the dark one (the page tells us which, see below).
@@ -39,6 +39,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         config.setURLSchemeHandler(LocalAppSchemeHandler(), forURLScheme: LocalAppSchemeHandler.scheme)
         config.userContentController.add(self, name: "nourishTheme")    // the page reports "light" or "dark"
         config.userContentController.add(self, name: "nourishNative")   // on-device AI, downloads, … (NativeBridge)
+        config.userContentController.add(self, name: "nourishHaptic")   // a light tap under the finger (app.js haptic())
 
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
@@ -187,6 +188,10 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             bridge.handle(id: id, cmd: cmd, args: body["args"] as? [String: Any] ?? [:])
             return
         }
+        if message.name == "nourishHaptic" {
+            playHaptic(message.body as? String ?? "")
+            return
+        }
         guard message.name == "nourishTheme", let theme = message.body as? String else { return }
         lightTheme = theme == "light"
         let color = lightTheme ? lightBackground : background
@@ -194,6 +199,16 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         webView.backgroundColor = color
         webView.scrollView.backgroundColor = color
         setNeedsStatusBarAppearanceUpdate()
+    }
+
+    private func playHaptic(_ style: String) {
+        switch style {
+        case "success": UINotificationFeedbackGenerator().notificationOccurred(.success)
+        case "warning": UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        case "select": UISelectionFeedbackGenerator().selectionChanged()
+        case "medium": UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        default: UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
     }
 
     // MARK: Dialogs and new windows
