@@ -33,7 +33,9 @@ adb shell am force-stop $APP
 BEFORE=$(wc -l < server.log)
 adb shell am start -W -n $APP/io.github.nourish.MainActivity --es server_url http://10.0.2.2:8000/
 wait_for_text "No meal plan yet|Generate Meal Plan|TODAY|Today" || fail "Nourish app not shown"
-sleep 3
+# The app asks the PC for its info after checking and syncing with it; give a slow emulator up to
+# 60 s for that (like ios-smoke.sh) instead of a fixed 3 s.
+for i in $(seq 1 60); do tail -n +"$((BEFORE + 1))" server.log | grep -q '"GET /api/info' && break; sleep 1; done
 adb exec-out screencap -p > shots/android-2-pc.png
 NEW=$(tail -n +"$((BEFORE + 1))" server.log); echo "Server saw:"; echo "$NEW" | grep -oE '"(GET|POST) [^"]*"' | sort | uniq -c
 echo "$NEW" | grep -q '"GET /app.js' || fail "app.js never loaded"
