@@ -839,3 +839,77 @@ a.settings-button { display: flex; text-decoration: none; }
 .log-error .log-level { color: var(--danger); font-weight: 700; }
 .log-warn .log-level { color: #C98A12; font-weight: 700; }
 .log-debug { opacity: 0.85; }
+
+/* ---------- Recipes from links, pasted text and screenshots ---------- */
+.import-modes { margin-bottom: 18px; }
+.import-drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    min-height: 120px; padding: 18px; margin-bottom: 12px; text-align: center;
+    border: 1.5px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface-2);
+    color: var(--text-2); font-weight: 600; cursor: pointer; overflow-wrap: anywhere;
+}
+.import-drop svg { width: 1.8rem; height: 1.8rem; color: var(--accent); }
+.import-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.import-drop:focus-within { border-color: var(--accent); }
+textarea { min-height: 120px; resize: vertical; line-height: 1.45; }
+.import-status { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 12px 14px; border-radius: var(--radius); background: var(--accent-soft); font-size: 0.95rem; }
+.import-error-actions p { margin: 8px 0 10px; font-size: 0.88rem; color: var(--text-2); }
+.import-error-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.import-error-buttons .btn { min-height: 46px; padding: 8px 10px; font-size: 0.9rem; }
+
+/* Preview / editor */
+.edit-source { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--accent); font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; }
+.edit-source svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+.edit-notes { font-size: 0.82rem; color: var(--text-3); margin: 0 0 16px; }
+.edit-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+.edit-row.four { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+.edit-row.four input { padding: 12px 10px; }
+.edit-num { min-width: 0; }
+.edit-num .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edit-nutrition-title { display: flex; align-items: center; gap: 8px; }
+.edit-nutrition-title .chip { text-transform: none; letter-spacing: 0; }
+.edit-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+.edit-save { margin-top: 18px; }
+.edit-also { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; color: var(--text-2); }
+.edit-also input { width: 22px; height: 22px; min-height: 0; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
+.slot-note { margin: -8px 0 16px; }
+
+/* Heart (save to Cookbook) */
+.heart-btn svg { fill: none; transition: fill 0.2s, transform 0.2s; }
+.heart-btn.saved svg { fill: var(--accent); stroke: var(--accent); }
+.recipe-top { display: flex; gap: 8px; }
+.recipe-top .heart-btn.saved { background: rgba(0, 0, 0, 0.45); }
+.recipe-actions.three { grid-template-columns: 1fr 1fr 1fr; }
+.btn.danger { color: var(--danger); }
+
+/* Cookbook */
+.cookbook-content { min-height: 70vh; }
+.cookbook-body { padding-top: 4px; }
+.cookbook-search { position: relative; margin-bottom: 12px; }
+.cookbook-search svg { position: absolute; left: 14px; top: 50%; width: 1.1rem; height: 1.1rem; transform: translateY(-50%); color: var(--text-3); pointer-events: none; }
+.cookbook-search input { padding-left: 42px; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.filter-row::-webkit-scrollbar { display: none; }
+.filter-chip {
+    flex-shrink: 0; min-height: 36px; padding: 6px 14px; border-radius: 999px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); font-weight: 600; font-size: 0.88rem;
+}
+.filter-chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.cookbook-list { display: flex; flex-direction: column; margin-top: 10px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
+.cookbook-card { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 14px; text-align: left; background: var(--surface); }
+.cookbook-card + .cookbook-card { border-top: 1px solid var(--border); }
+.cookbook-card:active { background: var(--surface-2); }
+.cookbook-card .dot { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; color: #fff; flex-shrink: 0; }
+.cookbook-card .dot svg { width: 1.05rem; height: 1.05rem; }
+.cookbook-card-body { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
+.cookbook-card .plan-meal-meta { white-space: normal; }
+.cookbook-card .chev { color: var(--text-3); width: 1rem; height: 1rem; flex-shrink: 0; }
+.cookbook-none { color: var(--text-3); text-align: center; padding: 30px 0; }
+.empty-state.compact { padding: 30px 10px; }
+
+/* Sheets over sheets: the newest on top. */
+#cookbookSheet { z-index: 200; }
+#importSheet { z-index: 205; }
+#recipeSheet { z-index: 210; }
+#recipeEditSheet { z-index: 215; }
+#slotSheet { z-index: 230; }

@@ -97,6 +97,7 @@ let prefs = { goal: 'Maintain', source: 'aiChef', likes: '', hates: '' };
 let daysData = [];
 let selectedDay = 0;
 let grocery = { checked: [], custom: [] };     // checked: item texts; custom: [{ text, checked }]
+let cookbook = { recipes: [] };                // saved recipes (see COOKBOOK)
 let chatHistory = [];                          // [{ role: 'user' | 'assistant', content, card? }]
 let chatBusy = false;
 let chatBusyLabel = '';
@@ -269,6 +270,7 @@ function loadLocalState() {
     grocery = cleanGrocery(savedGrocery || { checked: loadJSON('nourish_grocery_checked', []), custom: [] });
 
     chatHistory = cleanChat(loadJSON('nourish_chat', []));
+    cookbook = cleanCookbook(loadJSON('nourish_cookbook', null));
 }
 
 function persistLocal(section) {
@@ -283,6 +285,7 @@ function persistLocal(section) {
     else if (section === 'plan') store('nourish_plan', daysData);
     else if (section === 'grocery') store('nourish_grocery', grocery);
     else if (section === 'chat') store('nourish_chat', chatHistory);
+    else if (section === 'cookbook') store('nourish_cookbook', cookbook);
 }
 
 function cleanGrocery(g) {
@@ -302,10 +305,10 @@ function cleanChat(list) {
 }
 
 // === SYNC WITH THE PC ===
-// Settings, preferences, the plan, the grocery list and the chat are kept on the PC so every device
+// Settings, preferences, the plan, the grocery list, the chat and the cookbook are kept on the PC so every device
 // (browser, iPhone app, Android app) shows the same thing. Each section has a revision number:
 // a device that has a newer change sends it; a device that's behind takes the PC's copy.
-const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat'];
+const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat', 'cookbook'];
 const syncMeta = Object.assign(
     Object.fromEntries(SECTIONS.map(s => [s, { rev: 0, dirty: false, ver: 0 }])),
     loadJSON('nourish_sync', {}));
@@ -343,6 +346,7 @@ function sectionValue(section) {
     if (section === 'prefs') return prefs;
     if (section === 'plan') return daysData;
     if (section === 'grocery') return grocery;
+    if (section === 'cookbook') return cookbook;
     return chatHistory.map(m => (m.card ? { role: m.role, content: m.content, card: m.card } : { role: m.role, content: m.content }));
 }
 
@@ -351,6 +355,7 @@ function hasLocalData(section) {
     if (section === 'prefs') return !!(prefs.likes || prefs.hates) || prefs.goal !== 'Maintain' || prefs.source !== 'aiChef';
     if (section === 'plan') return daysData.length > 0;
     if (section === 'grocery') return grocery.checked.length > 0 || grocery.custom.length > 0;
+    if (section === 'cookbook') return cookbook.recipes.length > 0;
     return chatHistory.length > 0;
 }
 
@@ -383,6 +388,8 @@ function applyRemote(section, value) {
     } else if (section === 'chat') {
         if (chatBusy) return false;
         chatHistory = cleanChat(value);
+    } else if (section === 'cookbook') {
+        cookbook = cleanCookbook(value);
     }
     persistLocal(section);
     return true;
@@ -419,16 +426,23 @@ async function syncNow() {
         for (const section of SECTIONS) {
             const meta = syncMeta[section];
             const r = remote[section];
-            if (meta.dirty) {
-                await pushSection(section);
-                if (section === 'settings') touched.push(section);
-            } else if (!r) {
-                // The PC has nothing yet: give it what this device has.
-                if (hasLocalData(section)) await pushSection(section);
-            } else if (r.rev > meta.rev) {
-                if (applyRemote(section, r.value)) { meta.rev = r.rev; touched.push(section); }
-            } else if (r.rev < meta.rev) {
-                await pushSection(section);   // the PC's data file was reset; restore it from here
+            try {
+                if (meta.dirty) {
+                    await pushSection(section);
+                    if (section === 'settings') touched.push(section);
+                } else if (!r) {
+                    // The PC has nothing yet: give it what this device has.
+                    if (hasLocalData(section)) await pushSection(section);
+                } else if (r.rev > meta.rev) {
+                    if (applyRemote(section, r.value)) { meta.rev = r.rev; touched.push(section); }
+                } else if (r.rev < meta.rev) {
+                    await pushSection(section);   // the PC's data file was reset; restore it from here
+                }
+            } catch (e) {
+                // Nourish on the PC before 0.5.0 doesn't keep a cookbook: it stays on this device.
+                if (section !== 'cookbook' || e.status !== 400) throw e;
+                if (!meta.unsupported) nlog('sync', 'The Nourish on your PC is too old to keep the Cookbook; it stays on this device until the PC is updated', null, 'warn');
+                meta.unsupported = true;
             }
         }
         saveSyncMeta();
@@ -449,6 +463,7 @@ function rerenderAfterSync(sections) {
     if (sections.includes('plan') || sections.includes('settings')) { updateTodayScreen(); updatePlanScreen(); }
     if (sections.includes('plan') || sections.includes('grocery') || sections.includes('settings')) updateGroceryScreen();
     if (sections.includes('chat') || sections.includes('settings')) renderChat();
+    if (sections.includes('cookbook') && $('cookbookSheet').classList.contains('active')) renderCookbook();
     if (sections.includes('settings') || sections.includes('prefs')) {
         if (isEditingSettings()) settingsStale = true;
         else renderSettings();
@@ -1510,12 +1525,26 @@ function initSheets() {
     $('importLinkBtn').addEventListener('click', () => showImportSheet());
     $('importSheetBackdrop').addEventListener('click', closeImportSheet);
     $('closeImportBtn').addEventListener('click', closeImportSheet);
-    $('importBtn').addEventListener('click', importFromLink);
+    $('importBtn').addEventListener('click', runImport);
+    $('importUrl').addEventListener('keydown', e => { if (e.key === 'Enter') runImport(); });
+    document.querySelectorAll('[data-import-mode]').forEach(b => b.addEventListener('click', () => { setImportMode(b.dataset.importMode); showImportError(''); }));
+    $('importImage').addEventListener('change', () => {
+        const file = $('importImage').files && $('importImage').files[0];
+        $('importImageName').textContent = file ? file.name : 'Choose a screenshot of the recipe';
+    });
+    $('cookbookBtn').addEventListener('click', showCookbook);
+    $('cookbookBackdrop').addEventListener('click', closeCookbook);
+    $('recipeEditBackdrop').addEventListener('click', closeRecipeEditor);
+    $('slotBackdrop').addEventListener('click', closeSlotPicker);
     document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') { closeRecipeSheet(); closeGenerateSheet(); closeImportSheet(); }
+        if (e.key !== 'Escape') return;
+        // The top sheet first.
+        for (const [id, close] of [['slotSheet', closeSlotPicker], ['recipeEditSheet', closeRecipeEditor], ['recipeSheet', closeRecipeSheet], ['importSheet', closeImportSheet], ['cookbookSheet', closeCookbook], ['generateSheet', closeGenerateSheet]]) {
+            if ($(id).classList.contains('active')) { close(); return; }
+        }
     });
 
-    document.querySelectorAll('.segment-btn').forEach(btn => {
+    document.querySelectorAll('.segment-btn[data-goal]').forEach(btn => {
         btn.addEventListener('click', () => { setPref('goal', btn.dataset.goal); syncChoiceButtons(); });
     });
     document.querySelectorAll('.source-btn').forEach(btn => {
@@ -1524,7 +1553,7 @@ function initSheets() {
 }
 
 function syncChoiceButtons() {
-    document.querySelectorAll('.segment-btn').forEach(b => {
+    document.querySelectorAll('.segment-btn[data-goal]').forEach(b => {
         b.classList.toggle('active', b.dataset.goal === prefs.goal);
         b.setAttribute('aria-pressed', b.dataset.goal === prefs.goal);
     });
@@ -1549,8 +1578,10 @@ function closeGenerateSheet() {
 }
 
 let openRecipe = null;
-function openRecipeSheet(mealType, meal, dayIndex = null) {
-    openRecipe = { mealType, meal, dayIndex };
+// dayIndex: the plan's day it's on; cookbookId: opened from the Cookbook.
+function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } = {}) {
+    openRecipe = { mealType, meal, dayIndex, cookbookId };
+    const saved = cookbookId ? cookbook.recipes.find(e => e.id === cookbookId) : cookbookEntry(meal);
     const content = $('recipeSheetContent');
     const units = unitSystem();
     const ingredients = NourishGrocery.dedupeIngredients(meal.ingredients || []).map(line => NourishUnits.formatIngredient(NourishUnits.clampIngredient(line).line, units));
@@ -1559,6 +1590,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null) {
     if (meal.servings) chips.push(h('span', { class: 'chip' }, icon('i-user'), `Serves ${meal.servings}`));
     if (on('show_nutrition')) {
         chips.push(h('span', { class: 'chip accent' }, icon('i-flame'), `${formatCalories(n && n.calories)} kcal${meal.servings ? ' per serving' : ''}`));
+        if (n && meal.nutrition_estimated) chips.push(h('span', { class: 'chip warn', text: 'Estimated' }));
         if (n && n.protein_g != null) chips.push(h('span', { class: 'chip', text: `Protein ${Math.round(n.protein_g)}g` }));
         if (n && n.carbs_g != null) chips.push(h('span', { class: 'chip', text: `Carbs ${Math.round(n.carbs_g)}g` }));
         if (n && n.fat_g != null) chips.push(h('span', { class: 'chip', text: `Fat ${Math.round(n.fat_g)}g` }));
@@ -1569,6 +1601,15 @@ function openRecipeSheet(mealType, meal, dayIndex = null) {
         h('div', { class: `recipe-hero art-${mealType}` },
             icon(MEAL_ICONS[mealType] || 'i-utensils'),
             h('div', { class: 'recipe-top' },
+                h('button', {
+                    type: 'button', class: `icon-btn heart-btn${saved ? ' saved' : ''}`, 'aria-pressed': String(!!saved),
+                    'aria-label': saved ? 'Remove from Cookbook' : 'Save to Cookbook',
+                    onclick: () => {
+                        if (cookbookId) { removeFromCookbook(cookbookId); closeRecipeSheet(); return; }
+                        toggleSaved(meal, mealType);
+                        openRecipeSheet(mealType, meal, dayIndex);
+                    },
+                }, icon('i-heart')),
                 h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: closeRecipeSheet }, icon('i-close')))),
         h('div', { class: 'recipe-header' },
             h('div', { class: 'meal-type', text: where }),
@@ -1583,7 +1624,11 @@ function openRecipeSheet(mealType, meal, dayIndex = null) {
                 type: 'button', class: 'btn btn-primary', disabled: !!planJob,
                 onclick: () => { closeRecipeSheet(); remakeMeal(dayIndex, mealType, 'retry'); },
             }, icon('i-refresh'), 'Try again') : null) : null,
-        h('div', { class: 'recipe-actions' },
+        cookbookId ? h('div', { class: 'recipe-actions three' },
+            h('button', { type: 'button', class: 'btn btn-primary', onclick: () => showSlotPicker(meal.name, mealType, (d, t) => { placeInPlan(meal, d, t); closeRecipeSheet(); closeCookbook(); showToast(`Added "${meal.name}" to ${dayName(d)}`, false); }) }, icon('i-calendar'), 'Add to plan'),
+            h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => openRecipeEditor(meal, { mode: 'edit', mealType, cookbookId }) }, icon('i-edit'), 'Edit'),
+            h('button', { type: 'button', class: 'btn btn-secondary danger', onclick: () => { removeFromCookbook(cookbookId); closeRecipeSheet(); } }, icon('i-trash'), 'Remove')) : null,
+        cookbookId ? null : h('div', { class: 'recipe-actions' },
             dayIndex != null ? h('button', {
                 type: 'button', class: 'btn btn-secondary', disabled: !!planJob,
                 onclick: () => { closeRecipeSheet(); swapMeal(dayIndex, mealType); },
@@ -1598,7 +1643,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null) {
                 h('div', { class: 'recipe-step-number', text: idx + 1 }),
                 h('div', { class: 'recipe-step-text', text: NourishUnits.convertText(s, units) }))))) : null,
         meal.source_url ? h('a', { class: 'btn btn-secondary recipe-source', href: meal.source_url, target: '_blank', rel: 'noopener noreferrer' },
-            icon('i-link'), `Original recipe on ${meal.source_name || 'the web'}`) : h('div', { style: 'height:20px' }),
+            icon('i-link'), `Original recipe on ${meal.source_name || 'the web'}${meal.via_name ? ` · via ${meal.via_name}` : ''}`) : h('div', { style: 'height:20px' }),
     );
     content.scrollTop = 0;
     $('recipeSheet').classList.add('active');
@@ -1733,7 +1778,7 @@ function mealCard(type, meal, dayIndex) {
 function updatePlanScreen() {
     const container = $('planAccordions');
     if (!container) return;
-    $('planEyebrow').textContent = daysData.length ? `${daysData.length} days · starts ${dayName(0)}` : 'Your week';
+    $('planEyebrow').textContent = daysData.length ? `${daysData.length} day${daysData.length === 1 ? "" : "s"} · starts ${dayName(0)}` : 'Your week';
     if (!daysData.length) {
         setChildren(container, h('div', { class: 'empty-state' },
             h('div', { class: 'empty-art' }, icon('i-calendar')),
@@ -1975,6 +2020,7 @@ function normalizeMeal(m) {
         steps: toStringList(m.steps),
         // What the recipe checks (recipes.js) still found wrong after the remakes; shown on the recipe.
         incomplete: Array.isArray(m.incomplete) && m.incomplete.length ? m.incomplete.map(String).slice(0, 12) : undefined,
+        nutrition_estimated: n && m.nutrition_estimated ? true : undefined,   // the AI estimated it (an import without nutrition)
     }, safeSource(m));
 }
 
@@ -1982,7 +2028,9 @@ function safeSource(m) {
     try {
         const url = new URL(m.source_url);
         if (url.protocol !== 'http:' && url.protocol !== 'https:') return {};
-        return { source_url: url.href, source_name: String(m.source_name || url.hostname.replace(/^www\./, '')).slice(0, 60) };
+        const out = { source_url: url.href, source_name: String(m.source_name || url.hostname.replace(/^www\./, '')).slice(0, 60) };
+        if (m.via_url && /^https?:\/\//i.test(m.via_url)) Object.assign(out, { via_url: String(m.via_url), via_name: String(m.via_name || '').slice(0, 40) });
+        return out;
     } catch (e) {
         return {};
     }
@@ -2412,12 +2460,18 @@ async function generateWithWeb(likes, hates) {
     };
 }
 
-function showImportSheet(dayIndex = selectedDay, mealType = 'dinner') {
-    const days = Math.max(daysData.length, 1);
-    setChildren($('importDay'), Array.from({ length: Math.min(days + (days < 7 ? 1 : 0), 7) }, (_, i) =>
-        h('option', { value: String(i), selected: i === dayIndex }, `Day ${i + 1} · ${dayName(i, true)}${i >= daysData.length ? ' (new)' : ''}`)));
-    $('importMeal').value = mealType;
-    $('importError').hidden = true;
+// === RECIPES FROM A LINK, PASTED TEXT OR A SCREENSHOT ===
+// importer.js finds the recipe (embedded recipe data, a social post's caption or transcript, or the
+// page's text read by the AI); it's shown in an editable preview before anything is saved.
+let importTarget = null;   // { dayIndex, mealType } when opened from an empty meal in the plan
+let importMode = 'link';
+let importBusy = false;
+
+function showImportSheet(dayIndex = null, mealType = null, mode = 'link') {
+    importTarget = dayIndex != null ? { dayIndex, mealType: mealType || 'dinner' } : null;
+    setImportMode(mode);
+    showImportError('');
+    showImportStatus('');
     $('importSheet').classList.add('active');
 }
 
@@ -2425,34 +2479,439 @@ function closeImportSheet() {
     $('importSheet').classList.remove('active');
 }
 
-async function importFromLink() {
-    const url = $('importUrl').value.trim();
-    const errorBox = $('importError');
-    const btn = $('importBtn');
-    errorBox.hidden = true;
-    if (!url) { errorBox.textContent = 'Paste the address of a recipe page first.'; errorBox.hidden = false; return; }
-    btn.disabled = true;
-    btn.textContent = 'Reading the recipe…';
-    try {
-        const recipe = normalizeMeal(await api('/api/recipes/import', { method: 'POST', timeoutMs: 45000, body: { url } }));
-        if (!recipe) throw new Error('No recipe was found on that page.');
-        const dayIndex = Number($('importDay').value) || 0;
-        const mealType = $('importMeal').value;
-        while (daysData.length <= dayIndex) daysData.push({ breakfast: null, lunch: null, dinner: null });
-        daysData[dayIndex][mealType] = recipe;
-        changed('plan');
-        $('importUrl').value = '';
-        closeImportSheet();
-        selectedDay = dayIndex;
-        renderAll();
-        showToast(`Added "${recipe.name}" to ${dayName(dayIndex)}`, false);
-    } catch (err) {
-        errorBox.textContent = err.message;
-        errorBox.hidden = false;
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Add recipe';
+function setImportMode(mode) {
+    importMode = mode;
+    document.querySelectorAll('[data-import-mode]').forEach(b => {
+        const active = b.dataset.importMode === mode;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+    });
+    document.querySelectorAll('[data-import-panel]').forEach(p => { p.hidden = p.dataset.importPanel !== mode; });
+    $('importBtn').textContent = { link: 'Find the recipe', paste: 'Read the recipe', image: 'Read the screenshot' }[mode];
+    if (mode === 'image') $('importImageHint').textContent = screenshotHint();
+}
+
+function showImportStatus(text) {
+    $('importStatus').hidden = !text;
+    $('importStatusText').textContent = text || '';
+}
+
+// An error, with buttons to try pasting the text or a screenshot when the page couldn't be read.
+function showImportError(message, { offerOthers = false } = {}) {
+    const box = $('importError');
+    box.hidden = !message;
+    if (!message) { setChildren(box); return; }
+    setChildren(box, h('div', { text: message }),
+        offerOthers ? h('div', { class: 'import-error-actions' },
+            h('p', { text: 'You can still add it: open the post or page yourself, then paste the recipe text or take a screenshot of it.' }),
+            h('div', { class: 'import-error-buttons' },
+                h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => { setImportMode('paste'); showImportError(''); $('importText').focus(); } }, icon('i-text'), 'Paste the text'),
+                h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => { setImportMode('image'); showImportError(''); } }, icon('i-image'), 'Use a screenshot'))) : null);
+}
+
+// Can this device and AI read the recipe out of text? (Recipe data on a page needs no AI.)
+function aiReady() {
+    const p = settings.active_provider;
+    if (p === 'local') return !!settings.local_model;
+    if (p === 'claude' || p === 'openai') return !!settings[`${p}_api_key`] || (!isLocalMode() && !!secretsSet[`${p}_api_key`]);
+    return !isLocalMode();
+}
+const NEEDS_AI = 'Reading this needs an AI model: download one in Settings → AI model (or add a Claude or OpenAI key).';
+
+// One AI request outside a plan: the phone's model (with a forced format) or the PC/cloud AI.
+async function askAI(messages, { grammar = null, maxTokens } = {}) {
+    const req = await buildAIRequest(messages, { maxTokens });
+    if (req.provider === 'local') {
+        req.grammar = grammar;
+        return runOnDevice(req, 'ask-' + Date.now());
     }
+    return extractText(req.provider, await waitForJob(await startJob(req)));
+}
+
+function extractWithAI(text, info) {
+    if (!aiReady()) throw new Error(NEEDS_AI);
+    return extractRecipe(text, Object.assign({ provider: settings.active_provider }, info), askAI, { onPhone: settings.active_provider === 'local' });
+}
+
+async function fetchForImport(url, { browser = true } = {}) {
+    const started = Date.now();
+    const res = await api('/api/web/fetch', { method: 'POST', timeoutMs: 30000, body: { url, browser } });
+    nlog('import', `GET ${url.length > 120 ? url.slice(0, 120) + '…' : url} → ${res.status} (${Date.now() - started} ms, ${(res.body || '').length} characters)`, null, res.status >= 400 ? 'warn' : 'debug');
+    return res;
+}
+
+// How a screenshot can be read here: on the iPhone itself, or by a cloud AI that can see pictures.
+function screenshotHint() {
+    if (canReadTextOnPhone()) return 'Read on your iPhone (nothing is uploaded), then the AI pulls out the recipe.';
+    if (settings.active_provider === 'claude' || settings.active_provider === 'openai') return `${PROVIDERS[settings.active_provider]} reads the screenshot.`;
+    return 'Reading screenshots needs the iPhone app, or a Claude or OpenAI key (Settings → AI model). You can paste the text instead.';
+}
+function canReadTextOnPhone() {
+    if (!isLocalMode() || !nativeAvailable()) return false;
+    if (typeof specsCache !== 'undefined' && specsCache && specsCache.platform) return specsCache.platform === 'ios';
+    return /iPhone|iPad|iPod/.test(navigator.userAgent);   // before the phone's details have loaded
+}
+
+// A picture as a JPEG (upright, at most 2000 px on its longest side), base64.
+async function imageForReading(file) {
+    const url = URL.createObjectURL(file);
+    try {
+        const img = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => bad(new Error("That file isn't a picture Nourish can open.")); i.src = url; });
+        const scale = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        return { type: 'image/jpeg', data: canvas.toDataURL('image/jpeg', 0.88).split(',')[1] };
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+}
+
+async function runImport() {
+    if (importBusy) return;
+    showImportError('');
+    const btn = $('importBtn');
+    importBusy = true;
+    btn.disabled = true;
+    const started = Date.now();
+    try {
+        let result;
+        if (importMode === 'link') {
+            const url = $('importUrl').value.trim();
+            if (!url) throw new Error('Paste the link to a recipe first.');
+            nlog('import', `Importing ${url}`);
+            result = await NourishImport.importUrl(url, { fetchPage: fetchForImport, extract: extractWithAI, onStatus: showImportStatus });
+        } else if (importMode === 'paste') {
+            const text = $('importText').value.trim();
+            if (text.length < 30) throw new Error('Paste the whole recipe: the ingredients and the steps.');
+            showImportStatus('Asking the AI to find the recipe…');
+            const recipe = await extractWithAI(text, { kind: 'paste' });
+            if (!recipe) throw new Error("The AI didn't find a recipe in that text. Make sure it includes the ingredients.");
+            result = { recipe, how: 'ai', notes: ['Read from pasted text'] };
+        } else {
+            const file = $('importImage').files && $('importImage').files[0];
+            if (!file) throw new Error('Choose a screenshot first.');
+            showImportStatus('Preparing the picture…');
+            const image = await imageForReading(file);
+            let recipe;
+            if (canReadTextOnPhone()) {
+                showImportStatus('Reading the text in the picture…');
+                const read = await nativeCall('ocr', { image: image.data }, { timeoutMs: 60000 });
+                if (!read || (read.text || '').trim().length < 20) throw new Error("No text was found in that picture. Try a clearer screenshot, or paste the text.");
+                showImportStatus('Asking the AI to find the recipe…');
+                recipe = await extractWithAI(read.text, { kind: 'screenshot' });
+            } else if (settings.active_provider === 'claude' || settings.active_provider === 'openai') {
+                showImportStatus(`${PROVIDERS[settings.active_provider]} is reading the screenshot…`);
+                recipe = await extractWithAI('', { kind: 'screenshot', image });
+            } else {
+                throw new Error(screenshotHint());
+            }
+            if (!recipe) throw new Error("No recipe was found in that screenshot. Make sure the ingredients are in the picture.");
+            result = { recipe, how: 'ai', notes: ['Read from a screenshot'] };
+        }
+        const recipe = result.recipe;
+        // Missing nutrition: estimated by the AI, and labelled as an estimate.
+        if ((!recipe.nutrition || !(recipe.nutrition.calories > 0)) && aiReady()) {
+            showImportStatus('Estimating the nutrition…');
+            const est = await estimateNutrition(recipe, askAI, { onPhone: settings.active_provider === 'local' }).catch(e => { nlog('import', `Nutrition estimate failed: ${e.message}`, null, 'warn'); return null; });
+            if (est) {
+                recipe.nutrition = est.nutrition;
+                recipe.nutrition_estimated = true;
+                if (!recipe.servings && est.servings) recipe.servings = est.servings;
+                result.notes.push('Nutrition estimated by the AI');
+            }
+        }
+        nlog('import', `Found "${recipe.name}" in ${Math.round((Date.now() - started) / 100) / 10} s (${result.how === 'structured' ? 'recipe data on the page' : 'read by the AI'}): ${(recipe.ingredients || []).length} ingredients, ${(recipe.steps || []).length} steps`, result.notes);
+        showImportStatus('');
+        closeImportSheet();
+        $('importUrl').value = '';
+        $('importText').value = '';
+        $('importImage').value = '';
+        $('importImageName').textContent = 'Choose a screenshot of the recipe';
+        openRecipeEditor(recipe, { mode: 'import', notes: result.notes, mealType: (importTarget && importTarget.mealType) || guessMealType(recipe), target: importTarget });
+    } catch (err) {
+        showImportStatus('');
+        const message = (err && err.message) || 'Something went wrong';
+        nlog('import', `Import failed after ${Math.round((Date.now() - started) / 1000)} s: ${message}`, err && err.stack, err && err.blocked ? 'warn' : 'error');
+        showImportError(message, { offerOthers: !!(err && err.blocked) || (importMode === 'link' && /HTTP|couldn't load|timed out|abort/i.test(message)) });
+    } finally {
+        importBusy = false;
+        btn.disabled = false;
+    }
+}
+
+function guessMealType(recipe) {
+    const text = `${recipe.name} ${recipe.category || ''}`.toLowerCase();
+    if (/breakfast|brunch|pancake|waffle|omelet|oatmeal|overnight oats|granola|smoothie|muffin|french toast|scrambled|porridge/.test(text)) return 'breakfast';
+    if (/lunch|salad|sandwich|wrap|soup/.test(text)) return 'lunch';
+    return 'dinner';
+}
+
+// === RECIPE PREVIEW / EDITOR ===
+// An imported recipe before it's saved (mode 'import'), or a Cookbook recipe (mode 'edit').
+let editing = null;   // { mode, recipe, mealType, target, cookbookId }
+
+function openRecipeEditor(recipe, { mode = 'import', notes = [], mealType = 'dinner', target = null, cookbookId = null } = {}) {
+    editing = { mode, recipe, mealType, target, cookbookId };
+    const n = recipe.nutrition || {};
+    const num = (id, value, label, attrs = {}) => h('div', { class: 'edit-num' },
+        h('label', { class: 'label', for: id, text: label }),
+        h('input', Object.assign({ id, type: 'number', inputmode: 'decimal', min: '0', value: value == null || value === '' ? '' : String(Math.round(value)) }, attrs)));
+    const lines = (list) => (list || []).join('\n');
+    const source = recipe.source_url ? h('a', { class: 'edit-source', href: recipe.source_url, target: '_blank', rel: 'noopener noreferrer' },
+        icon('i-link'), `${recipe.source_name || NourishImport.hostOf(recipe.source_url)}${recipe.via_name ? ` · via ${recipe.via_name}` : ''}`) : null;
+    const estimated = !!recipe.nutrition_estimated;
+    setChildren($('recipeEditContent'),
+        h('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
+        h('div', { class: 'sheet-header' },
+            h('h2', { class: 'title', text: mode === 'import' ? 'Check the recipe' : 'Edit recipe' }),
+            h('button', { type: 'button', class: 'icon-btn btn-close', 'aria-label': 'Close', onclick: closeRecipeEditor }, icon('i-close'))),
+        h('div', { class: 'sheet-body' },
+            mode === 'import' ? h('p', { class: 'sheet-hint', text: 'Fix anything that looks wrong, then save it to your Cookbook or add it to your plan.' }) : null,
+            source,
+            notes.length ? h('p', { class: 'edit-notes', text: notes.join(' · ') }) : null,
+            h('div', { class: 'input-group' }, h('label', { class: 'label', for: 'editName', text: 'Name' }), h('input', { id: 'editName', type: 'text', value: recipe.name || '' })),
+            h('div', { class: 'edit-row' },
+                h('div', { class: 'edit-num' }, h('label', { class: 'label', for: 'editType', text: 'Meal' }),
+                    h('select', { id: 'editType' }, MEAL_TYPES.map(t => h('option', { value: t, selected: t === mealType }, MEAL_LABELS[t])))),
+                num('editServings', recipe.servings, 'Serves', { min: '1', max: '50' }),
+                num('editTime', recipe.time_minutes, 'Minutes')),
+            h('div', { class: 'input-group' }, h('label', { class: 'label', for: 'editIngredients', text: 'Ingredients · one per line' }),
+                h('textarea', { id: 'editIngredients', rows: String(Math.min(14, Math.max(5, (recipe.ingredients || []).length + 1))) }, lines(recipe.ingredients))),
+            h('div', { class: 'input-group' }, h('label', { class: 'label', for: 'editSteps', text: 'Steps · one per line' }),
+                h('textarea', { id: 'editSteps', rows: String(Math.min(14, Math.max(5, (recipe.steps || []).length + 2))) }, lines(recipe.steps))),
+            h('div', { class: 'label edit-nutrition-title' }, 'Nutrition per serving', estimated ? h('span', { class: 'chip warn', id: 'editEstimated', text: 'Estimated' }) : null),
+            h('div', { class: 'edit-row four' },
+                num('editKcal', n.calories, 'kcal'), num('editProtein', n.protein_g, 'Protein g'), num('editCarbs', n.carbs_g, 'Carbs g'), num('editFat', n.fat_g, 'Fat g')),
+            estimated ? h('p', { class: 'recipe-note', text: 'The source had no nutrition, so the AI estimated it. Change it if you know better.' }) : null,
+            h('div', { class: 'form-error', id: 'editError', role: 'alert', hidden: true }),
+            mode === 'edit'
+                ? h('button', { type: 'button', class: 'btn btn-primary edit-save', onclick: saveEditedCookbookRecipe }, icon('i-check'), 'Save changes')
+                : h('div', { class: 'edit-actions' },
+                    h('button', { type: 'button', class: 'btn btn-primary', onclick: () => saveImported('cookbook') }, icon('i-heart'), 'Save to Cookbook'),
+                    h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => saveImported('plan') }, icon('i-calendar'), target ? `Add to ${dayName(target.dayIndex)} ${MEAL_LABELS[target.mealType].toLowerCase()}` : 'Add to plan…'),
+                    h('label', { class: 'edit-also' }, h('input', { type: 'checkbox', id: 'editAlsoSave', checked: true }), 'Also keep it in my Cookbook when adding to the plan'))));
+    ['editKcal', 'editProtein', 'editCarbs', 'editFat'].forEach(id => $(id).addEventListener('input', () => { const chip = $('editEstimated'); if (chip) chip.textContent = 'Edited'; editing.nutritionEdited = true; }));
+    $('recipeEditContent').scrollTop = 0;
+    $('recipeEditSheet').classList.add('active');
+}
+
+function closeRecipeEditor() {
+    $('recipeEditSheet').classList.remove('active');
+    editing = null;
+}
+
+// The recipe as edited, or null (with the problem shown) when it can't be saved.
+function editedRecipe() {
+    const val = id => $(id).value.trim();
+    const numOrNull = id => (val(id) === '' || !(Number(val(id)) >= 0) ? null : Number(val(id)));
+    const split = id => val(id).split('\n').map(l => l.replace(/^\s*(\d+[.)]|[-•*])\s*/, '').trim()).filter(Boolean);
+    const err = $('editError');
+    const fail = text => { err.textContent = text; err.hidden = false; err.scrollIntoView({ block: 'center' }); return null; };
+    err.hidden = true;
+    const r = editing.recipe;
+    const recipe = {
+        name: val('editName'), servings: numOrNull('editServings'), time_minutes: numOrNull('editTime'),
+        ingredients: split('editIngredients'), steps: split('editSteps'),
+        nutrition: numOrNull('editKcal') != null ? { calories: numOrNull('editKcal'), protein_g: numOrNull('editProtein') || 0, carbs_g: numOrNull('editCarbs') || 0, fat_g: numOrNull('editFat') || 0 } : null,
+        nutrition_estimated: !!r.nutrition_estimated && !editing.nutritionEdited,
+        source_url: r.source_url, source_name: r.source_name, via_url: r.via_url, via_name: r.via_name,
+    };
+    if (recipe.name.length < 2) return fail('Give the recipe a name.');
+    if (!recipe.ingredients.length) return fail('Add at least one ingredient.');
+    if (!recipe.steps.length) return fail('Add at least one step.');
+    return normalizeMeal(recipe);
+}
+
+function saveImported(where) {
+    const recipe = editedRecipe();
+    if (!recipe) return;
+    const mealType = $('editType').value;
+    if (where === 'cookbook') {
+        addToCookbook(recipe, mealType, 'imported');
+        closeRecipeEditor();
+        showToast(`Saved "${recipe.name}" to your Cookbook`, false);
+        return;
+    }
+    const alsoSave = $('editAlsoSave').checked;
+    const target = editing.target;
+    const put = (dayIndex, type) => {
+        placeInPlan(recipe, dayIndex, type);
+        if (alsoSave) addToCookbook(recipe, mealType, 'imported');
+        closeRecipeEditor();
+        showToast(`Added "${recipe.name}" to ${dayName(dayIndex)}${alsoSave ? ' and your Cookbook' : ''}`, false);
+    };
+    if (target) put(target.dayIndex, target.mealType);
+    else showSlotPicker(recipe.name, mealType, put);
+}
+
+function placeInPlan(recipe, dayIndex, mealType) {
+    while (daysData.length <= dayIndex) daysData.push({ breakfast: null, lunch: null, dinner: null });
+    daysData[dayIndex][mealType] = normalizeMeal(JSON.parse(JSON.stringify(recipe)));
+    changed('plan');
+    selectedDay = dayIndex;
+    renderAll();
+}
+
+// === PICK A DAY AND MEAL ===
+function showSlotPicker(name, mealType, onPick) {
+    const days = Math.min(Math.max(daysData.length, 1) + (daysData.length < 7 ? 1 : 0), 7);
+    const replaces = () => {
+        const d = Number($('slotDay').value), t = $('slotMeal').value;
+        const meal = daysData[d] && daysData[d][t];
+        $('slotNote').textContent = meal ? `This replaces "${meal.name}" in your plan.` : 'This meal is empty.';
+    };
+    setChildren($('slotContent'),
+        h('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
+        h('div', { class: 'sheet-header' },
+            h('h2', { class: 'title', text: 'Add to plan' }),
+            h('button', { type: 'button', class: 'icon-btn btn-close', 'aria-label': 'Close', onclick: closeSlotPicker }, icon('i-close'))),
+        h('div', { class: 'sheet-body' },
+            h('p', { class: 'sheet-hint', text: name }),
+            h('div', { class: 'input-group import-slot' },
+                h('div', {}, h('label', { class: 'label', for: 'slotDay', text: 'Day' }),
+                    h('select', { id: 'slotDay', onchange: replaces }, Array.from({ length: days }, (_, i) =>
+                        h('option', { value: String(i), selected: i === Math.min(selectedDay, days - 1) }, `${isToday(i) ? 'Today' : dayName(i)}${i >= daysData.length ? ' (new)' : ''}`)))),
+                h('div', {}, h('label', { class: 'label', for: 'slotMeal', text: 'Meal' }),
+                    h('select', { id: 'slotMeal', onchange: replaces }, MEAL_TYPES.map(t => h('option', { value: t, selected: t === mealType }, MEAL_LABELS[t]))))),
+            h('p', { class: 'recipe-note slot-note', id: 'slotNote' }),
+            h('button', { type: 'button', class: 'btn btn-primary', onclick: () => { const d = Number($('slotDay').value), t = $('slotMeal').value; closeSlotPicker(); onPick(d, t); } }, icon('i-calendar'), 'Add to plan')));
+    replaces();
+    $('slotSheet').classList.add('active');
+}
+
+function closeSlotPicker() {
+    $('slotSheet').classList.remove('active');
+}
+
+// === COOKBOOK ===
+// Saved recipes, kept apart from the plan: making a new plan or swapping a meal never changes them.
+// { recipes: [{ id, saved_at, source: 'generated' | 'imported', meal_type, recipe }] }
+const COOKBOOK_MAX = 500;
+function cleanCookbook(value) {
+    const list = value && Array.isArray(value.recipes) ? value.recipes : [];
+    return {
+        recipes: list.filter(e => e && typeof e === 'object' && e.recipe && e.recipe.name)
+            .map(e => ({
+                id: String(e.id || cookbookId()), saved_at: Number(e.saved_at) || Date.now(),
+                source: e.source === 'imported' ? 'imported' : 'generated',
+                meal_type: MEAL_TYPES.includes(e.meal_type) ? e.meal_type : 'dinner',
+                recipe: normalizeMeal(e.recipe) || { name: String(e.recipe.name), ingredients: [], amounts: [], steps: [] },
+            })).slice(0, COOKBOOK_MAX),
+    };
+}
+function cookbookId() { return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+// The same recipe: same name and same source page (generated recipes have none).
+function sameRecipe(a, b) {
+    return String(a.name || '').trim().toLowerCase() === String(b.name || '').trim().toLowerCase() && (a.source_url || '') === (b.source_url || '');
+}
+function cookbookEntry(meal) {
+    return meal ? cookbook.recipes.find(e => sameRecipe(e.recipe, meal)) : null;
+}
+
+function addToCookbook(meal, mealType, source) {
+    const existing = cookbookEntry(meal);
+    const copy = normalizeMeal(JSON.parse(JSON.stringify(meal)));
+    delete copy.incomplete;   // a saved recipe is a copy; the plan's "may be incomplete" note isn't carried over
+    if (existing) {
+        existing.recipe = copy;
+        existing.meal_type = mealType;
+    } else {
+        cookbook.recipes.unshift({ id: cookbookId(), saved_at: Date.now(), source, meal_type: mealType, recipe: copy });
+        if (cookbook.recipes.length > COOKBOOK_MAX) cookbook.recipes.length = COOKBOOK_MAX;
+    }
+    changed('cookbook');
+    if ($('cookbookSheet').classList.contains('active')) renderCookbook();
+}
+
+function removeFromCookbook(id) {
+    const entry = cookbook.recipes.find(e => e.id === id);
+    cookbook.recipes = cookbook.recipes.filter(e => e.id !== id);
+    changed('cookbook');
+    if ($('cookbookSheet').classList.contains('active')) renderCookbook();
+    if (entry) showToast(`Removed "${entry.recipe.name}" from your Cookbook`, false);
+}
+
+// The heart on a recipe: saves it, or removes it again.
+function toggleSaved(meal, mealType) {
+    const entry = cookbookEntry(meal);
+    if (entry) removeFromCookbook(entry.id);
+    else {
+        addToCookbook(meal, mealType, meal.source_url ? 'imported' : 'generated');
+        showToast('Saved to your Cookbook', false);
+    }
+}
+
+let cookbookFilter = { q: '', type: 'all', source: 'all' };
+
+function showCookbook() {
+    renderCookbook();
+    $('cookbookSheet').classList.add('active');
+}
+function closeCookbook() {
+    $('cookbookSheet').classList.remove('active');
+}
+
+function renderCookbook() {
+    const f = cookbookFilter;
+    const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
+    const shown = cookbook.recipes.filter(e => {
+        if (f.type !== 'all' && e.meal_type !== f.type) return false;
+        if (f.source !== 'all' && e.source !== f.source) return false;
+        const text = `${e.recipe.name} ${(e.recipe.ingredients || []).join(' ')} ${e.recipe.source_name || ''}`.toLowerCase();
+        return words.every(w => text.indexOf(w) !== -1);
+    });
+    const chip = (group, value, label) => h('button', {
+        type: 'button', class: `filter-chip${f[group] === value ? ' active' : ''}`, 'aria-pressed': String(f[group] === value),
+        onclick: () => { cookbookFilter[group] = value; renderCookbook(); },
+    }, label);
+    const content = $('cookbookContent');
+    const hadFocus = document.activeElement && document.activeElement.id === 'cookbookSearch';
+    setChildren(content,
+        h('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
+        h('div', { class: 'sheet-header' },
+            h('div', {}, h('div', { class: 'eyebrow', text: `${cookbook.recipes.length} saved` }), h('h2', { class: 'title', text: 'Cookbook' })),
+            h('div', { class: 'header-actions' },
+                h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Add a recipe from a link', onclick: () => showImportSheet() }, icon('i-plus')),
+                h('button', { type: 'button', class: 'icon-btn btn-close', 'aria-label': 'Close', onclick: closeCookbook }, icon('i-close')))),
+        h('div', { class: 'sheet-body cookbook-body' },
+            h('div', { class: 'cookbook-search' }, icon('i-search'),
+                h('input', { id: 'cookbookSearch', type: 'search', placeholder: 'Search recipes and ingredients', value: f.q, autocomplete: 'off',
+                    oninput: e => { cookbookFilter.q = e.target.value; renderCookbook(); } })),
+            h('div', { class: 'filter-row', role: 'group', 'aria-label': 'Meal' }, chip('type', 'all', 'All meals'), MEAL_TYPES.map(t => chip('type', t, MEAL_LABELS[t]))),
+            h('div', { class: 'filter-row', role: 'group', 'aria-label': 'Source' }, chip('source', 'all', 'Any source'), chip('source', 'generated', 'Made by Nourish'), chip('source', 'imported', 'Imported')),
+            !cookbook.recipes.length
+                ? h('div', { class: 'empty-state compact' },
+                    h('div', { class: 'empty-art' }, icon('i-heart')),
+                    h('h2', { class: 'title', text: 'No saved recipes yet' }),
+                    h('p', { text: 'Tap the heart on any recipe to keep it here, or add one from a link, pasted text or a screenshot.' }),
+                    h('div', { class: 'empty-actions' }, h('button', { type: 'button', class: 'btn btn-primary', onclick: () => showImportSheet() }, icon('i-link'), 'Add a recipe')))
+                : !shown.length
+                    ? h('p', { class: 'cookbook-none', text: 'No saved recipes match.' })
+                    : h('div', { class: 'cookbook-list' }, shown.map(e => h('button', { type: 'button', class: 'cookbook-card', onclick: () => openRecipeSheet(e.meal_type, e.recipe, null, { cookbookId: e.id }) },
+                        h('span', { class: `dot art-${e.meal_type}` }, icon(MEAL_ICONS[e.meal_type])),
+                        h('span', { class: 'cookbook-card-body' },
+                            h('span', { class: 'plan-meal-type', text: `${MEAL_LABELS[e.meal_type]} · ${e.source === 'imported' ? (e.recipe.source_name || 'Imported') : 'Made by Nourish'}` }),
+                            h('span', { class: 'plan-meal-name', text: e.recipe.name }),
+                            h('span', { class: 'plan-meal-meta', text: [formatMinutes(e.recipe.time_minutes), on('show_nutrition') && e.recipe.nutrition ? `${formatCalories(e.recipe.nutrition.calories)} kcal` : ''].filter(Boolean).join(' · ') })),
+                        icon('i-chevron', 'chev'))))));
+    if (hadFocus) { const s = $('cookbookSearch'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+}
+
+function saveEditedCookbookRecipe() {
+    const recipe = editedRecipe();
+    if (!recipe) return;
+    const entry = cookbook.recipes.find(e => e.id === editing.cookbookId);
+    if (!entry) { closeRecipeEditor(); return; }
+    entry.recipe = recipe;
+    entry.meal_type = $('editType').value;
+    changed('cookbook');
+    closeRecipeEditor();
+    renderCookbook();
+    if (openRecipe && openRecipe.cookbookId === entry.id) openRecipeSheet(entry.meal_type, entry.recipe, null, { cookbookId: entry.id });
+    showToast('Saved', false);
 }
 
 // === CHAT ===

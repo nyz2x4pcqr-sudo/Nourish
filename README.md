@@ -16,7 +16,12 @@ Nourish makes a 7-day meal plan (breakfast, lunch, dinner) with recipes, calorie
   - **Web search**: finds recipes on recipe websites and reads them in full. It works without a key through DuckDuckGo, or with a free Brave Search key.
   - **TheMealDB**: free, no key. It has no nutrition data, so calories show as "—".
   - **Spoonacular**: needs a free key.
-  - **+ From link** on the Plan tab adds any single recipe page to a day and meal you pick.
+- **Add any recipe** (the link button on the Plan tab): from a recipe website, a YouTube, TikTok, Reddit or Pinterest post, pasted text, or a screenshot.
+  - Recipe sites' own recipe data is read directly; otherwise the AI reads the page, caption, description or transcript.
+  - Pages that are blocked or need a login (often Instagram and Facebook) say so, and offer pasting the text or a screenshot instead. Screenshots are read on the iPhone itself, or by Claude/OpenAI.
+  - You check and edit the recipe before saving. Missing nutrition is estimated by the AI and labelled "Estimated".
+- **Cookbook** (the book button on the Plan tab): tap the heart on any recipe to keep it. Search, filter by meal and by "made by Nourish" or "imported", add a saved recipe to any day and meal, edit or remove it. New plans and swaps never touch it.
+- **Checked recipes**: every AI recipe has a serving count, specific ingredients with amounts, and full steps from prep to plating. It's checked before you see it (amounts, seasoning, enough steps, every ingredient used, calories matching the macros) and made again when something's wrong.
 - **Chat with the chef**: describe what you want in plain words ("cheap high-protein dinners, nothing spicy") and go back and forth.
   - Say **"make me a plan"** and the plan goes straight into the Plan tab (or tap **Make plan**).
   - Say **"swap Wednesday dinner for something vegetarian"** and just that meal changes.
@@ -30,7 +35,7 @@ Nourish makes a 7-day meal plan (breakfast, lunch, dinner) with recipes, calorie
 - **Phone apps** for Android (`.apk`) and iPhone (`.ipa`, sideloaded). They find your PC on the Wi-Fi and open Nourish from it.
 - **Today screen**: calories and protein/carbs/fat for each day against your targets, with meal cards you can tap for the full recipe.
 - **Grocery list**: built from every ingredient in the plan, grouped by aisle, with a progress bar. Add your own items, hide ticked ones, and share or copy the list.
-- **The same everywhere**: your settings, plan, grocery list and chat are kept on the PC (in `nourish-data.json`, next to Nourish) and synced to every browser and phone app connected to it, within a few seconds. Each device also keeps a copy, so a saved plan still shows while the PC is off. API keys are stored on the PC and never sent back to phones.
+- **The same everywhere**: your settings, plan, grocery list, chat and Cookbook are kept on the PC (in `nourish-data.json`, next to Nourish) and synced to every browser and phone app connected to it, within a few seconds. Each device also keeps a copy, so a saved plan still shows while the PC is off. API keys are stored on the PC and never sent back to phones.
 
 Making a plan with a local model can take a few minutes. It runs in the background on your PC, so you can lock your phone or switch apps and the plan still arrives.
 
@@ -142,6 +147,7 @@ Nourish/
 ├── grocery.js        # the shopping list: merges ingredient lines, drops junk
 ├── units.js          # kitchen units: imperial ↔ metric, amounts in recipe text, sanity caps
 ├── recipes.js        # recipe checks: servings, specific amounts, full steps, macros match calories
+├── importer.js       # recipes from any link: recipe data, social captions/transcripts, page text → AI
 ├── styles.css
 ├── tests/            # frontend tests:  node --test
 ├── docker-compose.yml
@@ -182,6 +188,7 @@ API endpoints:
 | `POST /api/generate` | send a request to the AI and wait for the answer |
 | `POST /api/recipes/themealdb`, `/api/recipes/spoonacular`, `/api/recipes/web` | recipe search |
 | `POST /api/recipes/import` | read one recipe from a web address |
+| `POST /api/web/fetch` | a public web page for the app's recipe importer (`{status, url, body}`) |
 | `GET /api/update/check`, `POST /api/update/install` | check GitHub for a newer release; install it (Windows app only) |
 
 The server only accepts browser requests from `localhost`, private home-network addresses (`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`) and `*.local` names. When it reads recipe web pages, it only fetches public internet addresses, never devices on your home network.
