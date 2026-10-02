@@ -106,16 +106,16 @@ test('near-duplicate dish names are caught', () => {
     assert.ok(!sameDish('Greek Salad', 'Greek Yogurt Parfait'));
 });
 
-test('the meal format: one short item per line, up to 14, steps that end with a full stop, servings fixed', () => {
+test('the meal format: one short item per line, up to 12, steps that end with a full stop, servings fixed', () => {
     const { mealGrammar, GBNF_MEAL, editGrammar } = require('../ondevice.js');
     assert.match(GBNF_MEAL, /^root ::= meal/);
     const g = mealGrammar(4);
-    assert.match(g, /item \(","\s*ws item\)\{2,13\}/);
+    assert.match(g, /item \(","\s*ws item\)\{2,11\}/);
     assert.match(g, /item ::= .*\[\^"\\\\\\x7F\\x00-\\x1F,\]\{2,47\}/);
     assert.match(g, /step \(","\s*ws step\)\{2,7\}/);
-    assert.match(g, /step ::= .*\{10,198\} \[\.!\] "\\""/);
+    assert.match(g, /step ::= .*\{10,178\} \[\.!\] "\\""/);
     assert.match(g, /"\\"servings\\":" ws "4"/);
-    assert.match(editGrammar(2), /change \(","\s*ws change\)\{0,1\}/);
+    assert.match(editGrammar(2), /"\[" ws change ws "\]"/);   // one changed meal per answer on the phone
 });
 
 test('repeated ingredients and steps that name one twice are caught; amounts are capped', () => {
@@ -150,17 +150,18 @@ test('a meal at the format\'s maximum fits in the token budget (no cut-off answe
     // Longest possible meal in characters: field names and punctuation (~220), the name, every
     // ingredient and step at full length with quotes, comma and spacing, five 4-digit numbers.
     const meal = 220 + (L.nameChars + 2) + L.maxItems * (L.itemChars + 5) + L.maxSteps * (L.stepChars + 5) + 5 * 4;
-    // Worst case about 2 characters per token (numbers and punctuation; English text is ~4).
-    assert.ok(meal / 2 <= MEAL_TOKENS, `meal worst case ${meal} chars ≈ ${meal / 2} tokens > ${MEAL_TOKENS}`);
-    assert.ok((2 * meal + 120) / 2 <= EDIT_TOKENS, `two changed meals don't fit in ${EDIT_TOKENS}`);
-    // …and still leaves room for the prompt in the phone's default 4096-token memory.
-    assert.ok(EDIT_TOKENS <= 4096 - 1000, 'chat changes leave no room for the prompt');
+    // Worst case 1 character per token: Qwen and others write each digit as its own token, and a weak
+    // model filled a step with "1200g, 1000g, …" in the iPhone test (cut off at 1400 tokens).
+    assert.ok(meal <= MEAL_TOKENS, `meal worst case ${meal} chars = up to ${meal} tokens > ${MEAL_TOKENS}`);
+    assert.ok(meal + 120 <= EDIT_TOKENS, `a changed meal doesn't fit in ${EDIT_TOKENS}`);
+    // …and still leaves room for the prompt (about 1000 tokens with the plan) in the phone's 4096.
+    assert.ok(EDIT_TOKENS + 1000 <= 4096, 'no room for the prompt');
 });
 
 test('an imported recipe at the format\'s maximum fits, with the source text, in the phone\'s memory', () => {
     const { IMPORT_LIMITS: I, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar } = require('../ondevice.js');
     const answer = 300 + (I.nameChars + 2) + I.maxItems * (I.itemChars + 5) + I.maxSteps * (I.stepChars + 5) + 4 * 4;
-    assert.ok(answer / 2 <= IMPORT_TOKENS, `answer worst case ${answer} chars ≈ ${answer / 2} tokens > ${IMPORT_TOKENS}`);
+    assert.ok(answer <= IMPORT_TOKENS, `answer worst case ${answer} chars = up to ${answer} tokens > ${IMPORT_TOKENS}`);
     // The source text (~4 characters per token for English) and the instructions (~350 tokens) also fit.
     assert.ok(IMPORT_TOKENS + IMPORT_TEXT_CHARS / 4 + 350 <= 4096, 'source text + answer exceed 4096 tokens');
     assert.match(importGrammar(), /"\\"found\\":" ws \("false" ws "\}" \| "true"/);

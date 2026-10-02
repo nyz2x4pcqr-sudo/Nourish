@@ -236,8 +236,10 @@ function stripThinking(text) {
 // meal per request, so each recipe has room for specific ingredients and full steps from prep to
 // plating; the maximums are kept small enough that a meal always fits in MEAL_TOKENS
 // (tests/ondevice.test.js checks this): an answer cut off half-way can't be used.
-const PLAN_LIMITS = { nameChars: 60, itemChars: 48, minItems: 3, maxItems: 14, stepChars: 200, minSteps: 3, maxSteps: 8 };
-const MEAL_TOKENS = 1400;  // one meal
+const PLAN_LIMITS = { nameChars: 60, itemChars: 48, minItems: 3, maxItems: 12, stepChars: 180, minSteps: 3, maxSteps: 8 };
+// Budgeted at 1 character per token: models like Qwen write every digit as its own token, and a weak
+// model can fill a step with numbers ("1200g, 1000g, …"); the answer must still fit, not be cut off.
+const MEAL_TOKENS = 2500;  // one meal
 const MEAL_ATTEMPTS = 3;   // the first try and up to 2 remakes
 const L = PLAN_LIMITS;
 // The fields in the order the AI writes them: the recipe first, then its time and nutrition, so it
@@ -253,10 +255,10 @@ step ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{10,
 int ::= "0" | [1-9] [0-9]{0,3}
 ws ::= [ \n]{0,2}`;
 function mealGrammar(servings) { return 'root ::= meal\n' + mealRule(servings) + GBNF_COMMON; }
-// Chat changes on the phone: at most 2 meals per answer, so it fits the phone's memory (4096 tokens).
-const EDIT_TOKENS = 2 * MEAL_TOKENS + 100;
+// Chat changes on the phone: one meal per answer, so it fits the phone's memory (4096 tokens) with the plan in the prompt.
+const EDIT_TOKENS = MEAL_TOKENS + 100;
 function editGrammar(servings) {
-    return String.raw`root ::= "{" ws "\"changes\":" ws "[" ws change ("," ws change){0,1} ws "]" ws "}"
+    return String.raw`root ::= "{" ws "\"changes\":" ws "[" ws change ws "]" ws "}"
 change ::= "{" ws "\"day\":" ws [1-7] "," ws "\"meal\":" ws ("\"breakfast\"" | "\"lunch\"" | "\"dinner\"") "," ws "\"recipe\":" ws meal ws "}"
 ` + mealRule(servings) + GBNF_COMMON;
 }
@@ -532,9 +534,9 @@ async function generatePlanOnDevice(messages, hooks, state, run) {
 // The AI copies the recipe out of the text; it doesn't write one. On the phone the answer is forced
 // into this format, sized so the source text (IMPORT_TEXT_CHARS) and the longest answer
 // (IMPORT_TOKENS) fit the phone's 4096-token memory (tests/ondevice.test.js checks the answer side).
-const IMPORT_LIMITS = { nameChars: 100, itemChars: 90, maxItems: 20, stepChars: 250, maxSteps: 12 };
-const IMPORT_TOKENS = 2700;
-const IMPORT_TEXT_CHARS = 3000;
+const IMPORT_LIMITS = { nameChars: 100, itemChars: 72, maxItems: 14, stepChars: 170, maxSteps: 9 };
+const IMPORT_TOKENS = 3100;      // at 1 character per token, like MEAL_TOKENS
+const IMPORT_TEXT_CHARS = 2400;  // ~600 tokens of English
 const IMPORT_FORMAT = '{"found":true,"name":"","servings":0,"ingredients":[""],"steps":[""],"time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"nutrition_estimated":false}';
 function importGrammar() {
     const I = IMPORT_LIMITS;
