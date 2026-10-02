@@ -35,7 +35,9 @@
         if ((DESSERT.test(name) && !NOT_DESSERT.test(name)) || /dessert|baking|treat/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'a dessert' };
         if (NOT_A_MEAL.test(name.trim()) || /\b(sauce|drink|beverage|condiment|dressing)\b/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'not a meal' };
         const brk = BREAKFAST.test(name) || /breakfast|brunch/.test(cat);
-        const onlyBrk = ONLY_BREAKFAST.test(name) || (brk && sweetHeavy);
+        // A recipe the site files under breakfast only stays at breakfast.
+        const brkOnlyCat = /breakfast|brunch/.test(cat) && !/lunch|dinner|main|entr[eé]e|supper/.test(cat);
+        const onlyBrk = ONLY_BREAKFAST.test(name) || (brk && sweetHeavy) || brkOnlyCat || /\bbreakfast\b/i.test(name);
         const heavy = DINNER_ONLY.test(name);
         const side = SIDE.test(cat) && !/main/.test(cat);
         const hasProtein = !!mainProtein(r);
@@ -331,7 +333,7 @@
         const vocab = new Set(DISH_WORDS);
         return String(name || '').split(/(\s+|-)/).map(tok => {
             const w = tok.toLowerCase();
-            if (!/^[a-z]{4,}$/.test(w) || vocab.has(w) || PLAIN_WORDS.has(w) || P.correct(w) === w || P.correct(P.singular(w)) === P.singular(w)) return tok;
+            if (!/^[a-z]{4,}$/.test(w) || vocab.has(w) || vocab.has(w.replace(/e?s$/, '')) || vocab.has(w.replace(/s$/, '')) || PLAIN_WORDS.has(w) || P.correct(w) === w || P.correct(P.singular(w)) === P.singular(w)) return tok;
             let best = null;
             let bestD = 3;
             const max = w.length >= 7 ? 2 : 1;
