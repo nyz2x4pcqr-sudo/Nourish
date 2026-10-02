@@ -248,4 +248,21 @@ assert all(row["headerTop"] >= row["safeTop"] for row in rows)
 PY
 xcrun simctl io "$UDID" screenshot shots/ios-4-plan.png
 xcrun simctl io "$UDID" screenshot shots/ios-3-after-ai.png
+
+echo "== 8. A screenshot of a recipe is read on the phone (Apple Vision), the way the importer sends it"
+probe "const c = document.createElement('canvas'); c.width = 900; c.height = 520; const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#000'; g.font = '40px Helvetica';
+  ['Weeknight Red Lentil Dal', 'Ingredients', '1 cup red lentils', '2 cloves garlic', '1 tsp turmeric', 'Simmer for 20 minutes'].forEach((t, i) => g.fillText(t, 40, 70 + i * 75));
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const img = await imageForReading(new File([blob], 'shot.png', { type: 'image/png' }));
+  const read = await nativeCall('ocr', { image: img.data }, { timeoutMs: 60000 });
+  return JSON.stringify(read);" 120
+python3 - "$PROBE" <<'PY2' || fail "the phone couldn't read the text in a picture"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"]); text = v["text"].lower()
+print("Read", v["lines"], "lines:", v["text"].replace("\n", " | "))
+for word in ("lentil", "garlic", "turmeric", "ingredients"):
+    assert word in text, ("missing", word)
+PY2
 echo "SMOKE TEST PASSED"

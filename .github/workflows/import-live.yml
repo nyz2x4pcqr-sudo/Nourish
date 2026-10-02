@@ -1,0 +1,42 @@
+# Recipe import against real websites and social posts (importer.js through the Nourish server),
+# from GitHub's machines. Reports what each link gives: recipe data, text for the AI, or "blocked".
+# Sites change and some block cloud machines, so only a crash in the import code fails this check;
+# a site that can't be read is reported, not failed.
+name: Import from real links
+on:
+  push:
+    paths:
+      - "importer.js"
+      - "backend/web_recipes.py"
+      - "mobile/ci/import-live.js"
+      - ".github/workflows/import-live.yml"
+  workflow_dispatch:
+jobs:
+  import-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Start a Nourish server
+        run: |
+          pip install -r backend/requirements-core.txt
+          cd backend && nohup python -m uvicorn main:app --port 8000 > "$GITHUB_WORKSPACE/server.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
+      - name: Import real links in Chrome
+        run: |
+          npm install --no-save playwright-core@1.56.1
+          node mobile/ci/import-live.js | tee import-report.txt
+          cat import-report.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: import-live
+          path: |
+            import-report.txt
+            server.log
