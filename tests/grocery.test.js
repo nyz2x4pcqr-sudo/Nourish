@@ -50,8 +50,8 @@ test('units: kitchen rounding, text inside steps, both directions, caps', () => 
     assert.equal(u.formatIngredient('550 g chicken breast', 'imperial'), '1¼ lb chicken breast');
     assert.equal(u.formatIngredient('250 ml milk', 'imperial'), '1 cup milk');
     assert.equal(u.formatIngredient('chicken breast: 3 oz cooked', 'metric'), 'chicken breast: 85 g cooked');
-    assert.equal(u.convertText('Roast tomatoes at 400°F for 20 minutes.', 'metric'), 'Roast tomatoes at 205°C for 20 minutes.');
-    assert.equal(u.convertText('Bake at 350 degrees F.', 'metric'), 'Bake at 175°C.');
+    assert.equal(u.convertText('Roast tomatoes at 400°F for 20 minutes.', 'metric'), 'Roast tomatoes at 200°C for 20 minutes.');
+    assert.equal(u.convertText('Bake at 350 degrees F.', 'metric'), 'Bake at 180°C.');
     assert.equal(u.convertText('Heat the oven to 180°C.', 'imperial'), 'Heat the oven to 350°F.');
     assert.equal(u.convertText('Cut into 2-inch pieces and add 1/2 cup stock.', 'metric'), 'Cut into 5-cm pieces and add 120 ml stock.');
     assert.equal(u.convertText('Simmer 250 ml stock with 200 g rice.', 'imperial'), 'Simmer 1 cup stock with 7 oz rice.');

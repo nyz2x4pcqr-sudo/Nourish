@@ -1,5 +1,5 @@
 // Kitchen units: reads amounts like "1/2 cup", converts between US (imperial) and metric with kitchen
-// rounding (1 cup → 240 ml, 350°F → 175°C), converts amounts inside recipe text, and caps amounts
+// rounding (1 cup → 240 ml, 350°F → 180°C, like oven dials), converts amounts inside recipe text, and caps amounts
 // that can't be right ("1 cup curry paste"). Plans keep the AI's own amount and unit; everything is
 // converted only when shown, so switching Imperial ↔ Metric changes nothing that's stored.
 (function (root) {
@@ -115,16 +115,31 @@
     const NUM = '(\\d+(?:\\.\\d+)?(?:\\s+\\d+\\/\\d+)?|\\d+\\/\\d+|\\d*[½¼¾⅓⅔⅛])';
     function numberValue(text) { const n = parseNumber(text.trim()); return n ? n.value : NaN; }
 
+    // A temperature: "400°F", "200 °C", "350 degrees F", "425F", "180 C". The degree mark is optional
+    // only for 3-digit numbers, so "2 c" (cups) is never read as a temperature.
+    const TEMP = '(?:(\\d{2,3})\\s*(?:°\\s*|º\\s*|degrees?\\s+)|(\\d{3})\\s?)(F|C|Fahrenheit|Celsius)\\b';
+    function tempIn(deg, isF, system) {
+        if (system === 'metric') return isF ? `${(deg - 32) * 5 / 9 >= 100 ? roundTo((deg - 32) * 5 / 9, 10) : roundTo((deg - 32) * 5 / 9, 5)}°C` : `${deg}°C`;
+        if (isF) return `${deg}°F`;
+        const f = deg * 9 / 5 + 32;
+        return `${f >= 250 ? roundTo(f, 25) : roundTo(f, 5)}°F`;
+    }
+
     // Amounts inside recipe text: "Roast at 400°F for 20 minutes", "add 1/2 cup stock", "2-inch pieces".
     function convertText(text, system) {
         let out = String(text == null ? '' : text);
-        // Temperatures.
-        out = out.replace(new RegExp(`(\\d{2,3})\\s*(?:°\\s*|º\\s*|degrees?\\s+)(F|C|Fahrenheit|Celsius)\\b`, 'gi'), (all, deg, scale) => {
-            const isF = /^f/i.test(scale);
-            if (system === 'metric' && isF) return `${roundTo((Number(deg) - 32) * 5 / 9, 5)}°C`;
-            if (system !== 'metric' && !isF) { const f = Number(deg) * 9 / 5 + 32; return `${f >= 250 ? roundTo(f, 25) : roundTo(f, 5)}°F`; }
-            return `${deg}°${isF ? 'F' : 'C'}`;
+        // Two temperatures for the same thing ("400°F (200°C)", "200°C / 400°F", "180 C or 350 F"):
+        // keep one, the one already in the chosen system if there is one, so it reads "400°F" — never
+        // "400°F (400°F)".
+        out = out.replace(new RegExp(`${TEMP}(\\s*(?:\\(\\s*|\\/\\s*|or\\s+|,\\s*)?)${TEMP}(\\s*\\))?`, 'gi'), (all, d1, e1, s1, gap, d2, e2, s2, close) => {
+            if (/\(/.test(gap) !== Boolean(close)) return all;
+            const a = { deg: Number(d1 || e1), isF: /^f/i.test(s1) };
+            const b = { deg: Number(d2 || e2), isF: /^f/i.test(s2) };
+            const wantF = system !== 'metric';
+            const keep = b.isF === wantF && a.isF !== wantF ? b : a;
+            return tempIn(keep.deg, keep.isF, system);
         });
+        out = out.replace(new RegExp(TEMP, 'gi'), (all, d1, d2, scale) => tempIn(Number(d1 || d2), /^f/i.test(scale), system));
         // Lengths.
         out = out.replace(new RegExp(`${NUM}(\\s*-\\s*|\\s+)(inch(?:es)?|in\\.|cm|centimet(?:er|re)s?)(?![a-z])`, 'gi'), (all, n, gap, unit) => {
             const v = numberValue(n);
