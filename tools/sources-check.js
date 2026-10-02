@@ -68,7 +68,10 @@ const CANDIDATES = [
 ];
 const QUERY = 'chicken';
 const TERMS_PATHS = ['/terms', '/terms-of-use', '/terms-of-service', '/terms-and-conditions', '/legal/terms', '/legal', '/about/terms-of-use', '/termsofuse', '/legal/terms-of-use'];
-const TERMS_BAN = /(scrap(e|er|ing)|crawl(er|ing)?|spider|data[- ]mining|robot|automated (means|systems?|software|process|access|tools?)|bots?\b)/i;
+// A ban on robots reading the site (not, say, an "automatic telephone dialing system").
+const TERMS_BAN = /(scrap(e|er|ers|ing)\b|crawl(er|ers|ing)\b|spiders?\b|data[- ]mining|robots?\b(?! ?\.txt)|automated (means|software|process(es)?|tools?) (to|that|for)? ?(access|collect|copy|extract|scrape|monitor))/i;
+const ROUNDUP = /(\/(category|tag|collections?|recipes?)\/?$|best-|-ideas|ideas-|meal-plan|what-to-(cook|make|eat)|roundup|-challenge|-guide|-101|\d+-(easy|best|healthy|quick)|-recipes\/?$)/i;
+const ASSET = /\.(css|js|png|jpe?g|gif|svg|webp|ico|woff2?|xml|json)(\?|$)|\/(static|assets|_assets|etc\/clientlibs|themes|wp-content|verso)\//i;
 
 async function get(url, { browser = false, timeout = 20000, max = 2_000_000 } = {}) {
     const ctl = new AbortController();
@@ -126,7 +129,7 @@ function linksTo(html, domain, base) {
     for (const m of String(html).matchAll(/href=["']([^"'#]+)["']/g)) {
         let u; try { u = new URL(m[1], base); } catch (e) { continue; }
         const h = u.hostname.replace(/^www\./, '');
-        if ((h === domain || h.endsWith('.' + domain)) && u.pathname.length > 12 && /recipe|\/\d{4}\/|-/.test(u.pathname)) out.add(u.href.split('?')[0]);
+        if ((h === domain || h.endsWith('.' + domain)) && u.pathname.length > 12 && /-/.test(u.pathname) && !ASSET.test(u.pathname) && !ROUNDUP.test(u.pathname) && !/search|login|account|cart|privacy|terms/.test(u.pathname)) out.add(u.href.split('?')[0]);
     }
     return [...out];
 }
@@ -139,11 +142,14 @@ async function checkSite([id, name, domain, group, healthy, page]) {
     v.robots = rb.status === 200 ? (r.blanket ? 'disallows everything' : 'found') : `none (${rb.status || rb.error})`;
     // Terms
     v.terms = 'not found';
-    for (const p of TERMS_PATHS) {
-        const t = await get(base + p, { browser: true, timeout: 12000 });
+    const home = await get(base + '/', { browser: true, timeout: 15000 });
+    const termLinks = [...String(home.body).matchAll(/href=["']([^"'#]+)["'][^>]*>([^<]{0,60})</g)]
+        .filter(m => /terms|conditions|legal|tos\b/i.test(m[1] + ' ' + m[2]) && !/privacy|cookie/i.test(m[1] + m[2])).map(m => { try { return new URL(m[1], base).href; } catch (e) { return null; } }).filter(Boolean);
+    for (const p of [...new Set(termLinks)].slice(0, 2).concat(TERMS_PATHS.map(x => base + x))) {
+        const t = await get(p, { browser: true, timeout: 12000 });
         if (t.status === 200 && /terms|conditions/i.test(t.body)) {
             const text = t.body.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-            const hit = text.match(new RegExp('.{0,140}' + TERMS_BAN.source + '.{0,140}', 'i'));
+            const hit = text.match(new RegExp('.{0,160}' + TERMS_BAN.source + '.{0,160}', 'i'));
             v.terms = hit ? 'forbids automated access: "' + hit[0].trim().slice(0, 260) + '"' : 'no ban on automated access found';
             v.termsUrl = t.url;
             break;
@@ -151,9 +157,9 @@ async function checkSite([id, name, domain, group, healthy, page]) {
     }
     // Finding recipes
     const urls = [];
-    const wp = await get(`${base}/wp-json/wp/v2/posts?search=${QUERY}&per_page=6&_fields=link,title`);
+    const wp = await get(`${base}/wp-json/wp/v2/posts?search=${QUERY}&per_page=12&_fields=link,title`);
     if (wp.status === 200 && wp.body.trim().startsWith('[')) {
-        try { JSON.parse(wp.body).forEach(p => p.link && urls.push(p.link)); } catch (e) { /* not json */ }
+        try { JSON.parse(wp.body).forEach(p => p.link && !ROUNDUP.test(new URL(p.link).pathname) && !/\b(best|ideas|recipes|meal plan|what to)\b/i.test((p.title && p.title.rendered) || '') && urls.push(p.link)); } catch (e) { /* not json */ }
         if (urls.length) v.search = 'wp';
         v.wpAllowed = r.ok('/wp-json/wp/v2/posts');
     }
@@ -171,20 +177,28 @@ async function checkSite([id, name, domain, group, healthy, page]) {
             const locs = [...s.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
             const recipeMaps = locs.filter(l => /recipe/i.test(l) && /\.xml/.test(l));
             let pages = locs.filter(l => !/\.xml/.test(l) && /recipe/i.test(l));
-            if (!pages.length && recipeMaps.length) {
-                const s2 = await get(recipeMaps[0], { max: 3_000_000 });
-                pages = [...s2.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim()).filter(l => !/\.xml/.test(l));
+            const childMaps = recipeMaps.length ? recipeMaps : locs.filter(l => /\.xml/.test(l)).slice(0, 3);
+            for (const cm of childMaps.slice(0, 3)) {
+                if (pages.length) break;
+                const s2 = await get(cm, { max: 3_000_000 });
+                pages = [...s2.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim()).filter(l => !/\.xml/.test(l) && /recipe/i.test(l) && !ROUNDUP.test(l));
             }
-            if (pages.length) { urls.push(...pages.filter(p => p.includes(QUERY)).slice(0, 6)); if (!urls.length) urls.push(...pages.slice(0, 6)); v.search = 'sitemap'; v.sitemap = recipeMaps[0] || base + sm; v.sitemapPages = pages.length; break; }
+            if (pages.length) { pages = pages.filter(p => !ROUNDUP.test(p)); urls.push(...pages.filter(p => p.includes(QUERY)).slice(0, 6)); if (!urls.length) urls.push(...pages.slice(0, 6)); v.search = 'sitemap'; v.sitemap = recipeMaps[0] || base + sm; v.sitemapPages = pages.length; break; }
         }
     }
     v.candidates = urls.length;
+    v.lastStatus = '';
     // Recipe data
-    for (const u of urls.slice(0, 4)) {
-        const p = await get(u, { browser: true });
+    for (const u of urls.slice(0, 5)) {
+        let p = await get(u, { browser: true });
+        let via = 'direct';
+        if (p.status !== 200) { v.lastStatus = p.status || p.error;   // many sites block cloud servers (not phones at home): check the Internet Archive's copy
+            const a = await get(`https://web.archive.org/web/2025id_/${u}`, { timeout: 30000 });
+            if (a.status === 200) { p = a; via = 'archive (the site blocks cloud servers: ' + v.lastStatus + ')'; }
+        }
         const rec = p.status === 200 ? jsonLdRecipe(p.body) : null;
-        if (rec) {
-            v.recipe = { url: u, name: String(rec.name).slice(0, 80), ingredients: (rec.recipeIngredient || []).length, nutrition: !!(rec.nutrition && rec.nutrition.calories), category: rec.recipeCategory || null, pathAllowed: r.ok(new URL(u).pathname) };
+        if (rec && (rec.recipeIngredient || []).length) {
+            v.recipe = { url: u, via, name: String(rec.name).slice(0, 80), ingredients: (rec.recipeIngredient || []).length, nutrition: !!(rec.nutrition && rec.nutrition.calories), category: rec.recipeCategory || null, pathAllowed: r.ok(new URL(u).pathname) };
             break;
         }
         v.recipeTried = (v.recipeTried || []).concat(`${p.status || p.error} ${u.slice(0, 90)}`);
