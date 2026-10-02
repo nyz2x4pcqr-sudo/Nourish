@@ -1,0 +1,41 @@
+name: Data tools
+
+# Builds nutrition-data.js from USDA FoodData Central and checks the candidate recipe sites
+# (robots.txt, terms, recipe data). Both need the internet. The results are pushed to the
+# "data-tools-output" branch for review; nothing here changes main.
+on:
+  workflow_dispatch:
+    inputs:
+      what:
+        description: "usda, sources or both"
+        default: both
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: USDA nutrition table
+        if: inputs.what != 'sources'
+        run: python3 tools/usda-table.py > nutrition-data.js 2> usda-log.txt; cat usda-log.txt; wc -c nutrition-data.js
+      - name: Check recipe sites
+        if: inputs.what != 'usda'
+        run: node tools/sources-check.js > sources-report.txt; tail -c 3000 sources-report.txt
+      - name: Push results to data-tools-output
+        run: |
+          mkdir -p /tmp/out && cp nutrition-data.js usda-log.txt sources-report.txt /tmp/out/ 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan data-tools-output
+          git rm -rfq . && rm -rf ./*
+          cp /tmp/out/* . 2>/dev/null || true
+          git add -A && git commit -qm "Data tools output ($(date -u +%FT%TZ))" && git push -f origin data-tools-output
