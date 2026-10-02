@@ -605,6 +605,8 @@ function showJobBar(state, message) {
     bar.className = 'job-bar' + (state === 'error' ? ' error' : '');
     jobBarState = state || null;
     jobBarMessage = message || '';
+    document.documentElement.toggleAttribute('data-working', false);
+    if (state === 'busy' && planJob && planJob.local) document.documentElement.setAttribute('data-working', 'local');
     refreshCooking();
     if (!state) return;
     const text = h('span', { class: 'job-bar-text', text: message });
