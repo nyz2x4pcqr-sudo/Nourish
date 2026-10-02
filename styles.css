@@ -719,6 +719,15 @@ select {
 .plan-meal.empty .dot { background: transparent; color: var(--text-3); border: 1.5px dashed var(--border-strong); box-shadow: none; }
 .plan-meal.empty .plan-meal-name { color: var(--text-3); font-weight: 600; }
 .plan-meal-warn { font-size: var(--fs-caption); font-weight: 700; color: #E3A43A; }
+/* Small phones or Large text: time and calories go under the dish name, so the name keeps its width. */
+@media (max-width: 400px) {
+    .plan-meal { display: grid; grid-template-columns: auto 1fr; column-gap: var(--s-3); row-gap: 2px; }
+    .plan-meal .dot { grid-row: span 2; align-self: start; margin-top: 2px; }
+    .plan-meal-meta { grid-column: 2; text-align: left; }
+}
+[data-text="large"] .plan-meal { display: grid; grid-template-columns: auto 1fr; column-gap: var(--s-3); row-gap: 2px; }
+[data-text="large"] .plan-meal .dot { grid-row: span 2; align-self: start; margin-top: 2px; }
+[data-text="large"] .plan-meal-meta { grid-column: 2; text-align: left; }
 [data-theme="light"] .plan-meal-warn { color: #9A6510; }
 
 /* Plan being made: the "kitchen" panel */

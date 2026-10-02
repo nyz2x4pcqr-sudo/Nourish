@@ -1954,7 +1954,7 @@ function mealCard(type, meal, dayIndex) {
 function updatePlanScreen() {
     const container = $('planAccordions');
     if (!container) return;
-    $('planEyebrow').textContent = daysData.length ? `${daysData.length} day${daysData.length === 1 ? "" : "s"} · starts ${dayName(0)}` : 'Your week';
+    $('planEyebrow').textContent = daysData.length ? `${daysData.length} day${daysData.length === 1 ? "" : "s"} · from ${dayName(0, true)}` : 'Your week';
     const cooking = cookingPanel('plan');
     if (!daysData.length && cooking) { setChildren(container, cooking); return; }
     if (!daysData.length) {
