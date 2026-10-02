@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window is the app's dark background from the first frame, so there's no white flash at launch. -->
+    <style name="Theme.Nourish" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/nourish_bg</item>
+        <item name="android:colorBackground">@color/nourish_bg</item>
+        <item name="android:colorAccent">@color/nourish_saffron</item>
+        <item name="android:statusBarColor">@color/nourish_bg</item>
+        <item name="android:navigationBarColor">@color/nourish_bg</item>
+    </style>
+</resources>

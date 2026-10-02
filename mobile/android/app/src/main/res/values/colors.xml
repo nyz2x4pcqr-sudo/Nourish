@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="nourish_orange">#FF7043</color>
+    <color name="nourish_bg">#0C0B0A</color>
+    <color name="nourish_saffron">#F4A13D</color>
 </resources>

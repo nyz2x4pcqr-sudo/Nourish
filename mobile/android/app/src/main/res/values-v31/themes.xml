@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ launch screen: the Nourish icon on the app's dark background. -->
+    <style name="Theme.Nourish" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/nourish_bg</item>
+        <item name="android:colorBackground">@color/nourish_bg</item>
+        <item name="android:colorAccent">@color/nourish_saffron</item>
+        <item name="android:statusBarColor">@color/nourish_bg</item>
+        <item name="android:navigationBarColor">@color/nourish_bg</item>
+        <item name="android:windowSplashScreenBackground">@color/nourish_bg</item>
+    </style>
+</resources>

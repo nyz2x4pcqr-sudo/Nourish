@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Nourish app icon master: a saffron bowl with a sage sprout on warm espresso.
+       Exported to icon-192/512, apple-touch-icon, the iOS AppIcon and the Android adaptive icon (art/make-icons.js). -->
+  <defs>
+    <radialGradient id="bg" cx="32%" cy="18%" r="95%">
+      <stop offset="0%" stop-color="#33241A"/>
+      <stop offset="55%" stop-color="#17120F"/>
+      <stop offset="100%" stop-color="#0C0B0A"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#F4A13D" stop-opacity="0.34"/>
+      <stop offset="100%" stop-color="#F4A13D" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bowl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFC46A"/>
+      <stop offset="100%" stop-color="#E0782A"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7DB876"/>
+      <stop offset="100%" stop-color="#C4E8A9"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <ellipse cx="512" cy="640" rx="400" ry="300" fill="url(#glow)"/>
+  <g transform="translate(32 21.5) scale(15)">
+    <path d="M32 33.5V22" stroke="#9FD08C" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+    <path d="M31.6 25.5C25.4 25.6 21 21.4 20.2 15.2C26.6 15 31 18.9 31.6 25.5Z" fill="url(#leaf)"/>
+    <path d="M32.4 22.4C33 16.6 37.2 12.6 43.4 12.4C42.8 18.4 38.6 22.3 32.4 22.4Z" fill="url(#leaf)"/>
+    <path d="M12 33.5H52C52 44.8 43 53 32 53S12 44.8 12 33.5Z" fill="url(#bowl)"/>
+    <path d="M16 37.5C18 44 24.5 49 32 49.6" stroke="#FFE2B0" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+    <rect x="10" y="31.2" width="44" height="4" rx="2" fill="#FFE2B0"/>
+  </g>
+</svg>

@@ -1769,7 +1769,7 @@ function hasNutrition(day) {
 }
 
 // === BRAND MARK ===
-// The app icon's bowl and sprout, drawn inline (the same artwork as icon.svg).
+// The app icon's bowl and sprout, drawn inline (the same artwork as art/icon.svg).
 // Its gradients (bmBg, bmBowl, bmLeaf) are in index.html, so every copy can use them.
 function brandMark(size = 64) {
     const s = (tag, attrs, ...kids) => svgEl(tag, attrs, ...kids);

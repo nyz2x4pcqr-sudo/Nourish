@@ -50,11 +50,11 @@ public class MainActivity extends Activity implements NativeBridge.Host {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.parseColor("#14110F"));
+        getWindow().setStatusBarColor(Color.parseColor("#0C0B0A"));
         getWindow().setNavigationBarColor(Color.parseColor("#1F1B18"));
 
         web = new WebView(this);
-        web.setBackgroundColor(Color.parseColor("#14110F"));
+        web.setBackgroundColor(Color.parseColor("#0C0B0A"));
         setContentView(web);
 
         WebSettings s = web.getSettings();
