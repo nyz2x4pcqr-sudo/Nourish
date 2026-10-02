@@ -41,11 +41,11 @@ echo "$NEW" | grep -q '"GET /api/info' || fail "the app's JavaScript never calle
 
 echo "== 3. On-device AI: a real model, the app's engine and the app's meal format"
 adb shell am force-stop $APP
-adb push day.gbnf /data/local/tmp/day.gbnf >/dev/null || fail "push grammar"
-adb shell run-as $APP sh -c "'mkdir -p files/models && cp /data/local/tmp/day.gbnf files/models/'" || fail "copy grammar into the app"
+adb push meal.gbnf /data/local/tmp/meal.gbnf >/dev/null || fail "push grammar"
+adb shell run-as $APP sh -c "'mkdir -p files/models && cp /data/local/tmp/meal.gbnf files/models/'" || fail "copy grammar into the app"
 adb logcat -c
 # The app downloads the model from Hugging Face itself (following its redirects), then runs it.
-adb shell am start -W -n $APP/io.github.nourish.MainActivity --ez local true --es selftest_model test-model.gguf --es selftest_grammar day.gbnf \
+adb shell am start -W -n $APP/io.github.nourish.MainActivity --ez local true --es selftest_model test-model.gguf --es selftest_grammar meal.gbnf \
   --es selftest_download_url "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf" \
   --el selftest_download_size 105454432
 RESULT=""
@@ -60,14 +60,13 @@ adb logcat -d -s Nourish:* | grep -q NOURISH_DOWNLOAD_OK || fail "model download
 echo "$RESULT" | cut -c1-600
 echo "$RESULT" | grep -q NOURISH_SELFTEST_OK || fail "on-device generation failed or timed out"
 echo "$RESULT" | sed 's/.*NOURISH_SELFTEST_OK //' > shots/android-selftest.json
-python3 - <<'PY' || fail "the model's day of meals is not valid"
+python3 - <<'PY' || fail "the model's meal is not valid"
 import json
 result = json.load(open("shots/android-selftest.json"))
-day = json.loads(result["text"])
-for meal in ("breakfast", "lunch", "dinner"):
-    m = day[meal]
-    assert m["name"] and m["ingredients"] and m["steps"] and "calories" in m["nutrition"], meal
-print("Valid day of meals in", result["ms"], "ms:", [day[m]["name"] for m in ("breakfast", "lunch", "dinner")])
+m = json.loads(result["text"])
+assert m["name"] and m["servings"] == 2 and len(m["ingredients"]) >= 3 and len(m["steps"]) >= 3 and "calories" in m["nutrition"], m
+assert all(s.rstrip().endswith((".", "!")) for s in m["steps"]), m["steps"]
+print("Valid meal in", result["ms"], "ms:", m["name"], "-", len(m["ingredients"]), "ingredients,", len(m["steps"]), "steps")
 PY
 adb exec-out screencap -p > shots/android-3-after-ai.png
 

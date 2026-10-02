@@ -150,17 +150,17 @@ assert text.strip(), "LFM2.5-230M produced no text"
 PY
 
 echo "== 5. On-device AI through the app's own code"
-probe "const r = await nativeCall('generate', { model: 'test-model.gguf', grammar: GBNF_DAY, temperature: 0.7, max_tokens: DAY_TOKENS, n_ctx: 4096, gpu: false,
-  messages: [{ role: 'system', content: 'You are a meal-planning chef. Reply with JSON only.' }, { role: 'user', content: 'Plan Day 1 (Monday): breakfast, lunch and dinner.' }] }, { timeoutMs: 0 });
+probe "const r = await nativeCall('generate', { model: 'test-model.gguf', grammar: mealGrammar(2), temperature: 0.7, max_tokens: MEAL_TOKENS, n_ctx: 4096, gpu: false,
+  messages: [{ role: 'system', content: mealSystem(2) }, { role: 'user', content: mealAsk({ type: 'dinner', d: 0, cuisine: 'Moroccan' }) }] }, { timeoutMs: 0 });
   const models = await nativeCall('models', {}); return JSON.stringify({ text: r.text, models: models.files });" 300
-python3 - "$PROBE" <<'PY' || fail "the model's day of meals is not valid"
+python3 - "$PROBE" <<'PY' || fail "the model's meal is not valid"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
-v = json.loads(r["value"]); day = json.loads(v["text"])
-for meal in ("breakfast", "lunch", "dinner"):
-    m = day[meal]; assert m["name"] and m["ingredients"] and m["steps"] and "calories" in m["nutrition"], meal
+v = json.loads(r["value"]); m = json.loads(v["text"])
+assert m["name"] and m["servings"] == 2 and len(m["ingredients"]) >= 3 and len(m["steps"]) >= 3 and "calories" in m["nutrition"], m
+assert all(s.rstrip().endswith((".", "!")) for s in m["steps"]), m["steps"]
 assert any(f["file"] == "test-model.gguf" for f in v["models"]), v["models"]
-print("Valid day of meals:", [day[m]["name"] for m in ("breakfast", "lunch", "dinner")])
+print("Valid meal in the app's format:", m["name"], "-", len(m["ingredients"]), "ingredients,", len(m["steps"]), "steps")
 PY
 cp "$PROBE" shots/ios-ai-probe.json
 
@@ -169,7 +169,7 @@ probe "Object.assign(settings, { active_provider: 'local', local_model: 'test-mo
   runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
     { role: 'user', content: 'Goal: eat balanced. Likes: anything. Avoids: nothing. Generate the 7-day meal plan JSON.' }] });
   await new Promise(r => { const t = setInterval(() => { const s = JSON.parse(localStorage.getItem('nourish_plan_progress') || '{}'); if ((s.days || []).length >= 2) { clearInterval(t); r(); } }, 300); });
-  return localStorage.getItem('nourish_plan_progress');" 1200
+  return localStorage.getItem('nourish_plan_progress');" 2700
 python3 -c "
 import json; r = json.load(open('$PROBE')); assert r['ok'], r; s = json.loads(r['value'])
 json.dump(s['days'][:2], open('saved-days.json', 'w')); print('Saved before the kill:', len(s['days']), 'days')" || fail "the plan wasn't saved day by day"
@@ -177,7 +177,7 @@ sleep 3   # let WebKit write localStorage to disk
 
 echo "== 6b. Relaunch: the plan continues by itself from the saved day"
 probe "await new Promise(r => { const t = setInterval(() => { if (!planJob && daysData.length === 7 && !localStorage.getItem('nourish_plan_progress')) { clearInterval(t); r(); } }, 1000); });
-  return JSON.stringify({ days: daysData, log: activityLog.filter(l => l.area === 'plan').map(l => l.level + ' ' + l.msg) });" 2400
+  return JSON.stringify({ days: daysData, log: activityLog.filter(l => l.area === 'plan').map(l => l.level + ' ' + l.msg) });" 3600
 python3 - "$PROBE" <<'PY' || fail "the plan didn't continue correctly after the app was killed"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
@@ -190,10 +190,12 @@ assert any("Found a plan stopped at day" in l for l in v["log"]), "no resume in 
 junk = ("ingredients", "steps", "name", "nutrition", "description")
 for i, day in enumerate(v["days"]):
     for meal in ("breakfast", "lunch", "dinner"):
-        m = day[meal]; assert m["name"] and m["steps"] and "calories" in m["nutrition"], (i, meal)
+        m = day[meal]; assert m["name"] and m["steps"] and "calories" in m["nutrition"] and m["servings"] >= 1, (i, meal)
         for item in m["ingredients"]:
             assert item.strip().lower() not in junk and not item.lower().startswith(("use ", "description of ")) and item.count(",") <= 2, ("junk got through", item)
     print(f"Day {i + 1}:", " | ".join(day[m]["name"] for m in ("breakfast", "lunch", "dinner")))
+flagged = sum(1 for d in v["days"] for t in ("breakfast", "lunch", "dinner") if d[t].get("incomplete"))
+print(f"Meals marked 'may be incomplete' (expected with this tiny test model): {flagged} of 21")
 print("Resumed after the kill at day", len(saved) + 1, "and kept the first", len(saved), "days")
 PY
 cp "$PROBE" shots/ios-plan-probe.json
@@ -214,7 +216,7 @@ sleep 45
 sleep 3   # let WebKit write localStorage (the plan and the activity log) to disk
 echo "-- reopening Nourish; the plan should continue from its saved day"
 probe "await new Promise(r => { const t = setInterval(() => { if (!planJob && daysData.length === 7 && !localStorage.getItem('nourish_plan_progress')) { clearInterval(t); r(); } }, 1000); });
-  return JSON.stringify({ days: daysData.length, log: activityLog.filter(l => /background|Background|paused|Paused|Found a plan|Day [0-9] done|Screen stays/.test(l.msg)).map(l => new Date(l.t).toISOString().slice(11, 19) + ' ' + l.level + ' ' + l.msg) });" 2400
+  return JSON.stringify({ days: daysData.length, log: activityLog.filter(l => /background|Background|paused|Paused|Found a plan|Day [0-9] done|Screen stays/.test(l.msg)).map(l => new Date(l.t).toISOString().slice(11, 19) + ' ' + l.level + ' ' + l.msg) });" 3600
 python3 - "$PROBE" <<'PY' || fail "the plan didn't finish after a trip to the background"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r

@@ -51,9 +51,9 @@ r = json.load(open(sys.argv[1])); assert r["ok"], r
 v = json.loads(r["value"])
 print(f"{v['model']}: {v['total']:.0f} s for {len(v['stats'])} days")
 for s in v["stats"]:
-    print(f"  day {s['day']}: {s['seconds']} s, prompt {s['promptChars']} chars, junk lines (first try) {s['junkRows']}, made again {s['retried']}, repeats replaced {s['repeatsFixed']}")
-junk = sum(s["junkRows"] for s in v["stats"])
-print(f"  junk-line rate (first tries): {junk} of {junk + v['lines']} lines = {100 * junk / max(1, junk + v['lines']):.1f}%")
+    print(f"  day {s['day']}: {s['seconds']} s, {s['attempts']} model calls, problems on first tries {s['firstTryProblems']}, meals remade {s['remade']}, may be incomplete {s['incomplete']}")
+calls = sum(s["attempts"] for s in v["stats"]); meals = 3 * len(v["stats"])
+print(f"  {calls} model calls for {meals} meals ({calls / max(1, meals):.2f} per meal); may be incomplete: {sum(s['incomplete'] for s in v['stats'])} of {meals}")
 for i, n in enumerate(v["names"]): print(f"  Day {i + 1}: " + " | ".join(n))
 PY
   # free the simulator's disk for the next model
