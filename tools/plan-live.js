@@ -2,6 +2,8 @@
 // time taken, where the recipes came from and each day's totals. Run in CI (needs the internet and
 // `npm i linkedom`): node tools/plan-live.js
 const { DOMParser } = require('linkedom');
+// importer.js uses the browser's DOMParser; linkedom needs a whole <html> document to fill <body>.
+globalThis.DOMParser = class { parseFromString(s, type) { s = String(s); return new DOMParser().parseFromString(/<html[\s>]/i.test(s) ? s : `<html>${s}</html>`, type); } };
 const I = require('../importer.js');
 const F = require('../finder.js');
 const PL = require('../planner.js');
@@ -24,7 +26,7 @@ async function api(path, body) {
     }
     return { meals };
 }
-const readRecipe = (html, url) => { try { return I.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } };
+const readRecipe = (html, url) => { try { return I.structuredRecipe(new globalThis.DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } };
 const mem = {};
 const cache = { get: k => (k in mem ? JSON.parse(mem[k]) : null), set: (k, v) => { mem[k] = JSON.stringify(v); } };
 

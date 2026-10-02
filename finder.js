@@ -213,7 +213,7 @@
         }
         const steps = String(m.strInstructions || '').replace(/\.\s+/g, '.\n').split(/\r?\n/).map(s => s.replace(/^(step\s*)?\d+[.):]?\s*/i, '').trim()).filter(s => s.length > 3).slice(0, 14);
         return { name: m.strMeal, servings: 4, ingredients, steps, category: [m.strCategory, m.strArea].filter(Boolean),
-            source_url: m.strSource && /^https?:/.test(m.strSource) ? m.strSource : `https://www.themealdb.com/meal/${m.idMeal}`, source_name: 'TheMealDB' };
+            source_url: `https://www.themealdb.com/meal/${m.idMeal}`, source_name: 'TheMealDB' };
     }
     function fromSpoonacular(r) {
         const nutrient = name => { const f = ((r.nutrition && r.nutrition.nutrients) || []).find(n => n && n.name === name); return f ? f.amount : null; };
