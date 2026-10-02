@@ -958,7 +958,10 @@ select {
     background: linear-gradient(150deg, var(--accent-2), var(--accent) 60%, var(--accent-deep));
     box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--accent) 80%, transparent);
 }
-.chat-avatar svg { width: 1rem; height: 1rem; stroke-width: 2; }
+.chat-avatar { background: none; box-shadow: none; overflow: visible; }
+.chat-avatar .brand-mark { width: 32px; height: 32px; border-radius: 10px; filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.3)); }
+.chat-mark { display: grid; place-items: center; margin-bottom: var(--s-5); }
+.chat-mark .brand-mark { width: 76px; height: 76px; border-radius: 18px; }
 .chat-bubble { max-width: 84%; padding: 12px 16px; border-radius: 22px; line-height: 1.5; overflow-wrap: anywhere; }
 .chat-bubble p + p, .chat-bubble p + ul, .chat-bubble p + ol, .chat-bubble ul + p, .chat-bubble ol + p { margin-top: 8px; }
 .chat-bubble ul, .chat-bubble ol { padding-left: 20px; }
@@ -1216,6 +1219,9 @@ a.settings-button { display: flex; text-decoration: none; }
 }
 .cookbook-card .plan-meal-meta { white-space: normal; text-align: left; margin-top: 2px; }
 .cookbook-card .chev { display: none; }
+.cookbook-source { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: var(--fs-caption); font-weight: 650; color: var(--text-3); min-width: 0; }
+.cookbook-source svg { width: 0.85rem; height: 0.85rem; flex-shrink: 0; }
+.cookbook-source { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cookbook-none { color: var(--text-3); text-align: center; padding: var(--s-8) 0; }
 .empty-state.compact { padding: var(--s-6) var(--s-2); }
 .empty-state.compact .empty-art { width: 92px; height: 92px; border-radius: 30px; }

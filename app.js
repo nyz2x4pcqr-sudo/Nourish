@@ -1613,17 +1613,15 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
     const n = meal.nutrition;
     const chips = [h('span', { class: 'chip' }, icon('i-clock'), formatMinutes(meal.time_minutes))];
     if (meal.servings) chips.push(h('span', { class: 'chip' }, icon('i-user'), `Serves ${meal.servings}`));
-    if (on('show_nutrition')) {
-        chips.push(h('span', { class: 'chip accent' }, icon('i-flame'), `${formatCalories(n && n.calories)} kcal${meal.servings ? ' per serving' : ''}`));
-        if (n && meal.nutrition_estimated) chips.push(h('span', { class: 'chip warn', text: 'Estimated' }));
-        if (n && n.protein_g != null) chips.push(h('span', { class: 'chip', text: `Protein ${Math.round(n.protein_g)}g` }));
-        if (n && n.carbs_g != null) chips.push(h('span', { class: 'chip', text: `Carbs ${Math.round(n.carbs_g)}g` }));
-        if (n && n.fat_g != null) chips.push(h('span', { class: 'chip', text: `Fat ${Math.round(n.fat_g)}g` }));
-    }
+    if (on('show_nutrition') && !n) chips.push(h('span', { class: 'chip accent' }, icon('i-flame'), '— kcal'));
+    // Ticked ingredients and the step you're on stay while this recipe is open (also after the heart is tapped).
+    const progressKey = `${meal.name}|${dayIndex}|${mealType}|${cookbookId}`;
+    if (!recipeProgress || recipeProgress.key !== progressKey) recipeProgress = { key: progressKey, ticked: new Set(), step: -1 };
     const where = dayIndex != null ? `${MEAL_LABELS[mealType] || ''} · ${isToday(dayIndex) ? 'Today' : dayName(dayIndex)}` : MEAL_LABELS[mealType] || '';
 
     setChildren(content,
         h('div', { class: `recipe-hero art-${mealType}` },
+            h('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
             icon(MEAL_ICONS[mealType] || 'i-utensils'),
             h('div', { class: 'recipe-top' },
                 h('button', {
@@ -1639,8 +1637,8 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
         h('div', { class: 'recipe-header' },
             h('div', { class: 'meal-type', text: where }),
             h('h2', { class: 'recipe-name', text: meal.name }),
-            h('div', { class: 'recipe-meta' }, chips),
-            meal.servings && on('show_nutrition') && n ? h('p', { class: 'recipe-note', text: `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null),
+            h('div', { class: 'recipe-meta' }, chips)),
+        on('show_nutrition') && n ? nutritionPanel(meal) : null,
         Array.isArray(meal.incomplete) && meal.incomplete.length ? h('div', { class: 'recipe-warning', role: 'note' },
             h('div', { class: 'recipe-warning-title', text: 'This recipe may be incomplete' }),
             h('p', { text: 'The AI tried 3 times but this is the best it wrote. What\'s still wrong:' }),
@@ -1660,18 +1658,87 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
             }, icon('i-swap'), 'Swap meal') : null,
             h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => askAboutMeal(meal) }, icon('i-chat'), 'Ask the chef')),
         ingredients.length ? h('div', { class: 'recipe-section' },
-            h('div', { class: 'recipe-section-title', text: `Ingredients · ${ingredients.length}` }),
-            h('div', { class: 'recipe-ingredients' }, ingredients.map(i => h('div', { class: 'recipe-ingredient', text: i })))) : null,
+            h('div', { class: 'recipe-section-title' }, 'Ingredients', h('small', { text: meal.servings ? `${ingredients.length} · for ${meal.servings}` : String(ingredients.length) })),
+            h('div', { class: 'recipe-ingredients' }, ingredients.map((line, idx) => ingredientRow(line, idx)))) : null,
         meal.steps.length ? h('div', { class: 'recipe-section' },
-            h('div', { class: 'recipe-section-title', text: 'Instructions' }),
-            h('div', { class: 'recipe-steps' }, meal.steps.map((s, idx) => h('div', { class: 'recipe-step' },
-                h('div', { class: 'recipe-step-number', text: idx + 1 }),
-                h('div', { class: 'recipe-step-text', text: NourishUnits.convertText(s, units) }))))) : null,
+            h('div', { class: 'recipe-section-title' }, 'Method', h('small', { text: `${meal.steps.length} steps` })),
+            h('p', { class: 'recipe-steps-hint', text: 'Tap a step to follow along while you cook.' }),
+            h('div', { class: 'recipe-steps' }, meal.steps.map((s, idx) => h('button', {
+                type: 'button', class: 'recipe-step' + stepClass(idx), 'aria-pressed': String(idx < recipeProgress.step),
+                onclick: e => {
+                    // Tap a step to make it the one you're on; tap it again when it's done.
+                    recipeProgress.step = recipeProgress.step === idx ? idx + 1 : idx;
+                    e.currentTarget.parentNode.querySelectorAll('.recipe-step').forEach((b, i) => {
+                        b.className = 'recipe-step' + stepClass(i);
+                        b.setAttribute('aria-pressed', String(i < recipeProgress.step));
+                    });
+                },
+            },
+                h('span', { class: 'recipe-step-number', text: idx + 1 }),
+                h('span', { class: 'recipe-step-text' }, highlightStep(NourishUnits.convertText(s, units))))))) : null,
         meal.source_url ? h('a', { class: 'btn btn-secondary recipe-source', href: meal.source_url, target: '_blank', rel: 'noopener noreferrer' },
             icon('i-link'), `Original recipe on ${meal.source_name || 'the web'}${meal.via_name ? ` · via ${meal.via_name}` : ''}`) : h('div', { style: 'height:20px' }),
     );
     content.scrollTop = 0;
     $('recipeSheet').classList.add('active');
+}
+
+let recipeProgress = null;
+function stepClass(idx) {
+    return idx < recipeProgress.step ? ' done' : idx === recipeProgress.step ? ' current' : '';
+}
+
+// One ingredient, tappable to tick off; the amount is in bold.
+function ingredientRow(line, idx) {
+    const sp = NourishUnits.splitIngredient(line);
+    const amount = sp && sp.qty != null && !sp.note && sp.text && line.endsWith(sp.text) ? line.slice(0, line.length - sp.text.length).trim() : '';
+    return h('button', {
+        type: 'button', class: 'recipe-ingredient' + (recipeProgress.ticked.has(idx) ? ' done' : ''), 'aria-pressed': String(recipeProgress.ticked.has(idx)),
+        onclick: e => {
+            const el = e.currentTarget;
+            if (recipeProgress.ticked.has(idx)) recipeProgress.ticked.delete(idx); else recipeProgress.ticked.add(idx);
+            el.classList.toggle('done', recipeProgress.ticked.has(idx));
+            el.setAttribute('aria-pressed', String(recipeProgress.ticked.has(idx)));
+        },
+    }, h('span', {}, amount ? h('span', { class: 'qty', text: amount }) : null, amount ? ' ' + sp.text : line));
+}
+
+// Times and temperatures in a step stand out, so they're easy to find mid-cook.
+const STEP_KEYS = /(\d+(?:[.,]\d+)?(?:\s*(?:-|–|to)\s*\d+(?:[.,]\d+)?)?\s*(?:°\s*[CF]\b|degrees(?:\s+[CF]\b)?|(?:minutes?|mins?|hours?|hrs?|seconds?|secs?)\b))/gi;
+function highlightStep(text) {
+    const out = [];
+    let last = 0;
+    String(text).replace(STEP_KEYS, (match, _g, offset) => {
+        if (offset > last) out.push(text.slice(last, offset));
+        out.push(h('span', { class: 'step-key', text: match }));
+        last = offset + match.length;
+        return match;
+    });
+    if (last < text.length) out.push(text.slice(last));
+    return out;
+}
+
+// Calories per serving and how they split between protein, carbs and fat.
+function nutritionPanel(meal) {
+    const n = meal.nutrition;
+    const g = k => (Number.isFinite(n[k]) ? n[k] : null);
+    const kcal = { p: (g('protein_g') || 0) * 4, c: (g('carbs_g') || 0) * 4, f: (g('fat_g') || 0) * 9 };
+    const sum = kcal.p + kcal.c + kcal.f;
+    const split = h('div', { class: 'nutrition-split', 'aria-hidden': 'true' },
+        ['p', 'c', 'f'].map(k => h('span', { class: k, style: 'flex-grow:0' })));
+    if (sum > 0) requestAnimationFrame(() => requestAnimationFrame(() => {
+        split.querySelectorAll('span').forEach(el => { el.style.flexGrow = String(kcal[el.className] / sum); });
+    }));
+    const macro = (label, key, color) => h('div', { class: 'nutrition-macro' },
+        h('span', { class: 'k' }, h('i', { class: 'macro-dot', style: `background:var(--${color})` }), label),
+        h('span', { class: 'v num' }, g(key) != null ? String(Math.round(g(key))) : '—', h('small', { text: 'g' })));
+    return h('section', { class: 'nutrition-panel', 'aria-label': 'Nutrition' },
+        h('div', { class: 'nutrition-top' },
+            h('div', { class: 'nutrition-kcal num' }, formatCalories(n.calories), h('small', { text: meal.servings ? 'kcal per serving' : 'kcal' })),
+            meal.nutrition_estimated ? h('span', { class: 'chip warn', text: 'Estimated' }) : null),
+        sum > 0 ? split : null,
+        h('div', { class: 'nutrition-macros' }, macro('Protein', 'protein_g', 'protein'), macro('Carbs', 'carbs_g', 'carbs'), macro('Fat', 'fat_g', 'fat')),
+        meal.servings ? h('p', { class: 'recipe-note', text: `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null);
 }
 
 function closeRecipeSheet() {
@@ -1703,13 +1770,10 @@ function hasNutrition(day) {
 
 // === BRAND MARK ===
 // The app icon's bowl and sprout, drawn inline (the same artwork as icon.svg).
+// Its gradients (bmBg, bmBowl, bmLeaf) are in index.html, so every copy can use them.
 function brandMark(size = 64) {
     const s = (tag, attrs, ...kids) => svgEl(tag, attrs, ...kids);
     return s('svg', { class: 'brand-mark', viewBox: '0 0 64 64', width: String(size), height: String(size), 'aria-hidden': 'true' },
-        s('defs', {},
-            s('radialGradient', { id: 'bmBg', cx: '30%', cy: '20%', r: '90%' }, s('stop', { offset: '0%', 'stop-color': '#2E2116' }), s('stop', { offset: '100%', 'stop-color': '#0E0C0B' })),
-            s('linearGradient', { id: 'bmBowl', x1: '0', y1: '0', x2: '0', y2: '1' }, s('stop', { offset: '0%', 'stop-color': '#FFC46A' }), s('stop', { offset: '100%', 'stop-color': '#E0782A' })),
-            s('linearGradient', { id: 'bmLeaf', x1: '0', y1: '1', x2: '1', y2: '0' }, s('stop', { offset: '0%', 'stop-color': '#7DB876' }), s('stop', { offset: '100%', 'stop-color': '#C4E8A9' }))),
         s('rect', { width: '64', height: '64', rx: '15', fill: 'url(#bmBg)' }),
         s('path', { d: 'M32 33.5V22', stroke: '#9FD08C', 'stroke-width': '2.4', 'stroke-linecap': 'round', fill: 'none' }),
         s('path', { d: 'M31.6 25.5C25.4 25.6 21 21.4 20.2 15.2C26.6 15 31 18.9 31.6 25.5Z', fill: 'url(#bmLeaf)' }),
@@ -1941,6 +2005,8 @@ function groceryItems() {
     return items;
 }
 
+// Each aisle gets its own colour dot.
+const GROCERY_COLORS = { Protein: 'var(--fat)', Dairy: '#A9C7E8', 'Grains & bakery': 'var(--carbs)', Produce: 'var(--protein)', Pantry: '#C9A27E', Other: 'var(--text-3)' };
 function updateGroceryScreen() {
     const container = $('groceryContainer');
     if (!container) return;
@@ -1974,14 +2040,14 @@ function updateGroceryScreen() {
 
     const sections = [];
     if (grocery.custom.length) {
-        sections.push(h('section', { class: 'card grocery-category' },
+        sections.push(h('section', { class: 'card grocery-category', style: '--cat:var(--accent)' },
             h('div', { class: 'category-header' }, h('span', { text: 'Added by you' }), h('span', { class: 'count', text: `${grocery.custom.filter(c => c.checked).length}/${grocery.custom.length}` })),
             grocery.custom.map((item, i) => itemRow(item.text, item.checked,
                 box => { grocery.custom[i].checked = box.checked; groceryChanged(box); },
                 () => { grocery.custom.splice(i, 1); changed('grocery'); updateGroceryScreen(); }))));
     }
     for (const cat of categories) {
-        sections.push(h('section', { class: 'card grocery-category' },
+        sections.push(h('section', { class: 'card grocery-category', style: `--cat:${GROCERY_COLORS[cat] || 'var(--text-3)'}` },
             h('div', { class: 'category-header' }, h('span', { text: cat }), h('span', { class: 'count', text: `${items[cat].filter(i => checked.has(i.key)).length}/${items[cat].length}` })),
             items[cat].map(item => itemRow(item.text, checked.has(item.key), box => toggleGrocery(item.key, box)))));
     }
@@ -3007,9 +3073,10 @@ function renderCookbook() {
                     : h('div', { class: 'cookbook-list' }, shown.map(e => h('button', { type: 'button', class: 'cookbook-card', onclick: () => openRecipeSheet(e.meal_type, e.recipe, null, { cookbookId: e.id }) },
                         h('span', { class: `dot art-${e.meal_type}` }, icon(MEAL_ICONS[e.meal_type])),
                         h('span', { class: 'cookbook-card-body' },
-                            h('span', { class: 'plan-meal-type', text: `${MEAL_LABELS[e.meal_type]} · ${e.source === 'imported' ? (e.recipe.source_name || 'Imported') : 'Made by Nourish'}` }),
+                            h('span', { class: 'plan-meal-type', text: MEAL_LABELS[e.meal_type] }),
                             h('span', { class: 'plan-meal-name', text: e.recipe.name }),
-                            h('span', { class: 'plan-meal-meta', text: [formatMinutes(e.recipe.time_minutes), on('show_nutrition') && e.recipe.nutrition ? `${formatCalories(e.recipe.nutrition.calories)} kcal` : ''].filter(Boolean).join(' · ') })),
+                            h('span', { class: 'plan-meal-meta', text: [formatMinutes(e.recipe.time_minutes), on('show_nutrition') && e.recipe.nutrition ? `${formatCalories(e.recipe.nutrition.calories)} kcal` : ''].filter(Boolean).join(' · ') }),
+                            h('span', { class: 'cookbook-source' }, icon(e.source === 'imported' ? 'i-link' : 'i-sparkle'), e.source === 'imported' ? (e.recipe.source_name || 'Imported') : 'Made by Nourish')),
                         icon('i-chevron', 'chev'))))));
     if (hadFocus) { const s = $('cookbookSearch'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
 }
@@ -3190,11 +3257,11 @@ function renderChat() {
     if (label) label.textContent = planJob ? 'Cooking…' : 'Make plan';
     $('chatSend').disabled = chatBusy;
 
-    const avatar = () => h('div', { class: 'chat-avatar', 'aria-hidden': 'true' }, icon('i-leaf'));
+    const avatar = () => h('div', { class: 'chat-avatar', 'aria-hidden': 'true' }, brandMark(30));
     const items = [];
     if (!chatHistory.length) {
         items.push(h('div', { class: 'chat-welcome' },
-            h('div', { class: 'empty-art' }, icon('i-chat')),
+            h('div', { class: 'chat-mark' }, brandMark(76)),
             h('h2', { class: 'title', text: settings.name ? `Hi ${settings.name.trim().split(/\s+/)[0]}, I'm your chef` : "Hi, I'm your chef" }),
             h('p', { text: on('chat_actions')
                 ? 'Tell me what you like and how you cook. Ask me to make a plan and it goes straight into your Plan tab; ask me to swap a meal and I\'ll change it.'
