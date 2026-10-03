@@ -1,7 +1,7 @@
 // Model ranking for the phone apps: each phone gets its own top-5 list that fits its memory.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { rankModels: rank, assessModel, compareVersions, stripThinking } = require('../ondevice.js');
+const { rankModels: rank, assessModel, compareVersions, pickUpdate, stripThinking } = require('../ondevice.js');
 
 // Sample models for the ranking tests (the app itself always builds its list live from Hugging Face).
 const MODEL_CATALOG = [
@@ -165,4 +165,14 @@ test('an imported recipe at the format\'s maximum fits, with the source text, in
     // The source text (~4 characters per token for English) and the instructions (~350 tokens) also fit.
     assert.ok(IMPORT_TOKENS + IMPORT_TEXT_CHARS / 4 + 350 <= 4096, 'source text + answer exceed 4096 tokens');
     assert.match(importGrammar(), /"\\"found\\":" ws \("false" ws "\}" \| "true"/);
+});
+
+test('phone update check: the release published last is the latest, even after the numbers were reset', () => {
+    const list = [{ tag_name: 'v0.1.7-pre-alpha', prerelease: true }, { tag_name: 'v0.7.0-pre-alpha', prerelease: true }, { tag_name: 'v0.6.0-pre-alpha', prerelease: true }];
+    assert.strictEqual(pickUpdate(list, '0.7.0-pre-alpha', true).update_available, true);   // Android name
+    assert.strictEqual(pickUpdate(list, '0.7.0', true).latest, '0.1.7-pre-alpha');           // iPhone number
+    assert.strictEqual(pickUpdate(list, '0.7.0', true).update_available, true);
+    assert.strictEqual(pickUpdate(list, '0.1.7', true).update_available, false);
+    assert.strictEqual(pickUpdate(list, '0.1.7-pre-alpha', false).update_available, false);  // no stable releases
+    assert.strictEqual(pickUpdate(list.slice(1), '0.2.0', true).update_available, true);    // never released: by number
 });

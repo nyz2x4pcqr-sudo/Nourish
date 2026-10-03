@@ -379,6 +379,17 @@ class UpdateTest(unittest.TestCase):
         self.assertFalse(self._check(rel, current="0.2.0-beta")["update_available"])
         self.assertFalse(self._check(rel, prereleases=False)["update_available"])
 
+    def test_renumbered_release_is_newest(self):
+        # 0.7.0 was followed by 0.1.7: the one published last is the latest, whatever its number.
+        rel = [{"tag_name": "v0.1.7-pre-alpha", "prerelease": True, "published_at": "2026-10-03T04:00:00Z", "assets": []},
+               {"tag_name": "v0.7.0-pre-alpha", "prerelease": True, "published_at": "2026-10-03T00:55:17Z", "assets": []},
+               {"tag_name": "v0.6.0-pre-alpha", "prerelease": True, "published_at": "2026-10-02T22:01:09Z", "assets": []}]
+        info = self._check(rel, current="0.7.0-pre-alpha")
+        self.assertTrue(info["update_available"])
+        self.assertEqual(info["latest"], "0.1.7-pre-alpha")
+        self.assertFalse(self._check(rel, current="0.1.7-pre-alpha")["update_available"])
+        self.assertTrue(self._check(rel, current="0.6.0-pre-alpha")["update_available"])
+
     def test_no_digest_means_no_install(self):
         info = self._check([{"tag_name": "v1.0.0", "assets": [{"name": "Nourish.exe", "browser_download_url": "https://x"}]}])
         self.assertTrue(info["update_available"])

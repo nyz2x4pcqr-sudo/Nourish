@@ -55,22 +55,34 @@ async def fetch_latest(current: str, include_prereleases: bool = True) -> dict:
     if res.status_code >= 400:
         raise UpdateError(f"GitHub returned {res.status_code} while checking for updates")
 
-    best = None
+    releases = []
     for release in res.json() or []:
         if release.get("draft") or (release.get("prerelease") and not include_prereleases):
             continue
         version = parse_version(release.get("tag_name", ""))
-        if version and (best is None or version > best[0]):
-            best = (version, release)
+        if version:
+            releases.append((version, release))
 
     info = {"current": current, "update_available": False, "can_install": False}
     cur = parse_version(current)
-    if not best:
+    if not releases:
         return info
+    # Version numbers were reset once (0.7.0 was followed by 0.1.7), so the latest release is the
+    # one published last, and an update is one published after this version's own release.
+    # Without dates (or for a version that was never released) the highest number wins.
+    dated = all(r.get("published_at") for _, r in releases)
+    best = max(releases, key=(lambda vr: vr[1]["published_at"]) if dated else (lambda vr: vr[0]))
     release = best[1]
     info.update(latest=release["tag_name"].lstrip("vV"), url=release.get("html_url"),
                 notes=(release.get("body") or "")[:4000], published=release.get("published_at"))
-    if cur is None or best[0] <= cur:
+    if cur is None:
+        return info
+    mine = next((r for v, r in releases if v[:3] == cur[:3]), None)
+    if dated and mine is not None:
+        newer = release["published_at"] > mine["published_at"]
+    else:
+        newer = best[0] > cur
+    if not newer:
         return info
     asset = next((a for a in release.get("assets") or [] if a.get("name") == ASSET_NAME), None)
     digest = (asset or {}).get("digest") or ""

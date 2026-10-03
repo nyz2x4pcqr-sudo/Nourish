@@ -360,7 +360,7 @@ Driven by activity logs from a real iPhone 16 Pro (iOS 26.6, Nourish running ins
 - **Self-update on real Windows** — the swap-and-restart was tested with Linux builds of the app, plus the same code paths in unit tests. `os.rename` of a running `.exe` and `CREATE_NEW_CONSOLE` are standard Windows behaviour, but the first real Windows update (0.2.0 → the next release) is untested.
 - **Exact Dependabot alert list** — not readable with the tools here; reproduced with `pip-audit`.
 
-## Sensitive-information check (0.8.0)
+## Sensitive-information check (0.1.7)
 - **Keys and tokens:** the code and all 142 commits were searched for real API keys, tokens and private keys (Anthropic, OpenAI, GitHub, Hugging Face, AWS, Google, Slack, PEM). None found; the only hit is the fake `sk-ant-TEST-SECRET-do-not-log` used by a test. No `.env`, data file or signing key has ever been committed. Keys typed into the app stay on the PC (`nourish-data.json`, git-ignored) and are never sent back to the page or written to the log.
 - **FIXED:** this file quoted the old Windows folder path (with a username) from M11; it no longer does.
 - **FIXED:** `.gitignore` now also blocks `.env.*`, signing files (`*.keystore`, `*.jks`, `*.p12`, `*.pem`, `*.key`, `*.mobileprovision`), `local.properties` and model files.

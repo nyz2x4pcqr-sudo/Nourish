@@ -36,7 +36,7 @@ logger = logging.getLogger("nourish")
 # httpx logs full request URLs at INFO, which can include query-string API keys.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-VERSION = "0.8.0-pre-alpha"
+VERSION = "0.1.7-pre-alpha"
 PORT = int(os.getenv("NOURISH_PORT", "8000"))
 LMSTUDIO_URL = os.getenv("LMSTUDIO_URL", "http://localhost:1234").rstrip("/")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")

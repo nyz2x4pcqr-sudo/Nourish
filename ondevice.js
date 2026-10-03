@@ -790,10 +790,21 @@ async function localUpdateCheck(prereleases) {
     const specs = await getSpecs().catch(() => null);
     const current = (specs && specs.app_version) || '0';
     const list = await nativeJSON('https://api.github.com/repos/nyz2x4pcqr-sudo/Nourish/releases?per_page=10', { headers: { Accept: 'application/vnd.github+json' } });
-    const rel = (list || []).filter(r => !r.draft && (prereleases || !r.prerelease))[0];
+    return pickUpdate(list, current, prereleases);
+}
+
+// GitHub lists the newest release first. Version numbers were reset (0.7.0 was followed by 0.1.7),
+// so "newer" means published later: an update is offered when this version's own release is
+// further down the list. A version that was never released compares by number.
+function pickUpdate(list, current, prereleases) {
+    const releases = (list || []).filter(r => !r.draft && (prereleases || !r.prerelease));
+    const rel = releases[0];
     if (!rel) return { current, update_available: false };
     const latest = String(rel.tag_name || '').replace(/^v/, '');
-    return { current, latest, update_available: compareVersions(latest, current) > 0, notes: rel.body || '', url: rel.html_url, can_install: false };
+    const base = v => String(v).replace(/^v/, '').split('-')[0];
+    const mine = releases.findIndex(r => base(r.tag_name) === base(current));
+    const update = mine >= 0 ? mine > 0 : compareVersions(latest, current) > 0;
+    return { current, latest, update_available: update, notes: rel.body || '', url: rel.html_url, can_install: false };
 }
 
 // "0.3.0-pre-alpha" < "0.3.0-beta" < "0.3.0"
@@ -1387,5 +1398,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
+    module.exports = { IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }
