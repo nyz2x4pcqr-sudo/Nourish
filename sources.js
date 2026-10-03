@@ -19,6 +19,9 @@
         { id: 'themealdb', name: 'TheMealDB', kind: 'api', group: 'api', status: 'ok', note: 'Free recipe database, no key needed.' },
         { id: 'spoonacular', name: 'Spoonacular', kind: 'api', group: 'api', status: 'ok', needsKey: 'spoonacular_api_key', nutrition: true, note: 'Large recipe database with nutrition. Needs a free key.' },
 
+        // --- Nourish's own recipes (builtins.js): always there, offline too ---
+        { id: 'builtin', name: 'Nourish kitchen', kind: 'builtin', group: 'builtin', status: 'ok', note: 'Nourish\'s own tested recipes, built into the app. Work offline.' },
+
         // --- your own files ---
         { id: 'library', name: 'Your recipe library', kind: 'library', group: 'library', status: 'ok', note: 'Recipes from the files in your Nourish folders.' },
     ];

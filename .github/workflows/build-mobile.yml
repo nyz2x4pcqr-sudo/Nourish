@@ -25,6 +25,7 @@ on:
       - "library.js"
       - "foodlog.js"
       - "taste.js"
+      - "builtins.js"
       - "theme.js"
       - "font-*.woff2"
       - "app-icon-*.png"

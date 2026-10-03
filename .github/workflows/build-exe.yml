@@ -24,6 +24,7 @@ on:
       - "library.js"
       - "foodlog.js"
       - "taste.js"
+      - "builtins.js"
       - "theme.js"
       - "font-*.woff2"
       - "app-icon-*.png"
@@ -70,7 +71,7 @@ jobs:
           pyinstaller --noconfirm --onefile --console --name Nourish
           --collect-submodules uvicorn --paths backend
           --add-data "index.html;frontend" --add-data "app.js;frontend"
-          --add-data "json-repair.js;frontend" --add-data "grocery.js;frontend" --add-data "units.js;frontend" --add-data "recipes.js;frontend" --add-data "importer.js;frontend" --add-data "nutrition-data.js;frontend" --add-data "nutrition.js;frontend" --add-data "prefs.js;frontend" --add-data "planner.js;frontend" --add-data "sources.js;frontend" --add-data "finder.js;frontend" --add-data "library.js;frontend" --add-data "foodlog.js;frontend" --add-data "taste.js;frontend" --add-data "theme.js;frontend" --add-data "font-inter.woff2;frontend" --add-data "font-source-serif.woff2;frontend" --add-data "font-source-sans.woff2;frontend" --add-data "font-nunito.woff2;frontend" --add-data "font-manrope.woff2;frontend" --add-data "app-icon-default.png;frontend" --add-data "app-icon-midnight.png;frontend" --add-data "app-icon-forest.png;frontend" --add-data "app-icon-plum.png;frontend" --add-data "app-icon-paper.png;frontend" --add-data "app-icon-oled.png;frontend" --add-data "font-fraunces.woff2;frontend" --add-data "font-figtree.woff2;frontend" --add-data "ondevice.js;frontend" --add-data "styles.css;frontend"
+          --add-data "json-repair.js;frontend" --add-data "grocery.js;frontend" --add-data "units.js;frontend" --add-data "recipes.js;frontend" --add-data "importer.js;frontend" --add-data "nutrition-data.js;frontend" --add-data "nutrition.js;frontend" --add-data "prefs.js;frontend" --add-data "planner.js;frontend" --add-data "sources.js;frontend" --add-data "finder.js;frontend" --add-data "library.js;frontend" --add-data "foodlog.js;frontend" --add-data "taste.js;frontend" --add-data "builtins.js;frontend" --add-data "theme.js;frontend" --add-data "font-inter.woff2;frontend" --add-data "font-source-serif.woff2;frontend" --add-data "font-source-sans.woff2;frontend" --add-data "font-nunito.woff2;frontend" --add-data "font-manrope.woff2;frontend" --add-data "app-icon-default.png;frontend" --add-data "app-icon-midnight.png;frontend" --add-data "app-icon-forest.png;frontend" --add-data "app-icon-plum.png;frontend" --add-data "app-icon-paper.png;frontend" --add-data "app-icon-oled.png;frontend" --add-data "font-fraunces.woff2;frontend" --add-data "font-figtree.woff2;frontend" --add-data "ondevice.js;frontend" --add-data "styles.css;frontend"
           --add-data "manifest.webmanifest;frontend" --add-data "icon-192.png;frontend"
           --add-data "icon-512.png;frontend" --add-data "apple-touch-icon.png;frontend"
           backend/nourish_app.py

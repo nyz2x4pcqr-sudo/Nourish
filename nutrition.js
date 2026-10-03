@@ -14,12 +14,25 @@
     // Words that describe how an ingredient is cut or prepared, not what it is.
     const PREP = /\b(chopped|finely|roughly|coarsely|thinly|thickly|diced|minced|sliced|grated|shredded|crushed|peeled|seeded|deseeded|cored|trimmed|halved|quartered|cubed|julienned|torn|packed|loosely|lightly|heaping|level|rounded|softened|melted|room temperature|cold|warm|hot|cooked|uncooked|raw|fresh|freshly|frozen|thawed|drained|rinsed|and rinsed|divided|optional|to taste|for serving|for garnish|garnish|plus more|or more|as needed|about|approximately|large|medium|small|extra|boneless|skinless|skin-on|bone-in|organic|good quality|low[- ]sodium|reduced[- ]sodium|unsalted|salted|whole|ground|dried|toasted|roasted|fat[- ]free|lean|of|the|a|an)\b/g;
     // Herbs, spices and seasonings: almost no calories, so a missing amount doesn't matter.
-    const FREE = /\b(salt|pepper|cumin|paprika|chili powder|chilli|cayenne|flakes|turmeric|coriander|cinnamon|oregano|basil|thyme|rosemary|parsley|cilantro|dill|mint|chives|bay lea|garlic powder|onion powder|nutmeg|cloves|cardamom|allspice|seasoning|spice|herbs?|zest|vanilla|water|ice|cooking spray|nonstick spray|baking soda|baking powder|yeast)\b/;
+    const FREE = /\b(salt|pepper|cumin|paprika|chili powder|chilli|cayenne|flakes|turmeric|coriander|cinnamon|oregano|basil|thyme|rosemary|parsley|cilantro|dill|mint|chives|bay lea|garlic powder|onion powder|nutmeg|cloves|cardamom|allspice|star anise|anise|cinnamon sticks?|seasoning|spice|herbs?|zest|vanilla|water|ice|cooking spray|nonstick spray|baking soda|baking powder|yeast)\b/;
+
+    // Everyday names the USDA table doesn't have, read as the closest food it does.
+    const EXTRA = {
+        'hamburger buns': 'bread', 'hamburger bun': 'bread', 'burger buns': 'bread', 'burger bun': 'bread', 'buns': 'bread', 'bun': 'bread',
+        'sub rolls': 'bread', 'sub roll': 'bread', 'hoagie rolls': 'bread', 'dinner rolls': 'bread', 'crusty bread': 'bread', 'baguette': 'bread',
+        'bean sprouts': 'cabbage', 'red chilies': 'jalapeno', 'red chili': 'jalapeno', 'thai chilies': 'jalapeno', 'green chilies': 'jalapeno', 'chilies': 'jalapeno',
+        'chili bean paste': 'miso', 'doubanjiang': 'miso', 'arugula': 'lettuce', 'rocket': 'lettuce',
+    };
+    // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
+    const EACH = { 'rice cake': 9, ginger: 8, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20 };
+    const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
+    // A cup of something light and airy (chips, flakes) weighs far less than a cup of water.
+    const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60 };
 
     let INDEX = null;   // [phrase, key], longest phrases first
     function index() {
         if (INDEX) return INDEX;
-        INDEX = [];
+        INDEX = Object.keys(EXTRA).filter(k => FOODS[EXTRA[k]]).map(k => [k, EXTRA[k]]);
         Object.keys(FOODS).forEach(key => {
             INDEX.push([key, key]);
             (FOODS[key].a || []).forEach(a => INDEX.push([a.toLowerCase(), key]));
@@ -40,16 +53,25 @@
             .replace(/[^a-z0-9%' -]+/g, ' ').replace(/\s+/g, ' ').trim();
     }
 
-    // The table entry for an ingredient's words, or null.
+    // The table entry for an ingredient's words, or null. The patterns are made once, and each
+    // ingredient's answer is remembered (plans read the same lines many times).
+    let PATTERNS = null;
+    const matched = new Map();
     function matchFood(text) {
         const base = clean(text);
+        if (matched.has(base)) return matched.get(base);
+        if (!PATTERNS) PATTERNS = index().map(([phrase, key]) => [new RegExp('(^|[^a-z])' + phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z])'), phrase, key, phrase.split(' ')[0]]);
         const variants = [base, base.split(' ').map(singular).join(' '), base.replace(PREP, ' ').replace(/\s+/g, ' ').trim()];
         variants.push(variants[2].split(' ').map(singular).join(' '));
-        for (const [phrase, key] of index()) {
-            const re = new RegExp('(^|[^a-z])' + phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z])');
-            if (variants.some(v => re.test(v))) return { key, food: FOODS[key], phrase };
+        const all = variants.join(' | ');
+        let out = null;
+        for (const [re, phrase, key, first] of PATTERNS) {
+            if (all.indexOf(first) < 0) continue;   // quick check before the pattern
+            if (variants.some(v => re.test(v))) { out = { key, food: FOODS[key], phrase }; break; }
         }
-        return null;
+        if (matched.size > 20000) matched.clear();
+        matched.set(base, out);
+        return out;
     }
 
     // Grams in one of a food's portions, by the words in USDA's portion name.
@@ -71,7 +93,10 @@
         return 1;
     }
     // A whole thing ("2 eggs", "1 onion", "1 chicken breast"): USDA's medium, large or whole size.
-    function eachGrams(food, key) {
+    function eachGrams(food, key, phrase) {
+        const byPhrase = EACH_PHRASE.find(([re]) => re.test(phrase || ''));
+        if (byPhrase) return byPhrase[1];
+        if (EACH[key]) return EACH[key];
         return portionGrams(food, ['medium', 'large', 'whole', 'breast', 'thigh', 'fillet', 'chop', 'egg', 'fruit', 'pepper', 'clove', 'stalk', 'small', 'piece', 'slice'])
             || ({ garlic: 3, egg: 50, tortilla: 45, 'corn tortilla': 26, bread: 32, pita: 60, bagel: 100, 'english muffin': 60 }[key]) || 100;
     }
@@ -115,7 +140,7 @@
         } else if (qty != null) {
             const unit = item.unit;
             if (G[unit]) grams = qty * G[unit];
-            else if (ML[unit]) grams = qty * ML[unit] * gramsPerMl(food);
+            else if (ML[unit]) grams = CUP[m.key] ? qty * ML[unit] / 240 * CUP[m.key] : qty * ML[unit] * gramsPerMl(food);
             else if (unit === 'clove') grams = qty * (portionGrams(food, ['clove']) || 3);
             else if (unit === 'can') grams = qty * (portionGrams(food, ['can']) || 400);
             else if (unit === 'slice') grams = qty * (portionGrams(food, ['slice']) || 30);
@@ -128,8 +153,9 @@
             else if (unit === 'package') grams = qty * 300;
             else if (unit === 'scoop') grams = qty * 30;
             else if (unit === 'fillet') grams = qty * (portionGrams(food, ['fillet']) || 150);
-            else if (unit === 'piece') grams = qty * eachGrams(food, m.key);
-            else grams = qty * eachGrams(food, m.key);
+            else if (unit === 'piece') grams = qty * eachGrams(food, m.key, m.phrase);
+            else if (!unit && FREE.test(clean(words)) && /\b(sticks?|star anise|anise|pods?|cloves|bay lea|leaves|sprigs?|whole)\b/.test(clean(raw))) grams = qty * 1.5;   // 2 cinnamon sticks, 3 star anise
+            else grams = qty * eachGrams(food, m.key, m.phrase);
         } else {
             // No amount ("salt to taste", "cooking spray"): seasonings count as nothing; anything else
             // is a guess, so the recipe is marked approximate.
