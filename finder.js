@@ -102,7 +102,7 @@
         // The site's own category and course (keywords are too loose: "garlic butter sauce" on a steak).
         const cat = [].concat(r.category || [], r.course || []).join(', ');
         const name = String(r.name || '');
-        const dish = name.replace(/\s+(with|on|over|served with)\s+.*$/i, '').replace(/[^\x00-\x7f]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const dish = name.replace(/\s+(with|in|on|over|served with)\s+.*$/i, '').replace(/[^\x00-\x7f]+/g, ' ').replace(/\s+/g, ' ').trim();
         const mealish = /\b(main( course| dish)?|entr[eé]e|dinner|lunch|breakfast|brunch|supper)\b/i.test(cat);
         // Smoothies stay: they're a breakfast here (the breakfast check decides).
         if ((DRINK.test(dish) && !/smoothie|shake/i.test(dish)) || (/\b(drinks?|beverages?|cocktails?)\b/i.test(cat) && !mealish)) return 'a drink';

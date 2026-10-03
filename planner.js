@@ -20,12 +20,17 @@
     const BREAKFAST = /\b(breakfast|brunch|oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|crepes?|french toast|omelet+e?s?|frittatas?|scrambled?|scramble|eggs? benedict|shakshuka|smoothie|parfait|yogh?urt bowl|chia (seed )?pudding|muffins?|scones?|breakfast burrito|avocado toast|toast|bagels?|hash browns?|huevos|congee|egg (muffin|cup|bite)s?|egg bake|breakfast bowl|overnight|acai|quiche|dutch baby|cr[eê]pe)\b/i;
     const ONLY_BREAKFAST = /\b(oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|french toast|smoothie|parfait|chia (seed )?pudding|muffins?|scones?|overnight|acai|cereal)\b/i;
     const DESSERT = /\b(cake|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
-    const NOT_DESSERT = /\b(chia pudding|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry|rice cakes?|crab cakes?|fish cakes?|salmon cakes?|tuna cakes?|potato cakes?|pancakes?)\b/i;
+    const NOT_DESSERT = /\b(chia( seed)? pudding|protein pudding|overnight|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry|rice cakes?|crab cakes?|fish cakes?|salmon cakes?|tuna cakes?|potato cakes?|pancakes?)\b/i;
     const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib)\b/i;
     // Fine for dinner, too much for a quick lunch.
     const HEAVY_LUNCH = /\b(baked (pasta|ziti|penne|rigatoni|macaroni|mac|spaghetti|gnocchi)|pasta bake|mac and cheese bake|stuffed shells|manicotti|cannelloni|pot roast|roast (chicken|turkey|lamb|pork|beef|duck)|whole (chicken|fish|turkey)|beef wellington|pie|gratin|moussaka|pastitsio|osso buco|cassoulet|coq au vin|bourguignon|slow cooker|crock ?pot|braised)\b/i;
     const NOT_A_MEAL = /\b(sauce|dressing|dip|marinade|seasoning|spice (mix|blend)|stock|broth|syrup|jam|butter|vinaigrette|gravy|salsa|pesto|chutney|pickle[sd]?|drink|cocktail|mocktail|lemonade|tea|coffee|latte|juice|bread|loaf|rolls|buns|crackers|croutons|bars|bites|energy balls|protein balls|trail mix|popcorn|chips)$/i;
     const SIDE = /\b(side|sides|side dish|appetizers?|starters?|snacks?)\b/i;
+    // Parts of a meal, not a meal: eggs marinated or boiled to go with something, "how to cook…".
+    const COMPONENT = /\b(marinated|pickled|deviled|devilled|hard[- ]?boiled|soft[- ]?boiled|jammy|soy[- ]sauce|tea|ramen|mayak|onsen|scotch) eggs?\b|\bhow to (cook|make|boil|poach|fry|store|freeze)\b/i;
+    // A savoury porridge or congee with meat or fish is a lunch or dinner, not a breakfast.
+    const MEAT_WORD = /\b(chicken|beef|pork|lamb|turkey|duck|fish|shrimp|prawns?|salmon|sausage|bacon|ham|seafood|crab)\b/i;
+    const SAVORY_PORRIDGE = /\b(porridge|congee|jook|juk|oatmeal|grits)\b/i;
 
     function textOf(r) { return `${r.name || ''} ${(r.category || []).join ? (r.category || []).join(' ') : r.category || ''}`; }
 
@@ -35,16 +40,24 @@
         const cat = String(Array.isArray(r.category) ? r.category.join(' ') : r.category || '').toLowerCase();
         const ings = (r.ingredients || []).join(' ').toLowerCase();
         const sweetHeavy = /\b(sugar|honey|maple|chocolate|syrup)\b/.test(ings) && !/\b(salt|garlic|onion|soy|pepper)\b/.test(ings);
-        if ((DESSERT.test(name) && !NOT_DESSERT.test(name)) || /dessert|baking|treat/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'a dessert' };
-        // "Salmon Tacos with Mango Salsa" is tacos, not salsa: only the dish itself counts, not what comes with it.
-        const dish = name.replace(/\s+(with|on|over|served with|and a side of)\s+.*$/i, '').trim();
+        // Judged by what the dish is: a site's "Dessert" tag doesn't count when it also files it under a meal.
+        const mealCat = /breakfast|brunch|lunch|dinner|main|entr[eé]e|supper/.test(cat);
+        if ((DESSERT.test(name) && !NOT_DESSERT.test(name)) || (/dessert|baking|treat/.test(cat) && !mealCat)) return { breakfast: false, lunch: false, dinner: false, why: 'a dessert' };
+        if (COMPONENT.test(name)) return { breakfast: false, lunch: false, dinner: false, why: 'a side or component, not a meal' };
+        // "Salmon Tacos with Mango Salsa" is tacos and "Eggs in Spicy Tomato Sauce" is eggs: only the
+        // dish itself counts, not what it comes with or in.
+        const dish = name.replace(/\s+(with|in|on|over|served with|and a side of)\s+.*$/i, '').trim();
         if (NOT_A_MEAL.test(dish) || /\b(sauce|drink|beverage|condiment|dressing)\b/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'not a meal' };
-        const brk = BREAKFAST.test(name) || /breakfast|brunch/.test(cat);
+        const savoryPorridge = SAVORY_PORRIDGE.test(name) && MEAT_WORD.test(name);
+        // A complete egg dish ("Eggs in Spicy Tomato Sauce", "Baked Eggs with Spinach") is a breakfast too.
+        const eggDish = /\beggs?\b/i.test(dish) && !COMPONENT.test(name);
+        const brk = !savoryPorridge && (BREAKFAST.test(name) || eggDish || /breakfast|brunch/.test(cat));
         // A recipe the site files under breakfast only stays at breakfast.
         const brkOnlyCat = /breakfast|brunch/.test(cat) && !/lunch|dinner|main|entr[eé]e|supper/.test(cat);
-        const onlyBrk = ONLY_BREAKFAST.test(name) || (brk && sweetHeavy) || brkOnlyCat || /\bbreakfast\b/i.test(name);
+        const onlyBrk = !savoryPorridge && (ONLY_BREAKFAST.test(name) || (brk && sweetHeavy) || brkOnlyCat || /\bbreakfast\b/i.test(name));
         const heavy = DINNER_ONLY.test(name);
-        const side = SIDE.test(cat) && !/main/.test(cat);
+        const side = SIDE.test(cat) && !/main|breakfast|brunch|lunch|dinner/.test(cat);
+        if (side) return { breakfast: false, lunch: false, dinner: false, why: 'a side or snack, not a meal' };
         const hasProtein = !!mainProtein(r);
         return {
             breakfast: brk && !heavy,
