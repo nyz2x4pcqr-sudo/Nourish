@@ -160,7 +160,7 @@
         const unit = item.unit;
         if (!unit || unit === 'clove' || unit === 'can' || unit === 'slice' || unit === 'piece' || unit === 'fillet') q = Math.max(0.5, Math.round(q * 2) / 2);
         else if (unit === 'g' || unit === 'ml') q = Math.max(5, Math.round(q / 5) * 5);
-        else q = Math.max(0.125, Math.round(q * 8) / 8);
+        else q = q >= 0.3 ? Math.max(0.25, Math.round(q * 4) / 4) : Math.max(0.125, Math.round(q * 8) / 8);   // kitchen fractions: ¼ ½ ¾ (⅛ for pinches)
         const amount = U.formatAmount(q, unit);
         return item.note !== undefined ? `${item.text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${item.text}`.trim();
     }

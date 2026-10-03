@@ -592,10 +592,33 @@ document.addEventListener('click', e => {
 }, true);
 
 let toastTimer;
+// Error messages in plain words: what happened and what to do next. Technical details (status
+// codes, error class names) stay in Settings → Activity log.
+const PLAIN_ERRORS = [
+    [/(LM Studio|lmstudio).*(not reachable|ConnectError|refused)|not reachable at http:\/\/[^ ]*:1234/i, "Nourish can't reach LM Studio on your PC. Open LM Studio and start its server, or choose another AI in Settings → AI model."],
+    [/Ollama.*(not reachable|ConnectError|refused)|not reachable at http:\/\/[^ ]*:11434/i, "Nourish can't reach Ollama on your PC. Start Ollama, or choose another AI in Settings → AI model."],
+    [/(Claude|OpenAI|Anthropic)[^:]*returned 40[13]|invalid (x-)?api[ -]key|incorrect api key|authentication_error/i, "The AI service didn't accept your key. Check it in Settings → AI model."],
+    [/Spoonacular[^:]*returned (402|429)|points limit/i, "Spoonacular's free daily limit is used up. Plans still work with the other recipe sources; it resets tomorrow."],
+    [/Spoonacular[^:]*returned 401/i, "Spoonacular didn't accept the key. Check it in Settings → Advanced → Recipe sources & keys."],
+    [/(Claude|OpenAI|Anthropic)[^:]*returned 402|credit balance|insufficient_quota|billing/i, 'Your AI account is out of credit. Top it up, or choose another AI in Settings → AI model.'],
+    [/(page|site) returned (HTTP )?404|returned 404/i, "That page wasn't found. Check the link and try again."],
+    [/(page|site) returned (HTTP )?(401|403)/i, "That website didn't let Nourish read the page. Try pasting the recipe text or a screenshot instead."],
+    [/returned 429|rate.?limit|too many requests/i, 'That service is busy right now (too many requests). Wait a minute and try again.'],
+    [/returned 5\d\d|overloaded|service unavailable|bad gateway/i, 'That service is having problems right now. Try again in a few minutes.'],
+    [/failed to fetch|networkerror|load failed|network connection was lost|ConnectError|ConnectTimeout|ReadTimeout|timed out|not reachable/i, "Nourish couldn't connect. Check your internet connection (and, if you use the PC app, that it's running), then try again."],
+];
+function plainError(message) {
+    const text = String(message || '');
+    for (const [re, plain] of PLAIN_ERRORS) if (re.test(text)) return plain;
+    // Whatever else: keep the words, drop codes and class names.
+    return text.replace(/\s*\((?:[A-Z][a-zA-Z]+Error|[A-Z][a-zA-Z]+Exception|HTTP \d{3})\)/g, '').replace(/\breturned (\d{3}):?\s*/g, 'said no (error $1): ');
+}
+
 function showToast(message, isError = true) {
     haptic(isError ? 'warning' : 'success');
     const toast = $('toast');
-    toast.textContent = message;
+    if (isError && message !== plainError(message)) nlog('app', `Shown as plain words: ${message}`, null, 'debug');
+    toast.textContent = isError ? plainError(message) : message;
     toast.classList.toggle('error', isError);
     toast.classList.add('show');
     clearTimeout(toastTimer);
@@ -618,6 +641,11 @@ function showJobBar(state, message) {
     bar.hidden = !state;
     bar.className = 'job-bar' + (state === 'error' ? ' error' : '');
     jobBarState = state || null;
+    if (state === 'error') {
+        // Keep the lead-in ("Couldn't make the plan:") and put the reason in plain words.
+        const m = String(message || '').match(/^([^:]{0,40}:)\s*(.*)$/);
+        message = m ? `${m[1]} ${plainError(m[2])}` : plainError(message);
+    }
     jobBarMessage = message || '';
     document.documentElement.toggleAttribute('data-working', false);
     if (state === 'busy' && planJob && planJob.local) document.documentElement.setAttribute('data-working', 'local');
@@ -1322,7 +1350,7 @@ const SETTINGS_RENDERERS = {
         const names = Object.fromEntries(NourishSources.all().map(x => [x.id, x.name]));
         return [
             ...settingsGroup('Where recipes come from', [
-                settingsRow('New plans', settingsSelect('plan_source', { auto: 'Real recipes first (recommended)', ai: 'AI writes every meal' }, { onchange: () => renderSettings() })),
+                settingsRow('New plans', settingsSelect('plan_source', { auto: 'Real recipes first', ai: 'AI writes every meal' }, { onchange: () => renderSettings() })),
             ], help('"Real recipes first" uses tested recipes from cooking sites and only asks the AI when nothing fits. "AI writes every meal" is the older way: slower, especially on a phone.',
                 'Real recipes have been cooked and tested by people, and most sites list their own nutrition, which Nourish checks against USDA data. On a phone, writing a whole week with the AI can take 20 minutes or more; finding recipes takes seconds.')),
             ...settingsGroup('Recipe sites', NourishSources.usable().map(sourceRow),
@@ -1812,7 +1840,7 @@ function nutritionNotes(meal) {
     if (meal.nutrition_basis === 'source') notes.push(`Numbers from ${meal.source_name || 'the recipe'}, checked against USDA data.`);
     else if (meal.nutrition_basis === 'calculated') notes.push('Numbers worked out from the ingredients with USDA data.');
     if (meal.nutrition_unmatched) notes.push(`Not counted (not in the food table): ${meal.nutrition_unmatched.join('; ')}.`);
-    if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion sized to your targets: ${meal.scaled.portion}× the original serving.`);
+    if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion sized to your targets: about ${Number(meal.scaled.portion).toFixed(1)}× the original serving.`);
     if (meal.trimmed) notes.push('Less oil or sugar than the original, to fit your calories. Seasoning is unchanged.');
     if (meal.reseasoned) notes.push(`Seasoning added: ${meal.reseasoned.join(', ')}.`);
     return notes;

@@ -686,7 +686,7 @@ async function localTheMealDB(body) {
 
 async function localSpoonacular(body) {
     const key = settings.spoonacular_api_key;
-    if (!key) throw new Error('Spoonacular needs a free API key. Add it in Settings → Recipe sources.');
+    if (!key) throw new Error('Spoonacular needs a free API key. Add it in Settings → Advanced → Recipe sources & keys.');
     const q = { query: String(body.query || 'chicken').split(',')[0].trim() || 'chicken', excludeIngredients: body.exclude || '', number: body.number || 21,
         addRecipeInformation: 'true', addRecipeNutrition: 'true', fillIngredients: 'true' };
     if (body.diet) q.diet = body.diet;
@@ -704,7 +704,7 @@ async function webSearchUrls(query, count) {
     if (settings.web_engine === 'brave' && settings.brave_api_key) {
         const res = await nativeHttp(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${Math.min(count, 20)}`,
             { headers: { 'X-Subscription-Token': settings.brave_api_key, Accept: 'application/json' } });
-        if (res.status === 401 || res.status === 403 || res.status === 422) throw new Error('Brave Search rejected the API key. Check it in Settings → Recipe sources.');
+        if (res.status === 401 || res.status === 403 || res.status === 422) throw new Error('Brave Search rejected the API key. Check it in Settings → Advanced → Recipe sources & keys.');
         if (res.status === 429) throw new Error('Brave Search rate limit reached. Try again in a minute.');
         if (res.status >= 400) throw new Error(`Brave Search returned ${res.status}`);
         const data = JSON.parse(res.body || '{}');
