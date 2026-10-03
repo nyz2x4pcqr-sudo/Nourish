@@ -735,7 +735,7 @@ async function api(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
     } finally {
         clearTimeout(timer);
     }
-    if (backendOnline !== true) { backendOnline = true; updateBackendStatus(); }
+    if (backendOnline !== true) { backendOnline = true; updateBackendStatus(); backendCameBack(); }
     let data = null;
     try { data = await res.json(); } catch (e) { /* non-JSON body */ }
     if (path.indexOf('/api/jobs/') !== 0 || !res.ok) nlog('server', `${method} ${path} → ${res.status} (${Date.now() - started} ms)`, res.ok ? null : data, res.ok ? 'debug' : 'warn');
@@ -748,11 +748,16 @@ async function api(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
 }
 
 async function checkBackend() {
-    try {
-        const data = await api('/health', { timeoutMs: 5000 });
-        backendOnline = !!data && data.status === 'ok';
-    } catch (e) {
-        backendOnline = false;
+    // A slow phone can still be busy loading the app when the PC answers: a generous wait, and one
+    // more try, before saying the PC can't be reached.
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const data = await api('/health', { timeoutMs: attempt ? 15000 : 10000 });
+            backendOnline = !!data && data.status === 'ok';
+        } catch (e) {
+            backendOnline = false;
+        }
+        if (backendOnline) break;
     }
     updateBackendStatus();
     return backendOnline;
@@ -766,6 +771,17 @@ function updateBackendStatus() {
     const status = $('serverStatus');
     if (status) status.textContent = backendOnline ? 'Connected' : backendOnline === false ? 'Not reachable' : 'Checking…';
     updateSyncStatus();
+}
+
+// The PC answered after it had looked unreachable (a slow start, Wi-Fi back): catch up on what
+// start-up skipped, once.
+let catchingUp = false;
+function backendCameBack() {
+    if (serverInfo || catchingUp || isLocalMode()) return;
+    catchingUp = true;
+    setTimeout(() => {
+        syncNow().catch(() => {}).then(() => loadServerInfo()).catch(() => {}).then(() => { catchingUp = false; });
+    }, 0);
 }
 
 async function loadServerInfo() {
