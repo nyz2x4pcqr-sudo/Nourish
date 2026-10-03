@@ -10,6 +10,10 @@ on:
       days:
         description: Days per model
         default: "3"
+# Builds and tests only read the code; nothing here needs to change the repository.
+permissions:
+  contents: read
+
 jobs:
   ios-bench:
     runs-on: macos-latest

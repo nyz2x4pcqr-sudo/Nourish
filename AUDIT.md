@@ -86,7 +86,7 @@ Tests added: `backend/main_test.py` (12 tests, pass) and `tests/json-repair.test
 - **M8 — API keys in plain text in localStorage.** This is the nature of a client-side settings screen. Mitigations: the keys go only to your own server, and the server can hold them instead (`backend/.env` fallback added). **OPEN** (by design).
 - **M9 — No authentication on the backend.** Anyone on the same Wi-Fi can use the server, including any keys stored in `.env`. **OPEN.** This is acceptable for a home network; don't expose port 8000 to the internet.
 - **M10 — `nourish.log` was never ignored.** The commit "add gitignore, untrack nourish.log" deleted the file but never added a gitignore. **FIXED:** root `.gitignore` covers `*.log`, `.env`, `chroma_data`, `.venv` and `*.bak`.
-- **M11 — Absolute Windows path with a username was committed** (`index.html.bak`: `c:\Users\ss\Desktop\Stonys MInd\...`). **FIXED** (file deleted). **OPEN:** it's still in git history. Rewriting history needs a force-push, which is out of scope and needs your approval.
+- **M11 — Absolute Windows path with a username was committed** (`index.html.bak`: a `C:\Users\…\Desktop\…` path, removed here). **FIXED** (file deleted). **OPEN:** it's still in git history. Rewriting history needs a force-push, which is out of scope and needs your approval.
 - **M12 — Dockerfile used Python 3.11 while local setup needed 3.12.** **FIXED:** `python:3.12-slim`. `docker-compose.yml` failed when `backend/.env` didn't exist; it's now `required: false`. **UNVERIFIED:** no Docker daemon was available here.
 - **M13 — Dependabot watched `npm`, but there is no `package.json`.** **FIXED:** now watches `pip` (`/backend`), `docker` and `github-actions`. Note: the open Dependabot branch `dependabot/pip/backend/pip-51f24ed7e3` (python-multipart 0.0.22) is superseded by 0.0.31 here.
 
@@ -171,7 +171,7 @@ Any existing `chroma_data` folder is left on disk, unused.
 - **CORS:** see H2. **FIXED.**
 - **API keys in logs, tracebacks and URLs:** see C1. Keys are never logged, and error messages include only the exception type and the provider's own message. The Spoonacular key moved from the URL to a header. The frontend sends keys only in POST bodies to its own server. **FIXED.**
 - **Keys in git:** all history scanned for `sk-ant-`, `sk-…`, `Bearer`, `x-api-key` values. Only code and placeholders were found. No `.env` has ever been committed.
-- **Absolute paths and machine names:** `index.html.bak` (M11). Also, `.vscode/settings.json` names the workspace folder (`Nourish/.vscode/mcp.json`), which isn't sensitive. Old commits link to `github.com/stonys-mind/nourish`, an org name, not a secret.
+- **Absolute paths and machine names:** `index.html.bak` (M11). Also, `.vscode/settings.json` names the workspace folder (`Nourish/.vscode/mcp.json`), which isn't sensitive. Old commits link to an earlier GitHub organisation name, which isn't a secret.
 - **Static file exposure:** the backend now serves exactly four named files. A test confirms that `/.env`, `/backend/.env`, `/.git/config`, `/main.py` and `/nourish.log` return 404.
 - **innerHTML:** see C6. No `innerHTML` remains in `app.js`.
 
@@ -359,3 +359,11 @@ Driven by activity logs from a real iPhone 16 Pro (iOS 26.6, Nourish running ins
 - **Phone apps on real devices** — tested only in GitHub's Android emulator and iOS simulator (see the workflow's screenshots). Sideloading, the Local Network prompt and Wi-Fi scanning on a real phone are untested.
 - **Self-update on real Windows** — the swap-and-restart was tested with Linux builds of the app, plus the same code paths in unit tests. `os.rename` of a running `.exe` and `CREATE_NEW_CONSOLE` are standard Windows behaviour, but the first real Windows update (0.2.0 → the next release) is untested.
 - **Exact Dependabot alert list** — not readable with the tools here; reproduced with `pip-audit`.
+
+## Sensitive-information check (0.8.0)
+- **Keys and tokens:** the code and all 142 commits were searched for real API keys, tokens and private keys (Anthropic, OpenAI, GitHub, Hugging Face, AWS, Google, Slack, PEM). None found; the only hit is the fake `sk-ant-TEST-SECRET-do-not-log` used by a test. No `.env`, data file or signing key has ever been committed. Keys typed into the app stay on the PC (`nourish-data.json`, git-ignored) and are never sent back to the page or written to the log.
+- **FIXED:** this file quoted the old Windows folder path (with a username) from M11; it no longer does.
+- **FIXED:** `.gitignore` now also blocks `.env.*`, signing files (`*.keystore`, `*.jks`, `*.p12`, `*.pem`, `*.key`, `*.mobileprovision`), `local.properties` and model files.
+- **FIXED:** the build workflows that only read the code now say so (`permissions: contents: read`), so a compromised build step can't change the repository.
+- **OPEN (needs your decision):** older commits still contain that Windows path (`index.html.bak`) and every commit by you carries your Apple "Hide My Email" relay address. Removing them means rewriting history and force-pushing `main`, which changes every commit id and the release tags. The relay address is a forwarding address, not your real one; to stop it appearing on new commits, turn on GitHub → Settings → Emails → "Keep my email addresses private".
+- **By design:** the PC server listens on your home network so your phone can reach it, and has no password. Anyone on the same Wi-Fi could open it and see your plan (not your keys). Use it on networks you trust.

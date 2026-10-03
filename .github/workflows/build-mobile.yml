@@ -41,6 +41,10 @@ on:
         type: boolean
         default: false
 
+# Builds and tests only read the code; nothing here needs to change the repository.
+permissions:
+  contents: read
+
 jobs:
   android:
     runs-on: ubuntu-latest

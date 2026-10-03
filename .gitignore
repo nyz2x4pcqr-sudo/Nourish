@@ -19,3 +19,17 @@ nourish-data*.json
 mobile/ios/webapp/
 mobile/ios/Frameworks/
 mobile/ios/llama-src/
+
+# Never commit keys, signing files or personal data
+.env.*
+!.env.example
+!backend/.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+*.keystore
+*.jks
+local.properties
+nourish-secrets*
+*.gguf

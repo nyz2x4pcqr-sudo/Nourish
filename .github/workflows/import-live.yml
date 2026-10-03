@@ -11,6 +11,10 @@ on:
       - "mobile/ci/import-live.js"
       - ".github/workflows/import-live.yml"
   workflow_dispatch:
+# Builds and tests only read the code; nothing here needs to change the repository.
+permissions:
+  contents: read
+
 jobs:
   import-live:
     runs-on: ubuntu-latest
