@@ -3384,7 +3384,7 @@ function mealGuidance({ type, d, cuisine, dish }) {
 // background in small batches whenever they change (library.js). Their recipes compete on equal
 // terms with every other source; their text is cooking knowledge for the AI (cookbookNotes).
 const LIBRARY_KEY = 'nourish_library_index';
-const libraryState = { count: 0, files: 0, folder: '', where: null, busy: false, error: '', notes: [] };
+const libraryState = { count: 0, files: 0, folder: '', where: null, busy: false, error: '', notes: [], progress: null, cancel: false };
 let libraryIndexCache = null;
 function libraryIndex() { if (!libraryIndexCache) libraryIndexCache = loadJSON(LIBRARY_KEY, { files: {} }); return libraryIndexCache; }
 // Saved on this device. Cookbook passages can be big: if the phone's storage for the app is full,
@@ -3422,14 +3422,39 @@ async function indexLibrary({ quiet = true } = {}) {
         const io = {
             list: async () => { const r = await api('/api/library', { timeoutMs: 30000 }); libraryState.folder = r.folder || ''; return r.files || []; },
             read: path => api('/api/library/read', { method: 'POST', timeoutMs: 120000, body: { path } }),
+            // Books (EPUB, Word) are read a slice at a time (books.js), never the whole file at once.
+            range: async (path, offset, length) => {
+                const out = new Uint8Array(length);
+                let got = 0;
+                while (got < length) {
+                    const r = await api('/api/library/range', { method: 'POST', timeoutMs: 60000, body: { path, offset: offset + got, length: Math.min(4 * 1024 * 1024, length - got) } });
+                    const bin = atob((r && r.data) || '');
+                    if (!bin.length) break;
+                    for (let i = 0; i < bin.length; i++) out[got + i] = bin.charCodeAt(i);
+                    got += bin.length;
+                }
+                return got < length ? out.subarray(0, got) : out;
+            },
             ocr: canReadTextOnPhone() ? async image => ((await nativeCall('ocr', { image }, { timeoutMs: 60000 })) || {}).text || '' : null,
             readStructured: (html, url) => { try { return NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } },
             readText: html => { try { return NourishImport.readableText(new DOMParser().parseFromString(html, 'text/html')); } catch (e) { return ''; } },
             sleep: ms => new Promise(ok => setTimeout(ok, ms)),
         };
-        const res = await NourishLibrary.refresh(JSON.parse(JSON.stringify(libraryIndex())), io, { batch: 2, pause: 500, maxFiles: 20 });
+        libraryState.cancel = false;
+        let shown = 0;
+        const res = await NourishLibrary.refresh(JSON.parse(JSON.stringify(libraryIndex())), io, {
+            batch: 2, pause: 500, maxFiles: 20,
+            // A big book: how far it has got, shown in Settings → Recipes (at most once a second).
+            progress: (path, done, total, chapter) => {
+                libraryState.progress = { path, done, total, chapter };
+                if (settingsPage === 'sources' && Date.now() - shown > 1000) { shown = Date.now(); renderSettings(); }
+            },
+            cancelled: () => libraryState.cancel,
+        });
+        libraryState.progress = null;
         saveLibraryIndex(res.index);
         librarySummary(res.index);
+        if (res.cancelled) { nlog('library', 'Reading the recipe files was stopped (the rest is read next time)'); return; }
         if (res.changed) nlog('library', `Recipe library: ${libraryState.count} recipes from ${libraryState.files} files (${res.read} read now${res.pending ? `, ${res.pending} more next time` : ''})`, res.errors.length ? res.errors : null);
         if (res.pending) setTimeout(() => indexLibrary(), 20000);   // big folders: the rest a little later
     } catch (e) {
@@ -3438,8 +3463,13 @@ async function indexLibrary({ quiet = true } = {}) {
         nlog('library', `Couldn't read the recipe folder: ${e.message}`, null, 'warn');
     } finally {
         libraryState.busy = false;
+        libraryState.progress = null;
         if (settingsPage === 'sources') renderSettings();
     }
+}
+function cancelLibraryReading() {
+    libraryState.cancel = true;
+    showToast('Stopping… (the book is read again next time)', false);
 }
 
 async function openLibraryFolder() {
@@ -3457,20 +3487,23 @@ async function addLibraryFiles() {
     if (isLocalMode()) {
         try {
             const r = await api('/api/library/add', { method: 'POST', body: {} });
+            if (r && r.rejected && r.rejected.length) showToast(`${r.rejected.join(', ')}: ${NourishBooks.KINDLE_NOTE}`);
             if (r && r.added) { showToast(`Added ${r.added} file${r.added > 1 ? 's' : ''}. Reading ${r.added > 1 ? 'them' : 'it'} now…`, false); indexLibrary({ quiet: false }); }
         } catch (e) {
             showToast(`Couldn't add the files: ${plainError(e.message)}`);
         }
         return;
     }
-    const input = h('input', { type: 'file', multiple: true, accept: '.pdf,.txt,.text,.md,.markdown,.html,.htm,.mhtml,.webarchive,.jpg,.jpeg,.png,.heic,.webp', style: 'display:none' });
+    const input = h('input', { type: 'file', multiple: true, accept: '.epub,.pdf,.docx,.txt,.text,.md,.markdown,.html,.htm,.mhtml,.webarchive,.jpg,.jpeg,.png,.heic,.webp,.mobi,.azw,.azw3', style: 'display:none' });
     input.addEventListener('change', async () => {
         const files = [...(input.files || [])];
         input.remove();
         let added = 0;
         for (const file of files) {
             try {
-                if (file.size > 40 * 1024 * 1024) throw new Error('it is over 40 MB');
+                if (/\.(mobi|azw3?|kfx)$/i.test(file.name)) throw new Error(NourishBooks.KINDLE_NOTE);
+                const book = /\.(epub|docx)$/i.test(file.name);
+                if (file.size > (book ? 400 : 40) * 1024 * 1024) throw new Error(book ? 'it is over 400 MB' : 'it is over 40 MB');
                 const data = await new Promise((ok, bad) => {
                     const reader = new FileReader();
                     reader.onload = () => ok(String(reader.result).replace(/^data:[^,]*,/, ''));
@@ -3510,6 +3543,8 @@ async function libraryLocation() {
 // One line per file: how far reading it has got.
 function libraryFileStatus(path) {
     const entry = (libraryIndex().files || {})[path];
+    const p = libraryState.progress;
+    if (p && p.path === path) return `Reading… part ${p.done} of ${p.total}${p.chapter ? ` (${String(p.chapter).slice(0, 40)})` : ''}`;
     if (!entry) return libraryState.busy ? 'Reading…' : 'Waiting to be read';
     if (entry.recipes && entry.recipes.length) return `Read · ${entry.recipes.length} recipe${entry.recipes.length > 1 ? 's' : ''}`;
     if (entry.passages && entry.passages.length) return 'Read · used as cooking knowledge';
@@ -3535,17 +3570,22 @@ function libraryGroup() {
         settingsButton(container ? 'Add files (the easy way)' : 'Add files', addLibraryFiles, 'settings-button-primary'),
         !android && !container ? settingsButton(phone ? 'Show the folder in Files' : 'Open my recipe folder', openLibraryFolder) : null,
         infoRow('Recipes found', libraryState.busy ? 'Reading…' : `${libraryState.count} from ${libraryState.files} file${libraryState.files === 1 ? '' : 's'}`),
+        libraryState.progress ? h('div', { class: 'settings-row settings-row-stack' },
+            h('span', { class: 'settings-label', text: `Reading ${libraryState.progress.path.split('/').pop()}` }),
+            h('progress', { class: 'library-progress', max: String(libraryState.progress.total || 1), value: String(libraryState.progress.done || 0) }),
+            h('span', { class: 'settings-hint', text: `Part ${libraryState.progress.done} of ${libraryState.progress.total}. Big books are read a little at a time so the phone stays cool.` })) : null,
+        libraryState.progress ? settingsButton('Stop reading', cancelLibraryReading) : null,
         ...listed.map(f => h('div', { class: 'settings-row settings-row-stack library-file' },
             h('span', { class: 'settings-label', text: f.path.split('/').pop() }),
             h('span', { class: 'settings-hint', text: `${f.folder || ''}${f.folder ? ' · ' : ''}${libraryFileStatus(f.path)}` }))),
-        listed.length ? null : h('div', { class: 'settings-row' }, h('span', { class: 'settings-hint', text: 'No files yet. Tap Add files, or drop files into the folders.' })),
+        listed.length || libraryState.busy ? null : h('div', { class: 'settings-row' }, h('span', { class: 'settings-hint', text: 'No files yet. Tap Add files, or drop files into the folders.' })),
         settingsButton('Check for new files now', () => indexLibrary({ quiet: false })),
     ];
     const how = android ? 'Tap Add files to choose files on this phone.'
         : container ? `Nourish is running inside another app (LiveContainer), so the Files app shows these folders under that app: ${where}. Add files is the easiest way in.`
         : phone ? 'In the Files app: On My iPhone → Nourish → Recipe Books or My Recipes. Or tap Add files.'
         : 'Drop files into the Recipe Books or My Recipes folder on this PC, or tap Add files.';
-    return settingsGroup('My recipe files', rows, help(`Cookbooks and your own recipes (PDF, text, Markdown, saved web pages${phone && !android ? ', photos' : ''}). ${how}`,
+    return settingsGroup('My recipe files', rows, help(`Cookbooks and your own recipes (EPUB, PDF${android ? ' (on the PC)' : ''}, Word, text, Markdown, saved web pages${phone && !android ? ', photos' : ''}). Kindle books (MOBI, AZW3) can't be read. ${how}`,
         'Nourish reads each file in the background and learns from it: which ingredients go together, how dishes are seasoned and cooked. Its recipes can also turn up in your plans, next to recipes from everywhere else; they are not put first. Each folder has a "Read me" note. Files are only read again when they change.'));
 }
 

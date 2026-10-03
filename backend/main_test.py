@@ -85,7 +85,7 @@ class ApiTest(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("<title>", r.text)
-        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "foodlog.js", "taste.js", "builtins.js", "theme.js"):
+        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "books.js", "foodlog.js", "taste.js", "builtins.js", "theme.js"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 200, f)
         for f in (".env", "README.md", "main.py", "nourish.log", "..%2Fbackend%2F.env"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 404, f)
@@ -545,12 +545,43 @@ class LibraryTests(unittest.TestCase):
         self.assertTrue((folder / "Recipe Books").is_dir())
         self.assertTrue((folder / "My Recipes").is_dir())
         (folder / "My Recipes" / "soup.md").write_text("# Soup\n## Ingredients\n- 1 onion\n", encoding="utf-8")
-        (folder / "My Recipes" / "notes.docx").write_text("x", encoding="utf-8")
+        (folder / "My Recipes" / "notes.xlsx").write_text("x", encoding="utf-8")   # a spreadsheet: not a recipe file
         files = self.client.get("/api/library").json()["files"]
         self.assertEqual([f["path"] for f in files], ["My Recipes/soup.md"])
         got = self.client.post("/api/library/read", json={"path": "My Recipes/soup.md"}).json()
         self.assertEqual(got["kind"], "text")
         self.assertIn("1 onion", got["text"])
+        (folder / "My Recipes" / "notes.xlsx").unlink()
+        (folder / "My Recipes" / "soup.md").unlink()
+
+    def test_books_are_read_a_slice_at_a_time_and_kindle_files_explained(self):
+        import base64
+        folder = Path(self.client.get("/api/library").json()["folder"])
+        book = folder / "Recipe Books" / "book.epub"
+        book.write_bytes(b"PK0123456789")
+        (folder / "Recipe Books" / "old.azw3").write_bytes(b"kindle")
+        try:
+            paths = [f["path"] for f in self.client.get("/api/library").json()["files"]]
+            self.assertIn("Recipe Books/book.epub", paths)
+            self.assertIn("Recipe Books/old.azw3", paths)
+            got = self.client.post("/api/library/read", json={"path": "Recipe Books/book.epub"}).json()
+            self.assertEqual(got, {"kind": "epub", "size": 12})
+            part = self.client.post("/api/library/range", json={"path": "Recipe Books/book.epub", "offset": 2, "length": 4}).json()
+            self.assertEqual(base64.b64decode(part["data"]), b"0123")
+            self.assertEqual(self.client.post("/api/library/range", json={"path": "../secret", "offset": 0, "length": 4}).status_code, 404)
+            self.assertEqual(self.client.post("/api/library/range", json={"path": "Recipe Books/book.epub", "offset": 0, "length": 9 * 1024 * 1024}).status_code, 422)
+            kindle = self.client.post("/api/library/read", json={"path": "Recipe Books/old.azw3"}).json()
+            self.assertIn("Calibre", kindle["note"])
+            # Adding a Kindle book from the app: turned away with the plain reason; an EPUB goes into Recipe Books.
+            r = self.client.post("/api/library/add", json={"name": "novel.mobi", "data": "eA=="})
+            self.assertEqual(r.status_code, 400)
+            self.assertIn("Kindle", r.json()["detail"])
+            added = self.client.post("/api/library/add", json={"name": "new.epub", "data": "eA=="}).json()
+            self.assertEqual(added["path"], "Recipe Books/new.epub")
+            (folder / "Recipe Books" / "new.epub").unlink()
+        finally:
+            book.unlink()
+            (folder / "Recipe Books" / "old.azw3").unlink()
 
     def test_each_folder_has_a_read_me_that_is_not_a_recipe(self):
         folder = Path(self.client.get("/api/library").json()["folder"])

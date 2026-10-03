@@ -23,6 +23,7 @@ on:
       - "sources.js"
       - "finder.js"
       - "library.js"
+      - "books.js"
       - "foodlog.js"
       - "taste.js"
       - "builtins.js"

@@ -153,6 +153,7 @@ async function localApi(path, { method = 'GET', body } = {}) {
     // The recipe library folders on this phone (Files app → On My iPhone → Nourish on iPhone).
     if (route === '/api/library') return nativeCall('library', { op: 'list' }, { timeoutMs: 30000 });
     if (route === '/api/library/read') return nativeCall('library', { op: 'read', path: body.path }, { timeoutMs: 120000 });
+    if (route === '/api/library/range') return nativeCall('library', { op: 'range', path: body.path, offset: body.offset, length: body.length }, { timeoutMs: 60000 });
     if (route === '/api/library/open') return nativeCall('library', { op: 'open' });
     if (route === '/api/library/where') return nativeCall('library', { op: 'where' }, { timeoutMs: 10000 });
     if (route === '/api/library/add') return nativeCall('library', { op: 'add' }, { timeoutMs: 600000 });

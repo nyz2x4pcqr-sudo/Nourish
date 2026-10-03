@@ -149,6 +149,7 @@ final class NativeBridge: NSObject {
             switch a["op"] as? String ?? "" {
             case "list": return RecipeLibrary.list()
             case "read": return try RecipeLibrary.read(a["path"] as? String ?? "")
+            case "range": return try RecipeLibrary.range(a["path"] as? String ?? "", offset: (a["offset"] as? NSNumber)?.intValue ?? 0, length: (a["length"] as? NSNumber)?.intValue ?? 0)
             case "open": return RecipeLibrary.open()
             case "add": return try RecipeLibrary.pick()
             case "where": return RecipeLibrary.location()

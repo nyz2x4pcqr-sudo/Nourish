@@ -163,7 +163,8 @@ public class MainActivity extends Activity implements NativeBridge.Host {
             android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
             i.addCategory(android.content.Intent.CATEGORY_OPENABLE);
             i.setType("*/*");
-            i.putExtra(android.content.Intent.EXTRA_MIME_TYPES, new String[] { "text/*", "application/pdf", "image/*", "application/octet-stream" });
+            i.putExtra(android.content.Intent.EXTRA_MIME_TYPES, new String[] { "text/*", "application/pdf", "image/*", "application/epub+zip",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/x-mobipocket-ebook", "application/vnd.amazon.ebook", "application/octet-stream" });
             i.putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true);
             try {
                 startActivityForResult(i, PICK_LIBRARY_FILES);

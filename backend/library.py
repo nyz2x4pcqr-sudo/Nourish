@@ -12,8 +12,14 @@ import store
 FOLDERS = ("Recipe Books", "My Recipes")
 KINDS = {".txt": "text", ".text": "text", ".md": "text", ".markdown": "text", ".html": "html", ".htm": "html",
          ".mhtml": "html", ".webarchive": "html", ".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image",
-         ".heic": "image", ".webp": "image"}
+         ".heic": "image", ".webp": "image", ".epub": "epub", ".docx": "docx",
+         ".mobi": "kindle", ".azw": "kindle", ".azw3": "kindle", ".kfx": "kindle"}
 MAX_FILE_BYTES = 40 * 1024 * 1024
+# Books (EPUB, Word) are read by the app a slice at a time (read_range), so they can be bigger.
+MAX_BOOK_BYTES = 400 * 1024 * 1024
+MAX_SLICE = 8 * 1024 * 1024
+KINDLE_NOTE = ("Kindle books (MOBI, AZW, AZW3) can't be read: they're usually copy-protected. If yours isn't, "
+               "convert it to EPUB with the free Calibre app and add the EPUB instead.")
 MAX_TEXT_CHARS = 2_000_000
 
 
@@ -26,7 +32,7 @@ NOTE_NAMES = {"read me.txt", "readme.txt", "about these folders.txt"}   # Nouris
 READMES = {
     "Recipe Books": (
         "Recipe Books\n\n"
-        "Drop cookbooks here: PDF files, text or Markdown files, saved web pages, or photos of pages.\n"
+        "Drop cookbooks here: EPUB or PDF books, Word, text or Markdown files, saved web pages, or photos of pages.\n"
         "Nourish reads them in the background and learns from them: which ingredients go together,\n"
         "how dishes are seasoned and cooked. Their recipes can also turn up in your plans, next to\n"
         "recipes from other places.\n\n"
@@ -62,10 +68,13 @@ def add_file(name: str, data: bytes) -> str:
     clean = "".join("_" if c in '\\/:*?"<>|' or ord(c) < 32 else c for c in Path(str(name)).name).strip(" .")
     suffix = Path(clean).suffix.lower()
     if not clean or suffix not in KINDS:
-        raise LibraryError("Nourish can't read that kind of file. Use PDF, text, Markdown, a saved web page or a photo.")
-    if len(data) > MAX_FILE_BYTES:
-        raise LibraryError("That file is too big (over 40 MB).")
-    folder = root() / ("Recipe Books" if suffix == ".pdf" and len(data) > 3_000_000 else "My Recipes")
+        raise LibraryError("Nourish can't read that kind of file. Use EPUB, PDF, Word, text, Markdown, a saved web page or a photo.")
+    if KINDS[suffix] == "kindle":
+        raise LibraryError(KINDLE_NOTE)
+    book = KINDS[suffix] in ("epub", "docx")
+    if len(data) > (MAX_BOOK_BYTES if book else MAX_FILE_BYTES):
+        raise LibraryError("That file is too big (over 400 MB)." if book else "That file is too big (over 40 MB).")
+    folder = root() / ("Recipe Books" if suffix == ".epub" or (suffix == ".pdf" and len(data) > 3_000_000) else "My Recipes")
     dest, n = folder / clean, 2
     while dest.exists():
         dest = folder / f"{Path(clean).stem} {n}{suffix}"
@@ -109,11 +118,28 @@ def pdf_text(path: Path) -> str:
     return "\n".join(parts)
 
 
+def read_range(rel: str, offset: int, length: int) -> dict:
+    """A slice of a file, base64 (books are read this way, a part at a time)."""
+    path = _resolve(rel)
+    if offset < 0 or length < 0 or length > MAX_SLICE:
+        raise LibraryError("That part of the file is too big to read at once.")
+    with open(path, "rb") as f:
+        f.seek(offset)
+        return {"data": base64.b64encode(f.read(length)).decode("ascii")}
+
+
 def read_file(rel: str):
     path = _resolve(rel)
-    if path.stat().st_size > MAX_FILE_BYTES:
-        raise LibraryError("That file is too big to read (over 40 MB).")
     kind = KINDS.get(path.suffix.lower())
+    size = path.stat().st_size
+    if kind in ("epub", "docx"):   # read by the app a slice at a time (read_range)
+        if size > MAX_BOOK_BYTES:
+            raise LibraryError("That book is too big to read (over 400 MB).")
+        return {"kind": kind, "size": size}
+    if kind == "kindle":
+        return {"kind": "kindle", "note": KINDLE_NOTE}
+    if size > MAX_FILE_BYTES:
+        raise LibraryError("That file is too big to read (over 40 MB).")
     if kind == "text":
         return {"kind": "text", "text": path.read_text(encoding="utf-8", errors="replace")[:MAX_TEXT_CHARS]}
     if kind == "html":

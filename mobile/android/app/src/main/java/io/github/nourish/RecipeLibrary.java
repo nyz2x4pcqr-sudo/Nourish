@@ -30,12 +30,17 @@ import java.util.Locale;
 final class RecipeLibrary {
     static final String[] FOLDERS = { "Recipe Books", "My Recipes" };
     private static final long MAX_BYTES = 40L * 1024 * 1024;
+    // Books (EPUB, Word) are read by the app a slice at a time (range), so they can be much bigger.
+    private static final long MAX_BOOK_BYTES = 400L * 1024 * 1024;
+    private static final int MAX_SLICE = 8 * 1024 * 1024;
+    /** Kindle books turned away by the last copyIn (they can't be read; the app says why). */
+    static final List<String> lastRejected = new ArrayList<>();
 
     private RecipeLibrary() {}
 
     static final String README_NAME = "Read me.txt";
     private static final String[] READMES = {
-        "Recipe Books\n\nDrop cookbooks here: PDF files, text or Markdown files, saved web pages, or photos of pages.\n"
+        "Recipe Books\n\nDrop cookbooks here: EPUB or PDF books, Word, text or Markdown files, saved web pages, or photos of pages.\n"
             + "Nourish reads them in the background and learns from them: which ingredients go together,\n"
             + "how dishes are seasoned and cooked. Their recipes can also turn up in your plans, next to\n"
             + "recipes from other places.\n\nOn Android, add files from Nourish: Settings > Recipes > Add files.\n",
@@ -68,6 +73,9 @@ final class RecipeLibrary {
             case "html": case "htm": case "mhtml": case "webarchive": return "html";
             case "pdf": return "pdf";
             case "jpg": case "jpeg": case "png": case "heic": case "webp": return "image";
+            case "epub": return "epub";
+            case "docx": return "docx";
+            case "mobi": case "azw": case "azw3": case "kfx": return "kindle";
             default: return null;
         }
     }
@@ -98,14 +106,40 @@ final class RecipeLibrary {
         }
     }
 
-    static JSONObject read(Context c, String rel) throws Exception {
+    private static File resolve(Context c, String rel) throws Exception {
         File root = root(c).getCanonicalFile();
         File f = new File(root, rel).getCanonicalFile();
         if (!f.getPath().startsWith(root.getPath() + File.separator) || !f.isFile()) throw new IllegalArgumentException("That file isn't in the recipe library.");
-        if (f.length() > MAX_BYTES) throw new IllegalArgumentException("That file is too big to read (over 40 MB).");
+        return f;
+    }
+
+    /** A slice of a file (books are read this way, a part at a time): base64 of at most 8 MB. */
+    static JSONObject range(Context c, String rel, long offset, int length) throws Exception {
+        File f = resolve(c, rel);
+        if (offset < 0 || length < 0 || length > MAX_SLICE) throw new IllegalArgumentException("That part of the file is too big to read at once.");
+        byte[] buf = new byte[(int) Math.max(0, Math.min(length, f.length() - offset))];
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(f, "r")) {
+            raf.seek(offset);
+            raf.readFully(buf);
+        }
+        JSONObject o = new JSONObject();
+        o.put("data", Base64.encodeToString(buf, Base64.NO_WRAP));
+        return o;
+    }
+
+    static JSONObject read(Context c, String rel) throws Exception {
+        File f = resolve(c, rel);
         String kind = kind(f.getName());
         JSONObject o = new JSONObject();
         o.put("kind", kind);
+        // Books are read by the app a slice at a time (range); here only their size is given.
+        if ("epub".equals(kind) || "docx".equals(kind)) {
+            if (f.length() > MAX_BOOK_BYTES) throw new IllegalArgumentException("That book is too big to read (over 400 MB).");
+            o.put("size", f.length());
+            return o;
+        }
+        if ("kindle".equals(kind)) return o;
+        if (f.length() > MAX_BYTES) throw new IllegalArgumentException("That file is too big to read (over 40 MB).");
         if ("text".equals(kind)) o.put("text", new String(readAll(new FileInputStream(f)), StandardCharsets.UTF_8));
         else if ("html".equals(kind)) o.put("html", new String(readAll(new FileInputStream(f)), StandardCharsets.UTF_8));
         else if ("pdf".equals(kind)) { o.put("text", ""); o.put("note", "PDFs can't be read on Android yet: open them in Nourish on your PC, or save the recipe as text."); }
@@ -116,12 +150,15 @@ final class RecipeLibrary {
 
     /** Copies files chosen in the system picker into My Recipes. Returns how many were added. */
     static int copyIn(Context c, List<Uri> uris) {
-        File dest = new File(root(c), "My Recipes");
+        File mine = new File(root(c), "My Recipes");
         ContentResolver cr = c.getContentResolver();
         int added = 0;
+        synchronized (lastRejected) { lastRejected.clear(); }
         for (Uri uri : uris) {
             String name = displayName(cr, uri);
             if (name == null || kind(name) == null) continue;
+            if ("kindle".equals(kind(name))) { synchronized (lastRejected) { lastRejected.add(name); } continue; }
+            File dest = "epub".equals(kind(name)) ? new File(root(c), "Recipe Books") : mine;
             File out = new File(dest, name.replaceAll("[\\\\/:*?\"<>|]", "_"));
             try (InputStream in = cr.openInputStream(uri); OutputStream os = new FileOutputStream(out)) {
                 if (in == null) continue;

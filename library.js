@@ -8,7 +8,8 @@
     'use strict';
 
     const KINDS = { txt: 'text', text: 'text', md: 'text', markdown: 'text', html: 'html', htm: 'html', webarchive: 'html', mhtml: 'html', pdf: 'pdf',
-        jpg: 'image', jpeg: 'image', png: 'image', heic: 'image', webp: 'image' };
+        jpg: 'image', jpeg: 'image', png: 'image', heic: 'image', webp: 'image', epub: 'epub', docx: 'docx',
+        mobi: 'kindle', azw: 'kindle', azw3: 'kindle', kfx: 'kindle' };
     function kindOf(path) { const m = String(path).toLowerCase().match(/\.([a-z0-9]+)$/); return (m && KINDS[m[1]]) || null; }
     // The notes Nourish puts in its own folders ("Read me.txt") aren't recipes.
     function isReadme(path) { return /^(read ?me|about these folders)\.txt$/i.test(String(path).split('/').pop()); }
@@ -113,10 +114,13 @@
     }
 
     // Brings the index up to date: reads only new or changed files, a few at a time, pausing
-    // between batches. io: { list() → [{ path, size, mtime }], read(path) → { kind, text?, html?, image? },
-    // ocr(image) → text (optional), readStructured, readText, sleep(ms) }.
-    // index: { files: { path: { sig, recipes, note } } }. Returns { index, changed, read, errors }.
-    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60 } = {}) {
+    // between batches. io: { list() → [{ path, size, mtime }], read(path) → { kind, text?, html?, image?, size? },
+    // range(path, offset, length) → Uint8Array (books: EPUB and Word are read a slice at a time, see
+    // books.js), ocr(image) → text (optional), readStructured, readText, sleep(ms) }.
+    // opts.progress(path, done, total, chapter) is told how far a book is; opts.cancelled() → true
+    // stops reading (the book is read again from the start next time).
+    // index: { files: { path: { sig, recipes, note } } }. Returns { index, changed, read, errors, cancelled }.
+    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled } = {}) {
         const idx = index && index.files ? index : { files: {} };
         const listed = (await io.list()).filter(f => kindOf(f.path) && !isReadme(f.path));
         const seen = new Set(listed.map(f => f.path));
@@ -125,18 +129,35 @@
         const todo = listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).slice(0, maxFiles);
         let read = 0;
         const errors = [];
-        for (let i = 0; i < todo.length; i += batch) {
-            await Promise.all(todo.slice(i, i + batch).map(async f => {
+        let stopped = false;
+        // Books are read one at a time, after the other files (they take longer).
+        const BOOK = { epub: 1, docx: 1 };
+        const books = todo.filter(f => BOOK[kindOf(f.path)]);
+        const groups = [];
+        const rest = todo.filter(f => !BOOK[kindOf(f.path)]);
+        for (let i = 0; i < rest.length; i += batch) groups.push(rest.slice(i, i + batch));
+        books.forEach(b => groups.push([b]));
+        for (let g = 0; g < groups.length && !stopped; g++) {
+            if (cancelled && cancelled()) { stopped = true; break; }
+            await Promise.all(groups[g].map(async f => {
                 const entry = { sig: `${f.size}:${f.mtime}`, recipes: [], note: '' };
                 try {
-                    const got = await io.read(f.path);
+                    const kind = kindOf(f.path);
+                    if (kind === 'kindle') {
+                        entry.note = booksReader() ? booksReader().KINDLE_NOTE : 'Kindle books can\'t be read.';
+                        idx.files[f.path] = entry;
+                        changed++;
+                        return;
+                    }
+                    let got = await io.read(f.path);
+                    if (kind === 'epub' || kind === 'docx') got = await readBook(f, got, kind, io, { progress, cancelled });
                     const file = Object.assign({ path: f.path, folder: f.folder }, got);
                     if (got.kind === 'image') {
                         file.text = io.ocr ? await io.ocr(got.image) : '';
                         if (!io.ocr) entry.note = 'Pictures can be read in the iPhone app.';
                     }
                     if (got.kind === 'pdf' && !got.text) entry.note = got.note || 'No text could be read from this PDF.';
-                    entry.recipes = recipesFromFile(file, io.readStructured, io.readText);
+                    entry.recipes = got.recipes ? got.recipes : recipesFromFile(file, io.readStructured, io.readText);
                     const text = file.text || (file.html && io.readText ? io.readText(file.html) : '');
                     // Passages for the cooking notes: a recipe file is already covered by its recipes.
                     entry.passages = passagesFrom(text, { max: entry.recipes.length > 3 || f.folder === 'Recipe Books' ? 250 : 40 })
@@ -145,17 +166,45 @@
                     if (!entry.recipes.length && !entry.passages && !entry.note) entry.note = 'No recipe found (it needs a title, an ingredients list and steps).';
                     read++;
                 } catch (e) {
-                    entry.note = `Couldn't read it: ${e.message}`;
+                    if (e.cancelled) { stopped = true; return; }   // not saved: read again next time
+                    entry.note = e.drm && booksReader() ? booksReader().DRM_NOTE : `Couldn't read it: ${e.message}`;
                     errors.push(`${f.path}: ${e.message}`);
                 }
                 idx.files[f.path] = entry;
                 changed++;
             }));
-            if (i + batch < todo.length && io.sleep) await io.sleep(pause);
+            if (g + 1 < groups.length && io.sleep && !stopped) await io.sleep(pause);
         }
         idx.at = Date.now();
         idx.listed = listed.map(f => ({ path: f.path, folder: f.folder, size: f.size }));
-        return { index: idx, changed, read, errors, pending: Math.max(0, listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).length) };
+        return { index: idx, changed, read, errors, cancelled: stopped, pending: Math.max(0, listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).length) };
+    }
+
+    // A book (EPUB or Word) read a slice at a time. Its recipes keep the book's title and chapter:
+    // "Recipe from Easy Mornings · Breakfast".
+    // books.js loads after this file, so it's looked up when first needed.
+    function booksReader() {
+        if (root.NourishBooks) return root.NourishBooks;
+        try { return typeof require === 'function' ? require('./books.js') : null; } catch (e) { return null; }
+    }
+    async function readBook(f, got, kind, io, { progress, cancelled } = {}) {
+        const Books = booksReader();
+        if (!Books || !io.range) throw new Error('books can\'t be read here yet');
+        const size = got.size || f.size;
+        const opts = {
+            size, readRange: (offset, length) => io.range(f.path, offset, length),
+            progress: progress ? (done, total, chapter) => progress(f.path, done, total, chapter) : null,
+            cancelled, pause: io.sleep,
+        };
+        const book = kind === 'epub' ? await Books.readEpub(opts) : await Books.readDocx(opts);
+        const fileName = String(f.path).split('/').pop().replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
+        const title = book.title || fileName;
+        const recipes = book.recipes.map(r => Object.assign({}, r, {
+            source_name: r.chapter ? `${title} · ${r.chapter}` : title,
+            book: title,
+            library_path: f.path,
+        }));
+        return { kind, text: book.text, recipes, note: recipes.length ? '' : undefined };
     }
 
     // === COOKING KNOWLEDGE (cookbooks as inspiration, not as a ranking) ===

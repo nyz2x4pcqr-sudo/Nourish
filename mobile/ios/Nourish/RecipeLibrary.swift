@@ -11,8 +11,12 @@ enum RecipeLibrary {
     static let folders = ["Recipe Books", "My Recipes"]
     static let kinds: [String: String] = ["txt": "text", "text": "text", "md": "text", "markdown": "text", "html": "html", "htm": "html",
                                           "webarchive": "html", "mhtml": "html", "pdf": "pdf", "jpg": "image", "jpeg": "image",
-                                          "png": "image", "heic": "image", "webp": "image"]
+                                          "png": "image", "heic": "image", "webp": "image", "epub": "epub", "docx": "docx",
+                                          "mobi": "kindle", "azw": "kindle", "azw3": "kindle", "kfx": "kindle"]
     static let maxBytes = 40 * 1024 * 1024
+    /// Books (EPUB, Word) are read a slice at a time (range), so they can be much bigger.
+    static let maxBookBytes = 400 * 1024 * 1024
+    static let maxSlice = 8 * 1024 * 1024
 
     static var root: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
 
@@ -21,7 +25,7 @@ enum RecipeLibrary {
         "Recipe Books": """
         Recipe Books
 
-        Drop cookbooks here: PDF files, text or Markdown files, saved web pages, or photos of pages.
+        Drop cookbooks here: EPUB or PDF books, Word, text or Markdown files, saved web pages, or photos of pages.
         Nourish reads them in the background and learns from them: which ingredients go together,
         how dishes are seasoned and cooked. Their recipes can also turn up in your plans, next to
         recipes from other places.
@@ -54,7 +58,7 @@ enum RecipeLibrary {
         if !fm.fileExists(atPath: about.path) {
             try? """
             Put cookbooks in "Recipe Books" and your own recipes in "My Recipes": PDF, text, Markdown, \
-            saved web pages or photos. Nourish reads them and learns from them.
+            EPUB, Word, saved web pages or photos. Nourish reads them and learns from them.
             """.write(to: about, atomically: true, encoding: .utf8)
         }
     }
@@ -87,7 +91,8 @@ enum RecipeLibrary {
         let done = DispatchSemaphore(value: 0)
         var picked: [URL] = []
         DispatchQueue.main.async {
-            let types: [UTType] = [.pdf, .plainText, .text, .html, .webArchive, .image, .jpeg, .png, .heic] + ["md", "markdown", "mhtml", "webp"].compactMap { UTType(filenameExtension: $0) }
+            let types: [UTType] = [.pdf, .plainText, .text, .html, .webArchive, .image, .jpeg, .png, .heic, .epub]
+                + ["md", "markdown", "mhtml", "webp", "docx", "mobi", "azw", "azw3"].compactMap { UTType(filenameExtension: $0) }
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
             picker.allowsMultipleSelection = true
             let delegate = PickerDelegate { urls in picked = urls; done.signal() }
@@ -99,10 +104,13 @@ enum RecipeLibrary {
         done.wait()
         let fm = FileManager.default
         var added: [String] = []
+        var rejected: [String] = []
         for url in picked {
-            guard kinds[url.pathExtension.lowercased()] != nil else { continue }
+            let kind = kinds[url.pathExtension.lowercased()]
+            // Kindle books can't be read (see books.js KINDLE_NOTE): not copied, and the app says why.
+            guard kind != nil, kind != "kindle" else { rejected.append(url.lastPathComponent); continue }
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            let folder = url.pathExtension.lowercased() == "pdf" && size > 3_000_000 ? "Recipe Books" : "My Recipes"
+            let folder = kind == "epub" || (kind == "pdf" && size > 3_000_000) ? "Recipe Books" : "My Recipes"
             var dest = root.appendingPathComponent(folder).appendingPathComponent(url.lastPathComponent)
             var n = 2
             while fm.fileExists(atPath: dest.path) {
@@ -111,7 +119,7 @@ enum RecipeLibrary {
             }
             do { try fm.copyItem(at: url, to: dest); added.append(folder + "/" + dest.lastPathComponent) } catch { continue }
         }
-        return ["added": added.count, "files": added, "folder": location()["folder"] ?? ""]
+        return ["added": added.count, "files": added, "rejected": rejected, "folder": location()["folder"] ?? ""]
     }
 
     private static func topController() -> UIViewController? {
@@ -155,15 +163,38 @@ enum RecipeLibrary {
         var errorDescription: String? { message }
     }
 
-    static func read(_ rel: String) throws -> [String: Any] {
+    private static func resolve(_ rel: String) throws -> URL {
         let base = root.standardizedFileURL.path
         let url = root.appendingPathComponent(rel).standardizedFileURL
         guard url.path.hasPrefix(base + "/"), FileManager.default.fileExists(atPath: url.path) else {
             throw LibraryError(message: "That file isn't in the recipe library.")
         }
+        return url
+    }
+
+    /// A slice of a file (a book is read this way, a part at a time): base64 of at most 8 MB.
+    static func range(_ rel: String, offset: Int, length: Int) throws -> [String: Any] {
+        let url = try resolve(rel)
+        guard offset >= 0, length >= 0, length <= maxSlice else { throw LibraryError(message: "That part of the file is too big to read at once.") }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        try handle.seek(toOffset: UInt64(offset))
+        let data = try handle.read(upToCount: length) ?? Data()
+        return ["data": data.base64EncodedString()]
+    }
+
+    static func read(_ rel: String) throws -> [String: Any] {
+        let url = try resolve(rel)
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let kind = kinds[url.pathExtension.lowercased()] ?? ""
+        // Books are read by the app a slice at a time (range); here only their size is given.
+        if kind == "epub" || kind == "docx" {
+            if size > maxBookBytes { throw LibraryError(message: "That book is too big to read (over 400 MB).") }
+            return ["kind": kind, "size": size]
+        }
+        if kind == "kindle" { return ["kind": "kindle"] }
         if size > maxBytes { throw LibraryError(message: "That file is too big to read (over 40 MB).") }
-        switch kinds[url.pathExtension.lowercased()] ?? "" {
+        switch kind {
         case "text":
             return ["kind": "text", "text": (try? String(contentsOf: url, encoding: .utf8)) ?? (try? String(contentsOf: url, encoding: .isoLatin1)) ?? ""]
         case "html":

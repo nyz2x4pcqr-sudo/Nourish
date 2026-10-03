@@ -197,6 +197,7 @@ final class NativeBridge {
         switch (a.optString("op")) {
             case "list": return RecipeLibrary.list(context);
             case "read": return RecipeLibrary.read(context, a.optString("path"));
+            case "range": return RecipeLibrary.range(context, a.optString("path"), a.optLong("offset"), a.optInt("length"));
             case "where": {
                 JSONObject o = new JSONObject();
                 o.put("folder", "Inside the Nourish app (use Add files)");
@@ -210,6 +211,7 @@ final class NativeBridge {
                 host.pickLibraryFiles(done::complete);
                 JSONObject o = new JSONObject();
                 o.put("added", done.get(10, java.util.concurrent.TimeUnit.MINUTES));
+                synchronized (RecipeLibrary.lastRejected) { o.put("rejected", new JSONArray(RecipeLibrary.lastRejected)); }
                 o.put("folder", RecipeLibrary.root(context).getAbsolutePath());
                 return o;
             }
