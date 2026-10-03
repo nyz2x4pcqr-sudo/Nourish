@@ -247,7 +247,7 @@ r = json.load(open(sys.argv[1])); assert r["ok"], r
 v = json.loads(r["value"])
 print("\n".join(v["log"]))
 for i, d in enumerate(v["days"]): print(f"Day {i + 1}: {d['kcal']} kcal |", " | ".join(d["meals"]))
-print(f"AUTOMATIC 7-DAY PLAN ON THE SIMULATOR: {v['seconds']} s" + ("" if v["finished"] else " (stopped at the 8-minute limit; see the "Found ... recipes in ... s" line for the search time)"))
+print(f"AUTOMATIC 7-DAY PLAN ON THE SIMULATOR: {v['seconds']} s" + ("" if v["finished"] else " (stopped at the 8-minute limit; see the 'Found ... recipes in ... s' line for the search time)"))
 PY
 
 echo "== 7. Screen headers stay below the status bar on all five tabs"
