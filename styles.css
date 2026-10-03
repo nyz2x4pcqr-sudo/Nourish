@@ -1426,7 +1426,7 @@ a.settings-button { display: flex; text-decoration: none; }
 .food-barcode input { flex: 1; min-width: 10em; }
 .food-actions { position: sticky; bottom: 0; display: flex; gap: var(--s-2); padding: var(--s-3) 0 var(--s-2); background: linear-gradient(transparent, var(--sheet-bg, var(--surface)) 30%); }
 .food-actions .btn { flex: 1; min-height: 52px; }
-.eaten-control { margin: var(--s-4) 0 0; }
+.eaten-control { margin: var(--s-4) var(--s-5) 0; }
 
 .add-food-btn { width: auto; flex: 0 0 auto; }
 .extras .section-title { white-space: nowrap; }
@@ -1547,3 +1547,19 @@ a.settings-button { display: flex; text-decoration: none; }
 .breakdown-row .kcal { flex: 0 0 auto; font-weight: 700; }
 .breakdown-row.skipped { opacity: .55; }
 .breakdown-row.total { border-bottom: none; font-weight: 800; }
+
+/* "How was it?" after a meal */
+.rate-row { margin: 10px 0 4px; display: flex; flex-direction: column; gap: 8px; }
+.rate-row.compact { margin: -4px 4px 6px 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-2); }
+.rate-head { display: flex; align-items: center; gap: 8px; }
+.rate-q { flex: 1 1 auto; font-weight: 700; font-size: var(--fs-subhead); color: var(--text-2); }
+.rate-btn { border: 1px solid var(--border-strong); background: var(--surface-2); border-radius: 999px; min-width: 44px; min-height: 40px; font-size: 18px; line-height: 1; }
+.rate-btn.on { background: var(--accent); border-color: var(--accent); }
+.rate-close { width: 36px; height: 36px; }
+.rate-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.rate-tag { border: 1px solid var(--border-strong); background: transparent; color: var(--text-2); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: var(--fs-footnote); font-weight: 650; min-height: 34px; }
+.rate-tag.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.meal-with-rate { display: flex; flex-direction: column; }
+.learned-summary { padding: 4px 4px 14px; }
+.learned-summary p { margin: 0 0 6px; line-height: 1.5; }
+#recipeSheet .rate-row { padding: 0 var(--s-5); }

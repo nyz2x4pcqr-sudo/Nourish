@@ -24,6 +24,7 @@ on:
       - "finder.js"
       - "library.js"
       - "foodlog.js"
+      - "taste.js"
       - "theme.js"
       - "font-*.woff2"
       - "app-icon-*.png"

@@ -260,6 +260,10 @@
             // On equal terms with every other source (no head start): the books mainly teach (pairingScore).
             try { (await o.library()).forEach(r => add(Object.assign({}, r), { id: 'library', name: r.source_name || 'Your recipe library' })); } catch (e) { ctx.log('Library: ' + e.message); }
         }
+        // Favourites from the Cookbook (taste.js decides how often they come back): on equal terms.
+        if (o.favorites && o.favorites.recipes) {
+            o.favorites.recipes.forEach(r => add(JSON.parse(JSON.stringify(r)), { id: r.source_id || 'cookbook', name: r.source_name || 'Your Cookbook' }));
+        }
         const recipeCache = ctx.cache.get(CACHE.recipes) || {};
         Object.keys(recipeCache).forEach(url => {
             const c = recipeCache[url];
@@ -393,7 +397,7 @@
         const { pools, stats } = await findRecipes(o);
         const sourcePenalty = r => sourceCost(r, o);
         const exclude = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
-        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste });
+        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste, favorites: o.favorites });
         plan.days.forEach(d => PL.MEALS.forEach(m => { if (d[m]) { delete d[m]._fit; delete d[m].sameAs; delete d[m].preferred; } }));
         return Object.assign(plan, { stats, pools });
     }

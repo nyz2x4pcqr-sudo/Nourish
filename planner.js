@@ -445,6 +445,8 @@
         if (r.nutrition_unmatched) cost += 0.2;
         if (r.reseasoned) cost += 0.4;
         cost += (ctx.sourcePenalty && ctx.sourcePenalty(r)) || 0;
+        // What the app has learned the person likes (taste.js): −1…1, worth up to about a slot's worth of fit.
+        if (ctx.taste) { try { cost -= ctx.taste(r) * 0.8; } catch (e) { /* no profile */ } }
         cost += (ctx.cuisineCount[cuisineOf(r)] || 0) * 0.35;
         return cost;
     }
@@ -452,7 +454,10 @@
     // Picks recipes for each day and sizes the portions. pools: { breakfast: [recipes], … } (already
     // checked: allowed, seasoned, nutrition settled). Returns { days: [{ breakfast, lunch, dinner }],
     // missing: [{ day, meal, kcal }], report: [{ day, kcal, protein, carbs, fat }] }.
-    function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [], exclude, weekday, taste }) {
+    function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [], exclude, weekday, taste, favorites }) {
+        // Favourites (recipes they loved) come back, but at most `cap` times a week.
+        const favNames = new Set(((favorites && favorites.recipes) || []).map(r => normName(r.name)));
+        let favUsed = 0;
         const targets = targetsOf(settings);
         const split = splitOf(settings);
         const on = m => split[MEALS.indexOf(m)] > 0;
@@ -490,6 +495,7 @@
                 // for this slot (with this day's schedule) is out before it can be picked.
                 const limits = slotLimits(settings, m, weekday ? weekday(d) : null);
                 top[m] = (pools[m] || []).filter(r => !used.has(normName(r.name)) && !(r.sameAs && r.sameAs.some(x => used.has(x))))
+                    .filter(r => !favNames.has(normName(r.name)) || favUsed < ((favorites && favorites.cap) || 0))
                     .filter(r => { const why = slotProblem(r, m, limits); if (why) rejected[`${m}: ${r.name}`] = why; return !why; })
                     .map(r => ({ r, cost: slotCost(r, kcal, ctx) })).filter(x => isFinite(x.cost))
                     .sort((a, b) => a.cost - b.cost).slice(0, 8);
@@ -532,6 +538,7 @@
                 if (kcal / r.nutrition.calories < 0.85) trimAndRecount(r, r.nutrition.calories - kcal / 0.85);
                 items.push({ key: m, r, want: kcal });
                 used.add(normName(r.name));
+                if (favNames.has(normName(r.name))) favUsed++;
                 const c = cuisineOf(r);
                 ctx.cuisineCount[c] = (ctx.cuisineCount[c] || 0) + 1;
             });

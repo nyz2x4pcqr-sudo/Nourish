@@ -134,6 +134,7 @@ let selectedDay = 0;
 let grocery = { checked: [], custom: [] };     // checked: item texts; custom: [{ text, checked }]
 let cookbook = { recipes: [] };                // saved recipes (see COOKBOOK)
 let foodLog = { days: {}, recents: [], favorites: [] };   // what was eaten (foodlog.js), per day
+let taste = NourishTaste.empty();   // what the app has learned about the person (taste.js)
 let chatHistory = [];                          // [{ role: 'user' | 'assistant', content, card? }]
 let chatBusy = false;
 let chatBusyLabel = '';
@@ -320,6 +321,7 @@ function loadLocalState() {
     chatHistory = cleanChat(loadJSON('nourish_chat', []));
     cookbook = cleanCookbook(loadJSON('nourish_cookbook', null));
     foodLog = NourishLog.clean(loadJSON('nourish_log', null));
+    taste = NourishTaste.clean(loadJSON('nourish_taste', null));
 }
 
 function persistLocal(section) {
@@ -336,6 +338,7 @@ function persistLocal(section) {
     else if (section === 'chat') store('nourish_chat', chatHistory);
     else if (section === 'cookbook') store('nourish_cookbook', cookbook);
     else if (section === 'log') store('nourish_log', foodLog);
+    else if (section === 'taste') store('nourish_taste', taste);
 }
 
 function cleanGrocery(g) {
@@ -358,7 +361,7 @@ function cleanChat(list) {
 // Settings, preferences, the plan, the grocery list, the chat and the cookbook are kept on the PC so every device
 // (browser, iPhone app, Android app) shows the same thing. Each section has a revision number:
 // a device that has a newer change sends it; a device that's behind takes the PC's copy.
-const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat', 'cookbook', 'log'];
+const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat', 'cookbook', 'log', 'taste'];
 const syncMeta = Object.assign(
     Object.fromEntries(SECTIONS.map(s => [s, { rev: 0, dirty: false, ver: 0 }])),
     loadJSON('nourish_sync', {}));
@@ -398,6 +401,7 @@ function sectionValue(section) {
     if (section === 'grocery') return grocery;
     if (section === 'cookbook') return cookbook;
     if (section === 'log') return foodLog;
+    if (section === 'taste') return taste;
     return chatHistory.map(m => (m.card ? { role: m.role, content: m.content, card: m.card } : { role: m.role, content: m.content }));
 }
 
@@ -408,6 +412,7 @@ function hasLocalData(section) {
     if (section === 'grocery') return grocery.checked.length > 0 || grocery.custom.length > 0;
     if (section === 'cookbook') return cookbook.recipes.length > 0;
     if (section === 'log') return Object.keys(foodLog.days).length > 0 || foodLog.favorites.length > 0;
+    if (section === 'taste') return taste.events.length > 0 || !taste.on || Object.keys(taste.overrides.ingredients).length > 0;
     return chatHistory.length > 0;
 }
 
@@ -444,6 +449,9 @@ function applyRemote(section, value) {
         cookbook = cleanCookbook(value);
     } else if (section === 'log') {
         foodLog = NourishLog.clean(value);
+    } else if (section === 'taste') {
+        taste = NourishTaste.clean(value);
+        tasteCache = null;
     }
     persistLocal(section);
     return true;
@@ -1264,6 +1272,7 @@ const SETTINGS_PAGES = {
     chat: { icon: 'i-chat', color: '#6FA77A', title: 'Chat' },
     profile: { icon: 'i-user', color: '#D9893A', title: 'Your profile' },
     schedule: { icon: 'i-clock', color: '#C2964A', title: 'My schedule' },
+    learned: { icon: 'i-sparkle', color: '#B07CC6', title: 'What Nourish has learned' },
     sources: { icon: 'i-book', color: '#C9675A', title: 'Recipes' },
     advanced: { icon: 'i-gear', color: '#6E7F8E', title: 'Recipe sources & keys' },
     grocery: { icon: 'i-cart', color: '#4E9E92', title: 'Grocery list' },
@@ -1272,7 +1281,7 @@ const SETTINGS_PAGES = {
     data: { icon: 'i-shield', color: '#8B7E6E', title: 'Data & privacy' },
     logs: { icon: 'i-list', color: '#6E6862', title: 'Activity log' },
 };
-const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'schedule', 'sources', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
+const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'schedule', 'learned', 'sources', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
 const SETTINGS_GROUP_TITLES = ['', '', 'Advanced', ''];
 
 function settingsSummary(page) {
@@ -1287,6 +1296,7 @@ function settingsSummary(page) {
             : `${PROVIDERS[s.active_provider].replace(' (local)', '')} · ${s[`${s.active_provider}_model`] || 'auto'}`;
         case 'chat': return `${s.chef_style.charAt(0).toUpperCase() + s.chef_style.slice(1)} · ${on('chat_actions') ? 'can edit plan' : 'chat only'}`;
         case 'profile': return `${s.calorie_target} kcal · ${s.diet === 'No restriction' ? 'any diet' : s.diet}`;
+        case 'learned': return !taste.on ? 'Off' : taste.events.length ? `${taste.events.length} thing${taste.events.length > 1 ? 's' : ''} noted` : 'Nothing yet';
         case 'schedule': return ['breakfast', 'lunch', 'dinner'].map(m => SCHEDULE_SHORT[scheduleValue(m)] || '').join(' · ');
         case 'sources': return libraryState.count ? `${libraryState.count} of your own` : 'Automatic';
         case 'advanced': {
@@ -1404,7 +1414,89 @@ function scheduleRow(label, control, opts) {
     return r;
 }
 
+// === WHAT NOURISH HAS LEARNED ===
+const TASTE_EVENT_WORDS = { save: 'Saved', eaten: 'Ate', swap: 'Swapped away', skip: 'Skipped', delete: 'Removed from the Cookbook', log: 'Logged', rate: 'Rated', chat: 'Told the chef' };
+function ago(t) {
+    const d = Math.floor((Date.now() - t) / 86400000);
+    return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d < 30 ? `${d} days ago` : `${Math.round(d / 30)} month${d >= 45 ? 's' : ''} ago`;
+}
+function tasteChanged() { tasteCache = null; changed('taste'); renderSettings(); }
+function hourWords(h) {
+    if (h == null) return '';
+    const hr = Math.floor(h), min = Math.round((h - hr) * 60);
+    return new Date(2000, 0, 1, hr, min).toLocaleTimeString([], { hour: 'numeric', minute: min ? '2-digit' : undefined });
+}
+
 const SETTINGS_RENDERERS = {
+    learned() {
+        const prof = tasteProfile();
+        const o = taste.overrides;
+        const overrideRow = (kind, name, current) => scheduleRow(name.charAt(0).toUpperCase() + name.slice(1),
+            selectInput(current, { like: 'Like', dislike: "Don't like", forget: 'Forget this' }, v => { o[kind][name] = v; tasteChanged(); }, name));
+        const pick = (key, labels, learnedText) => selectInput(o[key] || '', Object.assign({ '': learnedText ? `Auto: ${learnedText}` : 'Auto' }, labels), v => { o[key] = v; tasteChanged(); }, key);
+        const addBox = h('input', { type: 'text', class: 'settings-input', placeholder: 'e.g. coriander', 'aria-label': 'A food', autocomplete: 'off' });
+        const addFood = v => () => {
+            const name = addBox.value.trim().toLowerCase().replace(/s$/, '');
+            if (!name) return;
+            o.ingredients[name] = v;
+            tasteChanged();
+            showToast(v === 'like' ? `Noted: you like ${name}` : `Noted: less ${name}`, false);
+        };
+        const sentence = [];
+        if (prof.likes.length) sentence.push(`You seem to enjoy ${prof.likes.slice(0, 5).join(', ')}.`);
+        if (prof.dislikes.length) sentence.push(`You're less keen on ${prof.dislikes.slice(0, 4).join(', ')}.`);
+        if (prof.cuisinesLiked.length) sentence.push(`Favourite cuisines: ${prof.cuisinesLiked.slice(0, 3).join(', ')}.`);
+        if (prof.spice !== 'unknown') sentence.push(`Spice: ${prof.spice}.`);
+        if (prof.effort !== 'unknown') sentence.push(`Cooking effort you like: ${prof.effort}.`);
+        if (prof.filling === 'more') sentence.push('You often find portions small, so plans lean towards more filling meals.');
+        const times = ['breakfast', 'lunch', 'dinner'].filter(m => prof.mealTimes[m] != null).map(m => `${MEAL_LABELS[m].toLowerCase()} around ${hourWords(prof.mealTimes[m])}`);
+        const recent = taste.events.slice(-12).reverse();
+        const likedRows = [...new Set(prof.likes.concat(Object.keys(o.ingredients).filter(k => o.ingredients[k] === 'like')))].slice(0, 15);
+        const dislikedRows = [...new Set(prof.dislikes.concat(Object.keys(o.ingredients).filter(k => o.ingredients[k] === 'dislike')))].slice(0, 15);
+        return [
+            ...settingsGroup('', [h('button', { type: 'button', class: 'settings-row settings-nav switch-row', role: 'switch', 'aria-checked': String(taste.on), onclick: () => { taste.on = !taste.on; tasteChanged(); } },
+                h('span', { class: 'settings-label', text: 'Learn from what I do' }),
+                h('span', { class: 'switch', 'aria-checked': String(taste.on), 'aria-hidden': 'true' }))],
+                help('Nourish notices what you save, cook, rate, swap away, skip and log, and what you tell the chef, and uses it to pick and write meals you will like.',
+                    'It all stays on this device and syncs only to Nourish on your PC. It is never sent anywhere else: AI services on the internet (Claude, OpenAI) are not told any of it. The AI model itself is not retrained; Nourish keeps a short list of what you like and uses it to choose and guide recipes. You will still get something new now and then.')),
+            ...(taste.on ? [
+                h('div', { class: 'learned-summary' },
+                    h('p', { text: sentence.length ? sentence.join(' ') : "Nothing learned yet. Save recipes, mark meals as eaten and tap 👍 or 👎 after a meal, and this fills in." }),
+                    times.length ? h('p', { class: 'text-dim', text: `You usually have ${times.join(', ')}.` }) : null,
+                    prof.proteins.length ? h('p', { class: 'text-dim', text: `Favourite proteins: ${prof.proteins.join(', ')}.` }) : null),
+                ...settingsGroup('Foods you like', likedRows.length ? likedRows.map(k => overrideRow('ingredients', k, o.ingredients[k] || 'like')) : [h('div', { class: 'settings-row' }, h('span', { class: 'settings-hint', text: 'None yet.' }))]),
+                ...settingsGroup('Foods you are less keen on', dislikedRows.length ? dislikedRows.map(k => overrideRow('ingredients', k, o.ingredients[k] || 'dislike')) : [h('div', { class: 'settings-row' }, h('span', { class: 'settings-hint', text: 'None yet.' }))]),
+                ...settingsGroup('Tell Nourish yourself', [
+                    h('div', { class: 'settings-row settings-row-stack' }, addBox,
+                        h('div', { class: 'quick-actions' },
+                            h('button', { type: 'button', class: 'btn btn-secondary', onclick: addFood('like') }, '👍 I like it'),
+                            h('button', { type: 'button', class: 'btn btn-secondary', onclick: addFood('dislike') }, '👎 Less of it'))),
+                ]),
+                ...(prof.cuisinesLiked.length || prof.cuisinesDisliked.length || Object.keys(o.cuisines).length ? settingsGroup('Cuisines',
+                    [...new Set(prof.cuisinesLiked.concat(prof.cuisinesDisliked, Object.keys(o.cuisines).filter(k => o.cuisines[k] !== 'forget')))].map(k => overrideRow('cuisines', k, o.cuisines[k] || (prof.cuisinesLiked.includes(k) ? 'like' : 'dislike')))) : []),
+                ...settingsGroup('How you like it', [
+                    scheduleRow('Spice', pick('spice', { mild: 'Mild', medium: 'Medium', hot: 'Hot' }, prof.spice !== 'unknown' && !o.spice ? prof.spice : '')),
+                    scheduleRow('Cooking effort', pick('effort', { easy: 'Easy', medium: 'Medium', involved: 'Involved is fine' }, prof.effort !== 'unknown' && !o.effort ? prof.effort : '')),
+                    scheduleRow('Portions', pick('filling', { fine: 'They are fine', more: 'More filling, please' }, !o.filling ? (prof.filling === 'more' ? 'more filling' : 'fine') : '')),
+                    scheduleRow('Favourites again', pick('repeats', { rarely: 'Rarely', sometimes: 'Sometimes', often: 'Often' }, !o.repeats ? prof.repeats : '')),
+                ], '"Auto" means Nourish works it out from what you do. Your own choices here win. Favourites again: sometimes is up to 2 loved recipes a week, often up to 4.'),
+                ...settingsGroup('Recently noted', recent.length ? recent.map(e => h('div', { class: 'settings-row' },
+                    h('span', { class: 'settings-label' }, e.type === 'chat' ? `"${e.word === '__spice' ? (e.sign > 0 ? 'spicier' : 'less spicy') : e.word}"` : (e.name || '—'),
+                        h('span', { class: 'settings-hint', text: `${TASTE_EVENT_WORDS[e.type] || e.type}${e.type === 'rate' ? ` ${e.rating === 'up' ? '👍' : e.rating === 'down' ? '👎' : ''} ${(e.tags || []).map(t => NourishTaste.TAGS[t]).join(', ')}` : ''} · ${ago(e.t)}` })),
+                    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Forget this', title: 'Forget this', onclick: () => { NourishTaste.forget(taste, e.t); tasteChanged(); } }, icon('i-close'))))
+                    : [h('div', { class: 'settings-row' }, h('span', { class: 'settings-hint', text: 'Nothing yet.' }))]),
+            ] : []),
+            ...settingsGroup('', [settingsButton('Reset what Nourish has learned', () => {
+                if (!confirm('Forget everything Nourish has learned about your tastes? This can\'t be undone.')) return;
+                const wasOn = taste.on;
+                taste = NourishTaste.empty();
+                taste.on = wasOn;
+                tasteChanged();
+                store(RATE_DISMISSED_KEY, []);
+                showToast('Reset. Nourish starts learning again from scratch.', false);
+            }, 'danger')]),
+        ];
+    },
     schedule() {
         const meals = ['breakfast', 'lunch', 'dinner'];
         const weekend = on('sched_weekend');
@@ -2062,6 +2154,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
             h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => openRecipeEditor(meal, { mode: 'edit', mealType, cookbookId }) }, icon('i-edit'), 'Edit'),
             h('button', { type: 'button', class: 'btn btn-secondary danger', onclick: () => { removeFromCookbook(cookbookId); closeRecipeSheet(); } }, icon('i-trash'), 'Remove')) : null,
         dayIndex != null && !cookbookId ? eatenControl(dayIndex, mealType) : null,
+        dayIndex != null && !cookbookId ? rateRow(dayIndex, mealType, meal) : null,
         cookbookId ? null : h('div', { class: 'recipe-actions' },
             dayIndex != null && !isSnackSlot(mealType) ? h('button', {
                 type: 'button', class: 'btn btn-secondary', disabled: !!planJob,
@@ -2190,6 +2283,49 @@ function nutritionNotes(meal) {
     if (meal.trimmed) notes.push('Less oil or sugar than the original, to fit your calories. Seasoning is unchanged.');
     if (meal.reseasoned) notes.push(`Seasoning added: ${meal.reseasoned.join(', ')}.`);
     return notes;
+}
+
+// "How was it?": one optional tap after a meal (thumbs up or down, and a few quick notes). It
+// teaches the taste profile; it never asks twice and can be dismissed.
+const RATE_DISMISSED_KEY = 'nourish_rate_dismissed';
+function rateKey(dayIndex, mealType) { return `${logKey(dayIndex)}|${mealType}`; }
+function rateMeal(dayIndex, mealType, meal, change) {
+    if (!meal) return;
+    const key = rateKey(dayIndex, mealType);
+    const old = NourishTaste.ratingOf(taste, key) || { rating: '', tags: [] };
+    const next = Object.assign({ rating: old.rating, tags: (old.tags || []).slice() }, change(old));
+    learn('rate', meal, { key, rating: next.rating, tags: next.tags, slot: mealType });
+    updateTodayScreen();
+    if (openRecipe && openRecipe.dayIndex === dayIndex && openRecipe.mealType === mealType) openRecipeSheet(mealType, meal, dayIndex);
+}
+function rateRow(dayIndex, mealType, meal, { compact = false } = {}) {
+    if (!taste.on || dayIndex == null || !meal) return null;
+    const key = rateKey(dayIndex, mealType);
+    const r = NourishTaste.ratingOf(taste, key);
+    const tags = (r && r.tags) || [];
+    const thumb = (v, label, glyph) => h('button', { type: 'button', class: 'rate-btn' + (r && r.rating === v ? ' on' : ''), 'aria-pressed': String(!!(r && r.rating === v)), 'aria-label': label, title: label,
+        onclick: () => rateMeal(dayIndex, mealType, meal, o => ({ rating: o.rating === v ? '' : v })) }, glyph);
+    const tag = (id) => h('button', { type: 'button', class: 'rate-tag' + (tags.includes(id) ? ' on' : ''), 'aria-pressed': String(tags.includes(id)),
+        onclick: () => rateMeal(dayIndex, mealType, meal, o => {
+            const t = (o.tags || []).includes(id) ? o.tags.filter(x => x !== id) : (o.tags || []).concat([id]);
+            return { tags: t, rating: o.rating || (id === 'loved' ? 'up' : '') };
+        }) }, NourishTaste.TAGS[id]);
+    const dismiss = compact ? h('button', { type: 'button', class: 'icon-btn rate-close', 'aria-label': 'Not now', onclick: () => {
+        const set = loadJSON(RATE_DISMISSED_KEY, []).concat([key]).slice(-200);
+        store(RATE_DISMISSED_KEY, set);
+        updateTodayScreen();
+    } }, icon('i-close')) : null;
+    return h('div', { class: 'rate-row' + (compact ? ' compact' : '') },
+        h('div', { class: 'rate-head' }, h('span', { class: 'rate-q', text: r && (r.rating || tags.length) ? 'Thanks, noted.' : 'How was it?' }), thumb('up', 'Liked it', '👍'), thumb('down', "Didn't like it", '👎'), dismiss),
+        (!compact || r) ? h('div', { class: 'rate-tags' }, ['loved', 'too_bland', 'too_much_work', 'too_small'].map(tag)) : null);
+}
+// On Today: the latest meal marked eaten that hasn't been rated (or waved away) gets the quick row.
+function rateTargetToday(dayIndex, day, entry) {
+    if (!taste.on || !isToday(dayIndex)) return null;
+    const dismissed = new Set(loadJSON(RATE_DISMISSED_KEY, []));
+    const eaten = MEAL_TYPES.filter(t => day[t] && (entry.meals || {})[t] === 'eaten');
+    const open = eaten.filter(t => !dismissed.has(rateKey(dayIndex, t)) && !NourishTaste.ratingOf(taste, rateKey(dayIndex, t)));
+    return open.length ? open[open.length - 1] : null;
 }
 
 // "Did you eat this?" on a planned meal: Not yet / Eaten / Skipped.
@@ -2389,13 +2525,17 @@ function updateTodayScreen() {
     }
 
     const title = isToday(selectedDay) ? "Today's meals" : `${dayName(selectedDay)}'s meals`;
+    const rateTarget = rateTargetToday(selectedDay, day, entry);
     setChildren(body,
         cookingPanel('today'),
         strip,
         summary,
         on('show_nutrition') ? dayStatus(selectedDay, day, dayTotals) : null,
         h('h2', { class: 'section-title' }, title, h('small', { text: `Day ${selectedDay + 1}` })),
-        h('div', { class: 'meal-cards', id: 'mealCards' }, daySlots(day).map(([t, meal]) => mealCard(t, meal, selectedDay, entry.meals[t]))),
+        h('div', { class: 'meal-cards', id: 'mealCards' }, daySlots(day).map(([t, meal]) => {
+            const card = mealCard(t, meal, selectedDay, entry.meals[t]);
+            return t === rateTarget ? h('div', { class: 'meal-with-rate' }, card, rateRow(selectedDay, t, meal, { compact: true })) : card;
+        })),
         extrasSection(selectedDay, entry));
     const active = strip.querySelector('.day-pill.active');
     if (active && active.scrollIntoView) requestAnimationFrame(() => {
@@ -2459,6 +2599,8 @@ function todayStatOn(key) { return String(settings.today_stats || 'protein_g,car
 function setMealStatus(dayIndex, type, status) {
     NourishLog.setMeal(foodLog, logKey(dayIndex), type, status);
     changed('log');
+    const meal = daysData[dayIndex] && slotMeal(daysData[dayIndex], type);
+    if (status && meal) learn(status === 'eaten' ? 'eaten' : 'skip', meal, { slot: isSnackSlot(type) ? 'snack' : type, hour: isToday(dayIndex) ? new Date().getHours() + new Date().getMinutes() / 60 : null });
     updateTodayScreen();
     if (status) showToast(status === 'eaten' ? 'Marked as eaten' : 'Marked as skipped', false);
 }
@@ -2691,6 +2833,7 @@ function saveFood() {
     if (d.editId) NourishLog.update(foodLog, key, d.editId, d.items[0]);
     else d.items.forEach(it => NourishLog.add(foodLog, key, Object.assign({}, it, { needsCalories: undefined })));
     changed('log');
+    if (!d.editId) d.items.forEach(it => learn('log', { name: it.name, ingredients: [it.name] }));
     const n = d.items.length;
     closeFoodSheet();
     updateTodayScreen();
@@ -3062,12 +3205,47 @@ function applyEdits(parsed) {
     return { replacedPlan: false, changes: done };
 }
 
+// === THE APP LEARNS THE PERSON (taste.js) ===
+// Everything someone does with their food goes into a private taste profile: kept on this device,
+// synced to their own PC, never sent anywhere else (cloud AIs don't get it).
+let tasteCache = null;
+function tasteProfile() {
+    if (!tasteCache) tasteCache = NourishTaste.profile(taste);
+    return tasteCache;
+}
+function learn(type, recipe, extra) {
+    if (!taste.on) return;
+    try {
+        if (NourishTaste.record(taste, type, recipe, extra || {})) { tasteCache = null; changed('taste'); }
+    } catch (e) { nlog('taste', `Couldn't note that: ${e.message}`, null, 'warn'); }
+}
+// Recipes scored for the person (−1…1), with a small push towards something new now and then.
+function tasteScorer() {
+    const prof = tasteProfile();
+    if (!prof.on || !prof.learnedAnything) return null;
+    const seed = Math.floor(Date.now() / (7 * 86400000));
+    return r => NourishTaste.score(prof, r, { explore: true, seed });
+}
+// Recipes they loved or saved, offered again as often as they like favourites back.
+function favoriteRecipes() {
+    const prof = tasteProfile();
+    if (!prof.on || prof.repeats === 'rarely') return null;
+    const loved = new Set(taste.events.filter(e => e.type === 'rate' && (e.rating === 'up' || (e.tags || []).includes('loved'))).map(e => e.name));
+    const list = cookbook.recipes.filter(e => e.recipe && (loved.has(e.recipe.name) || prof.repeats === 'often')).map(e => e.recipe).slice(0, 30);
+    return list.length ? { recipes: list, cap: prof.repeats === 'often' ? 4 : 2 } : null;
+}
+
 // === WHAT GOES WITH EVERY AI MEAL REQUEST ===
 // Called by mealAsk (ondevice.js) for every meal the AI writes or rewrites, on every AI.
 function mealGuidance({ type, d, cuisine, dish }) {
     const parts = [];
     const notes = cookbookNotes([type, cuisine, dish, prefs.likes].filter(Boolean).join(' '));
     if (notes) parts.push(notes);
+    // What the app has learned: only for AIs on this phone or the person's own PC, never a cloud AI.
+    if (['local', 'lmstudio', 'ollama'].includes(settings.active_provider)) {
+        const learned = NourishTaste.guidance(tasteProfile());
+        if (learned) parts.push(learned);
+    }
     return parts.join(' ');
 }
 
@@ -3276,6 +3454,8 @@ function finderOptions(likes, hates) {
         library: () => libraryRecipes(),
         pairingScore: r => NourishLibrary.pairingScore(libraryIndex(), r),
         weekday: d => (dayBase() + d) % 7,
+        taste: tasteScorer(),
+        favorites: favoriteRecipes(),
         cache: { get: k => loadJSON(k, null), set: (k, v) => store(k, v) },
         log: m => nlog('plan', m),
     };
@@ -3379,6 +3559,8 @@ async function generatePlanFromChat() {
 }
 
 function swapMeal(dayIndex, mealType) {
+    const current = daysData[dayIndex] && daysData[dayIndex][mealType];
+    if (current) learn('swap', current);
     if (settings.plan_source !== 'ai') return swapFromSources(dayIndex, mealType);
     return remakeMeal(dayIndex, mealType, 'swap');
 }
@@ -3400,8 +3582,9 @@ async function swapFromSources(dayIndex, mealType) {
         const others = MEAL_TYPES.filter(t => t !== mealType).map(t => day[t]).filter(Boolean);
         const taken = new Set(others.map(NourishPlanner.mainProtein).concat(others.map(NourishPlanner.mainVeg)).filter(Boolean));
         const share = NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(mealType)] * (Number(settings.calorie_target) || 2000);
+        const scorer = tasteScorer();
         const fits = (pools[mealType] || []).filter(r => !inWeek.has(NourishPlanner.normName(r.name)) && !taken.has(NourishPlanner.mainProtein(r)) && !taken.has(NourishPlanner.mainVeg(r)) && !slotCheck(r, mealType, dayIndex))
-            .map(r => ({ r, d: Math.abs(Math.log(share / r.nutrition.calories)) }))
+            .map(r => ({ r, d: Math.abs(Math.log(share / r.nutrition.calories)) - (scorer ? scorer(r) * 0.3 : 0) }))
             .filter(x => x.d < Math.log(2)).sort((a, b) => a.d - b.d).slice(0, 4);
         if (fits.length) picked = fits[Math.floor(Math.random() * fits.length)].r;
     } catch (e) {
@@ -4037,6 +4220,7 @@ function addToCookbook(meal, mealType, source) {
         existing.meal_type = mealType;
     } else {
         cookbook.recipes.unshift({ id: cookbookId(), saved_at: Date.now(), source, meal_type: mealType, recipe: copy });
+        learn('save', copy);
         if (cookbook.recipes.length > COOKBOOK_MAX) cookbook.recipes.length = COOKBOOK_MAX;
     }
     changed('cookbook');
@@ -4047,6 +4231,7 @@ function removeFromCookbook(id) {
     const entry = cookbook.recipes.find(e => e.id === id);
     cookbook.recipes = cookbook.recipes.filter(e => e.id !== id);
     changed('cookbook');
+    if (entry) learn('delete', entry.recipe);
     if ($('cookbookSheet').classList.contains('active')) renderCookbook();
     if (entry) showToast(`Removed "${entry.recipe.name}" from your Cookbook`, false);
 }
@@ -4192,6 +4377,7 @@ async function sendChat(text) {
     autoGrow(input);
     chatHistory.push({ role: 'user', content: text });
     chatHistory = chatHistory.slice(-100);
+    if (taste.on && NourishTaste.fromChat(taste, text).length) { tasteCache = null; changed('taste'); }
     changed('chat');
     if (intent === 'create') {
         await runPlanJob({ kind: 'plan', origin: 'chat', messages: chatPlanMessages() });
