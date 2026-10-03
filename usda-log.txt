@@ -1,0 +1,20 @@
+Downloading SR Legacy...
+approx 'sausage': 'Sausage, Italian, pork, raw' -> 'sausage, italian, pork, mild, raw' (1.00)
+approx 'lamb': 'Lamb, domestic, leg, whole (shank and sirloin), separable lean and fat, trimmed to 1/4" fat, choice, raw' -> 'lamb, leg, whole (shank and sirloin), separable lean and fat, trimmed to 1/4" fat, choice, raw' (0.94)
+approx 'lamb chop': 'Lamb, domestic, loin, separable lean and fat, trimmed to 1/4" fat, choice, raw' -> 'lamb, loin, separable lean and fat, trimmed to 1/4" fat, choice, raw' (0.92)
+approx 'shrimp': 'Crustaceans, shrimp, raw (not previously frozen)' -> 'crustaceans, shrimp, raw' (0.50)
+  candidates for 'shrimp': ["applebee's, double crunch shrimp", 'cracker barrel, country fried shrimp platter', 'crustaceans, shrimp, cooked', 'crustaceans, shrimp, mixed species, canned', 'crustaceans, shrimp, mixed species, cooked, breaded and fried', 'crustaceans, shrimp, mixed species, cooked, moist heat (may contain additives to retain moisture)', 'crustaceans, shrimp, mixed species, imitation, made from surimi', 'crustaceans, shrimp, mixed species, raw (may contain additives to retain moisture)']
+  candidates for 'oat milk': ['babyfood, cereal, oatmeal, prepared with whole milk', 'babyfood, cereal, oatmeal, with bananas, prepared with whole milk', 'babyfood, cereal, oatmeal, with honey, prepared with whole milk', 'candies, milk chocolate coated coffee beans', 'candies, milk chocolate coated peanuts', 'candies, milk chocolate coated raisins', 'granola bar, soft, milk chocolate coated, peanut butter', 'milk, goat, fluid, with added vitamin d']
+approx 'hot dog': 'Fast foods, hot dog, plain' -> 'fast foods, roast beef sandwich, plain' (0.60)
+  candidates for 'hot dog': ['pickle relish, hot dog', 'rolls, hamburger or hot dog, wheat/cracked wheat', 'rolls, hamburger or hot dog, whole wheat', 'rolls, hamburger or hotdog, mixed-grain', 'rolls, hamburger or hotdog, plain']
+approx 'cereal': "Cereals ready-to-eat, KELLOGG, KELLOGG'S CORN FLAKES" -> 'cereals ready-to-eat, ralston corn flakes' (0.78)
+  candidates for 'cereal': ['babyfood, baked product, finger snacks cereal fortified', 'babyfood, cereal, barley, dry fortified', 'babyfood, cereal, barley, prepared with whole milk', 'babyfood, cereal, brown rice, dry, instant', 'babyfood, cereal, egg yolks and bacon, junior', 'babyfood, cereal, high protein, prepared with whole milk', 'babyfood, cereal, high protein, with apple and orange, dry', 'babyfood, cereal, high protein, with apple and orange, prepared with whole milk']
+approx 'sports drink': 'Beverages, Sports drink, PEPSICO QUAKER GATORADE G, 0-calorie' -> 'beverages, pepsico quaker, gatorade g2, low calorie' (0.67)
+  candidates for 'sports drink': ['beverages, cytosport, muscle milk, ready-to-drink']
+  candidates for 'cheesecake': ['cake, cheesecake, commercially prepared', 'cake, cheesecake, prepared from mix, no-bake type']
+  candidates for 'brownie': ['cookies, brownies, commercially prepared', 'cookies, brownies, commercially prepared, reduced fat, with added fiber', 'cookies, brownies, dry mix, regular', 'cookies, brownies, dry mix, sugar free', 'cookies, brownies, prepared from recipe', "martha white foods, martha white's chewy fudge brownie mix, dry"]
+approx 'chicken wings': 'Fast foods, chicken wings, plain' -> 'fast foods, chicken fillet sandwich, plain with pickles' (0.80)
+  candidates for 'chicken wings': ['chicken, broiler, rotisserie, bbq, wing, meat and skin', 'chicken, broiler, rotisserie, bbq, wing, meat only', 'chicken, broilers or fryers, rotisserie, original seasoning, wing, meat and skin, cooked', 'chicken, broilers or fryers, rotisserie, original seasoning, wing, meat only, cooked', 'chicken, broilers or fryers, wing, meat and skin, cooked, fried, batter', 'chicken, broilers or fryers, wing, meat and skin, cooked, fried, flour', 'chicken, broilers or fryers, wing, meat and skin, cooked, roasted', 'chicken, broilers or fryers, wing, meat and skin, cooked, stewed']
+  candidates for 'sushi': []
+approx 'raisins': 'Raisins, seedless' -> 'raisins, golden, seedless' (1.00)
+MISSING: cheesecake, brownie, sushi
