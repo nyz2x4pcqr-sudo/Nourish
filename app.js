@@ -2566,7 +2566,51 @@ async function generatePlanFromChat() {
 }
 
 function swapMeal(dayIndex, mealType) {
+    if (settings.plan_source !== 'ai') return swapFromSources(dayIndex, mealType);
     return remakeMeal(dayIndex, mealType, 'swap');
+}
+
+// Swap with a real recipe (mostly from what's already been found, so it's quick), sized to the
+// day; the AI writes one only when nothing fits.
+async function swapFromSources(dayIndex, mealType) {
+    if (planJob) { showToast('A plan is already being made'); return; }
+    const day = daysData[dayIndex] || {};
+    const current = day[mealType];
+    const label = `${isToday(dayIndex) ? 'today\'s' : dayName(dayIndex) + '\'s'} ${MEAL_LABELS[mealType].toLowerCase()}`;
+    planJob = { id: 'stepwise', started: Date.now(), provider: settings.active_provider, kind: 'edit', origin: 'recipe', local: false };
+    showJobBar('busy', `Finding another recipe for ${label}…`);
+    let picked = null;
+    try {
+        const o = Object.assign(finderOptions(prefs.likes, prefs.hates), { days: 2, limits: { searches: 6, pages: 8, seconds: 25 } });
+        const { pools } = await NourishFinder.findRecipes(o);
+        const inWeek = new Set(daysData.flatMap(d => MEAL_TYPES.map(t => d && d[t] && NourishPlanner.normName(d[t].name)).filter(Boolean)));
+        const others = MEAL_TYPES.filter(t => t !== mealType).map(t => day[t]).filter(Boolean);
+        const taken = new Set(others.map(NourishPlanner.mainProtein).concat(others.map(NourishPlanner.mainVeg)).filter(Boolean));
+        const share = NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(mealType)] * (Number(settings.calorie_target) || 2000);
+        const fits = (pools[mealType] || []).filter(r => !inWeek.has(NourishPlanner.normName(r.name)) && !taken.has(NourishPlanner.mainProtein(r)) && !taken.has(NourishPlanner.mainVeg(r)))
+            .map(r => ({ r, d: Math.abs(Math.log(share / r.nutrition.calories)) }))
+            .filter(x => x.d < Math.log(2)).sort((a, b) => a.d - b.d).slice(0, 4);
+        if (fits.length) picked = fits[Math.floor(Math.random() * fits.length)].r;
+    } catch (e) {
+        nlog('plan', `Looking for another recipe failed: ${e.message}`, null, 'warn');
+    } finally {
+        planJob = null;
+        showJobBar(null);
+    }
+    if (!picked) {
+        if (aiReady()) return remakeMeal(dayIndex, mealType, 'swap');
+        showToast('No other recipe fits that meal right now. Try again later, or download an AI model in Settings.');
+        return;
+    }
+    const meal = normalizeMeal(JSON.parse(JSON.stringify(picked)));
+    const fitted = NourishPlanner.fitDay(Object.assign({}, day, { [mealType]: meal }), Object.assign({}, settings, { goal: prefs.goal }), servingsWanted());
+    daysData[dayIndex] = fitted;
+    changed('plan');
+    updateTodayScreen();
+    updatePlanScreen();
+    updateGroceryScreen();
+    showToast(`Swapped in: ${fitted[mealType].name}`, false);
+    if (openRecipe && openRecipe.dayIndex === dayIndex && openRecipe.mealType === mealType) openRecipeSheet(mealType, daysData[dayIndex][mealType], dayIndex);
 }
 
 // One meal of the plan made again by the AI, checked like a plan's meals (made again up to 2 times

@@ -269,7 +269,7 @@
                 const kcal = targets.kcal * split[i];
                 top[m] = (pools[m] || []).filter(r => !used.has(normName(r.name)) && !(r.sameAs && r.sameAs.some(x => used.has(x))))
                     .map(r => ({ r, cost: slotCost(r, kcal, ctx) })).filter(x => isFinite(x.cost))
-                    .sort((a, b) => a.cost - b.cost).slice(0, 6);
+                    .sort((a, b) => a.cost - b.cost).slice(0, 8);
             });
             // The best combination: different main proteins and vegetables, closest to the day's macros.
             let best = null;
@@ -284,6 +284,13 @@
                 if (new Set(vegs).size < vegs.length) return;
                 const cuis = rs.map(cuisineOf).filter(c => c !== 'other');
                 let cost = pick.reduce((s, x) => s + (x ? x.cost : 50), 0);
+                // The whole day's protein and fat once each meal is sized to its share of calories.
+                let p = 0, f = 0, share = 0;
+                pick.forEach((x, i) => { if (!x) return; const k = targets.kcal * split[i] / x.r.nutrition.calories; p += x.r.nutrition.protein_g * k; f += x.r.nutrition.fat_g * k; share += split[i]; });
+                if (share > 0) {
+                    const pT = targets.protein * share, fT = targets.fat * share;
+                    cost += Math.max(0, (pT * 0.9 - p) / pT) * 4 + Math.max(0, (f - fT * 1.1) / fT) * 4;
+                }
                 if (new Set(cuis).size < cuis.length) cost += 0.6;
                 if (!best || cost < best.cost) best = { pick, cost };
             })));
