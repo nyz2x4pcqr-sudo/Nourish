@@ -191,6 +191,8 @@
                 <button type="button" class="icon-btn btn-close" id="closeGenerateBtn" aria-label="Close"><svg><use href="#i-close"/></svg></button>
             </div>
             <div class="sheet-body">
+                <div id="scheduleQuick" hidden></div>
+                <div id="generateForm">
                 <div class="input-group">
                     <label class="label" for="inputLikes">Foods you love</label>
                     <input type="text" id="inputLikes" placeholder="Optional, e.g. chicken, pasta, Thai food" autocomplete="off" enterkeyhint="next" />
@@ -209,7 +211,9 @@
                 </div>
                 <p class="sheet-hint">Nourish picks real recipes from trusted cooking sites and sizes them to your calories, diet and allergies. Both boxes are optional.
                     <button type="button" class="link-btn" id="editProfileBtn">Edit profile</button></p>
+                <p class="sheet-hint" id="scheduleSummary"></p>
                 <button type="button" class="btn btn-primary" id="generateBtn">Generate Plan</button>
+                </div>
             </div>
         </div>
     </div>

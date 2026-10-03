@@ -118,6 +118,15 @@ const SETTINGS_DEFAULTS = {
 };
 
 // === STATE ===
+// My schedule: how long someone has to make and eat each meal ('' = the usual default for the
+// meal), different at the weekend if they like, or per day (Advanced). Hard limits for plans.
+['breakfast', 'lunch', 'dinner'].forEach(m => {
+    SETTINGS_DEFAULTS[`sched_${m}`] = '';
+    SETTINGS_DEFAULTS[`sched_we_${m}`] = '';
+    for (let d = 0; d < 7; d++) SETTINGS_DEFAULTS[`sched_d${d}_${m}`] = '';
+});
+SETTINGS_DEFAULTS.sched_weekend = 'off';
+SETTINGS_DEFAULTS.sched_asked = '';   // 'yes' once the quick questions were answered or skipped
 const settings = Object.assign({}, SETTINGS_DEFAULTS);
 let prefs = { goal: 'Maintain', source: 'aiChef', likes: '', hates: '' };
 let daysData = [];
@@ -1238,6 +1247,7 @@ const SETTINGS_PAGES = {
     ai: { icon: 'i-sparkle', color: '#8A79C9', title: 'AI model' },
     chat: { icon: 'i-chat', color: '#6FA77A', title: 'Chat' },
     profile: { icon: 'i-user', color: '#D9893A', title: 'Your profile' },
+    schedule: { icon: 'i-clock', color: '#C2964A', title: 'My schedule' },
     sources: { icon: 'i-book', color: '#C9675A', title: 'Recipes' },
     advanced: { icon: 'i-gear', color: '#6E7F8E', title: 'Recipe sources & keys' },
     grocery: { icon: 'i-cart', color: '#4E9E92', title: 'Grocery list' },
@@ -1246,7 +1256,7 @@ const SETTINGS_PAGES = {
     data: { icon: 'i-shield', color: '#8B7E6E', title: 'Data & privacy' },
     logs: { icon: 'i-list', color: '#6E6862', title: 'Activity log' },
 };
-const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'sources', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
+const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'schedule', 'sources', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
 const SETTINGS_GROUP_TITLES = ['', '', 'Advanced', ''];
 
 function settingsSummary(page) {
@@ -1261,6 +1271,7 @@ function settingsSummary(page) {
             : `${PROVIDERS[s.active_provider].replace(' (local)', '')} · ${s[`${s.active_provider}_model`] || 'auto'}`;
         case 'chat': return `${s.chef_style.charAt(0).toUpperCase() + s.chef_style.slice(1)} · ${on('chat_actions') ? 'can edit plan' : 'chat only'}`;
         case 'profile': return `${s.calorie_target} kcal · ${s.diet === 'No restriction' ? 'any diet' : s.diet}`;
+        case 'schedule': return ['breakfast', 'lunch', 'dinner'].map(m => SCHEDULE_SHORT[scheduleValue(m)] || '').join(' · ');
         case 'sources': return libraryState.count ? `${libraryState.count} of your own` : 'Automatic';
         case 'advanced': {
             const off = String(s.sources_off || '').split(',').filter(Boolean).length;
@@ -1342,7 +1353,68 @@ function renderSettings() {
     renderUpdateResult();
 }
 
+// === MY SCHEDULE ===
+const SCHEDULE_DEFAULT = { breakfast: '20', lunch: '30', dinner: 'norush' };   // the same as the built-in slot limits
+const SCHEDULE_CHOICES = {
+    breakfast: ['5', '10', '20', '30', '45', 'norush', 'nocook'],
+    lunch: ['10', '20', '30', '45', '60', 'norush', 'nocook'],
+    dinner: ['20', '30', '45', '60', '90', 'norush', 'nocook'],
+};
+const SCHEDULE_SHORT = { 5: '5 min', 10: '10 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour', 90: '1½ hours', norush: 'No rush', nocook: "Don't cook" };
+const SCHEDULE_LONG = Object.assign({}, SCHEDULE_SHORT, { nocook: "I don't cook this meal" });
+function scheduleValue(meal, prefix = 'sched_') { return settings[`${prefix}${meal}`] || (prefix === 'sched_' ? SCHEDULE_DEFAULT[meal] : ''); }
+function scheduleOptions(meal, inherit) {
+    const o = inherit ? { '': inherit } : {};
+    SCHEDULE_CHOICES[meal].forEach(v => { o[v] = SCHEDULE_LONG[v]; });
+    return o;
+}
+// What a choice means for the recipes, in plain words.
+function scheduleMeaning(meal, value) {
+    if (value === 'nocook') return 'Grab-and-go or no-cook ideas only';
+    if (value === 'norush') return meal === 'dinner' ? 'Any recipe, however long' : 'Longer recipes are fine';
+    const L = NourishPlanner.slotLimits({ [`sched_${meal}`]: value }, meal);
+    return L.noCook ? 'No-cook ideas (there is no time to cook)' : `Recipes ready in ${L.minutes} min or less`;
+}
+function scheduleChips(meal, onpick) {
+    const current = scheduleValue(meal);
+    return h('div', { class: 'time-chips', role: 'radiogroup', 'aria-label': `${MEAL_LABELS[meal]} time` }, SCHEDULE_CHOICES[meal].map(v =>
+        h('button', { type: 'button', role: 'radio', 'aria-checked': String(v === current), class: 'time-chip' + (v === current ? ' selected' : ''),
+            onclick: () => { setSetting(`sched_${meal}`, v === SCHEDULE_DEFAULT[meal] ? '' : v, { quiet: true }); onpick(); } }, SCHEDULE_SHORT[v])));
+}
+
+function scheduleRow(label, control, opts) {
+    const r = settingsRow(label, control, opts);
+    r.classList.add('schedule-row');
+    return r;
+}
+
 const SETTINGS_RENDERERS = {
+    schedule() {
+        const meals = ['breakfast', 'lunch', 'dinner'];
+        const weekend = on('sched_weekend');
+        const row = (meal, prefix, inherit) => scheduleRow(MEAL_LABELS[meal],
+            selectInput(settings[`${prefix}${meal}`] || (inherit ? '' : SCHEDULE_DEFAULT[meal]), scheduleOptions(meal, inherit), v => {
+                setSetting(`${prefix}${meal}`, !inherit && v === SCHEDULE_DEFAULT[meal] ? '' : v, { quiet: true });
+                renderSettings();
+            }, `${MEAL_LABELS[meal]} time`),
+            { hint: inherit ? (settings[`${prefix}${meal}`] ? scheduleMeaning(meal, settings[`${prefix}${meal}`]) : '') : scheduleMeaning(meal, scheduleValue(meal)) });
+        const days = Array.from({ length: 7 }, (_, d) => d);
+        return [
+            ...settingsGroup(weekend ? 'Weekdays' : 'Every day', meals.map(m => row(m, 'sched_')),
+                help('How long you have to make and eat each meal. Plans only use recipes that fit.',
+                    'The time includes about 5 minutes to eat (10 at dinner), so "20 min" means recipes ready in 15 minutes. "I don\'t cook this meal" gives grab-and-go or no-cook ideas only. Without changes, breakfast is quick (15 min), lunch is light (25 min) and dinner can take as long as it takes.')),
+            ...settingsGroup('', [settingsToggle('sched_weekend', 'Different times at the weekend', { onchange: () => renderSettings() })]),
+            ...(weekend ? settingsGroup('Saturday and Sunday', meals.map(m => row(m, 'sched_we_', 'As weekdays'))) : []),
+            h('details', { class: 'settings-advanced' + (days.some(d => meals.some(m => settings[`sched_d${d}_${m}`])) ? ' has-values' : '') , open: days.some(d => meals.some(m => settings[`sched_d${d}_${m}`])) },
+                h('summary', { class: 'settings-group-label', text: 'Advanced: day by day' }),
+                days.map(d => settingsGroup(DAY_NAMES[d], meals.map(m => row(m, `sched_d${d}_`, 'As usual'))))),
+            ...settingsGroup('', [settingsButton('Reset my schedule', () => {
+                Object.keys(SETTINGS_DEFAULTS).filter(k => k.startsWith('sched_') && k !== 'sched_asked').forEach(k => setSetting(k, SETTINGS_DEFAULTS[k], { quiet: true }));
+                renderSettings();
+                showToast('Schedule reset', false);
+            }, 'danger')], 'These are hard limits for new plans, swaps and AI-written meals. Your current plan stays as it is until you make a new one.'),
+        ];
+    },
     appearance() {
         const T = NourishTheme;
         if (!lookSnapshot) lookSnapshot = Object.fromEntries(APPEARANCE_KEYS.map(k => [k, settings[k]]));
@@ -1876,7 +1948,37 @@ function syncChoiceButtons() {
     });
 }
 
+// The first time: three quick questions about time (with the usual answers already picked and a
+// Skip), then the usual form. Changed any time in Settings → My schedule.
+function renderScheduleQuestions() {
+    const box = $('scheduleQuick');
+    const form = $('generateForm');
+    if (!box || !form) return;
+    const ask = settings.sched_asked !== 'yes';
+    box.hidden = !ask;
+    form.hidden = ask;
+    const summary = $('scheduleSummary');
+    if (summary) setChildren(summary, h('span', { text: `Time: ${['breakfast', 'lunch', 'dinner'].map(m => `${MEAL_LABELS[m]} ${SCHEDULE_SHORT[scheduleValue(m)]}`).join(' · ')} ` }),
+        h('button', { type: 'button', class: 'link-btn', onclick: () => { closeGenerateSheet(); switchTab('settings'); openSettingsPage('schedule'); } }, 'Change'));
+    if (!ask) return;
+    const done = () => { setSetting('sched_asked', 'yes', { quiet: true }); renderScheduleQuestions(); };
+    setChildren(box,
+        h('p', { class: 'sheet-hint', text: 'Quick question, so your recipes fit your day: how much time do you usually have to make and eat each meal?' }),
+        ['breakfast', 'lunch', 'dinner'].map(m => h('div', { class: 'input-group' },
+            h('div', { class: 'label', text: MEAL_LABELS[m] }),
+            scheduleChips(m, renderScheduleQuestions),
+            h('div', { class: 'time-meaning', text: scheduleMeaning(m, scheduleValue(m)) }))),
+        h('div', { class: 'quick-actions' },
+            h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => {
+                ['breakfast', 'lunch', 'dinner'].forEach(m => setSetting(`sched_${m}`, '', { quiet: true }));
+                done();
+            } }, 'Skip'),
+            h('button', { type: 'button', class: 'btn btn-primary', onclick: done }, 'Continue')),
+        h('p', { class: 'sheet-hint', text: 'You can change this any time in Settings → My schedule, including different times at the weekend.' }));
+}
+
 function showGenerateSheet() {
+    renderScheduleQuestions();
     syncChoiceButtons();
     $('inputLikes').value = prefs.likes || '';
     $('inputHates').value = prefs.hates || '';
