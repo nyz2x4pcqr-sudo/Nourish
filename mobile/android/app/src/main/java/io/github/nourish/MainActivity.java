@@ -68,6 +68,16 @@ public class MainActivity extends Activity implements NativeBridge.Host {
         // alert()/confirm() dialogs, and the system picker for <input type="file"> (recipe screenshots,
         // barcode photos).
         web.setWebChromeClient(new WebChromeClient() {
+            // The page's warnings and errors go to the phone's log (tag "Nourish"), so a failing build
+            // test shows what went wrong.
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage m) {
+                if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR || m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.WARNING) {
+                    Log.w(TAG, "page: " + m.message() + " (" + m.sourceId() + ":" + m.lineNumber() + ")");
+                }
+                return super.onConsoleMessage(m);
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, android.webkit.ValueCallback<android.net.Uri[]> callback, FileChooserParams params) {
                 if (filePicked != null) filePicked.onReceiveValue(null);

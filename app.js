@@ -252,9 +252,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (location.protocol === 'file:') {
         showBanner('Opened as a file. Start the server and open http://localhost:8000 instead.');
     }
-    checkBackend().then(ok => {
+    // One step failing (say a screen that can't redraw) must not stop the rest of the start-up.
+    const startupError = step => e => { nlog('app', `Start-up step "${step}" failed: ${(e && e.message) || e}`, e && e.stack, 'error'); };
+    checkBackend().catch(e => { startupError('check server')(e); return backendOnline; }).then(ok => {
         if (!ok) return;
-        syncNow().then(() => { loadServerInfo(); resumePendingJobs(); });
+        syncNow().catch(startupError('sync')).then(() => {
+            loadServerInfo().catch(startupError('server info'));
+            try { resumePendingJobs(); } catch (e) { startupError('resume jobs')(e); }
+        });
     });
     setInterval(() => { if (!document.hidden) syncNow(); }, 15000);
     window.addEventListener('online', () => { checkBackend(); syncNow(); });

@@ -5,7 +5,7 @@
 #  3. the app's own on-device AI engine runs a real model and writes a valid day of meals.
 set -ux
 mkdir -p shots
-fail() { echo "SMOKE TEST FAILED: $*"; tail -n 40 server.log; adb logcat -d > shots/android-logcat.txt; exit 1; }
+fail() { echo "SMOKE TEST FAILED: $*"; tail -n 40 server.log; adb logcat -d > shots/android-logcat.txt; echo "Page messages:"; grep -E "Nourish|chromium" shots/android-logcat.txt | tail -n 60; exit 1; }
 screen_text() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb exec-out cat /sdcard/ui.xml | grep -o 'text="[^"]*"' | sed 's/text="//;s/"$//' | grep -v '^$' | tr '\n' '|'; }
 # The emulator's screen reader can come back empty while the page is still settling (slower
 # runners), so keep reading for up to 60 s before deciding the text isn't there.
