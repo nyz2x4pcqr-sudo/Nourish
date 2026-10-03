@@ -61,7 +61,7 @@ FOODS = {
     "hamburger": ("Fast foods, hamburger; single, regular patty; plain", ["burger", "hamburgers", "burgers"]),
     "cheeseburger": ("Fast foods, cheeseburger; single, regular patty; plain", ["cheeseburgers"]),
     "french fries": ("Fast foods, potato, french fried in vegetable oil", ["fries", "chips (fries)"]),
-    "hot dog": ("Fast foods, hotdog, plain", ["hotdog", "hot dogs"]),
+    "hot dog": ("Fast foods, hot dog, plain", ["hotdog", "hot dogs"]),
     "fried chicken": ("Fast foods, fried chicken, breast, meat and skin and breading", ["chicken nuggets", "nuggets", "chicken tenders"]),
     "bean burrito": ("Fast foods, burrito, with beans and cheese", ["burrito", "burritos"]),
     "potato chips": ("Snacks, potato chips, plain, salted", ["chips", "crisps", "bag of chips"]),
