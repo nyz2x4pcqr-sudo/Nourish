@@ -2121,6 +2121,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
     if (time.makeAhead) chips.push(h('span', { class: 'chip accent', text: 'Make ahead' }));
     if (portionLabel(meal)) chips.push(h('span', { class: 'chip', title: 'Your portion, sized to fit your day. The amounts and calories below are for this portion.' }, icon('i-user'), portionLabel(meal)));
     if (meal.leftover) chips.push(h('span', { class: 'chip', text: 'Leftovers' }));
+    if (meal.rating && meal.rating.value) chips.push(h('span', { class: 'chip', title: `Rated ${meal.rating.value} of 5 on ${meal.source_name || 'its site'}` }, `★ ${meal.rating.value}${meal.rating.count ? ` (${meal.rating.count.toLocaleString()})` : ''}`));
     if (meal.servings && !portionLabel(meal)) chips.push(h('span', { class: 'chip' }, icon('i-user'), `Serves ${meal.servings}`));
     // How much work it is (steps, ingredients, techniques), so a busy morning isn't a surprise.
     if (profile) chips.push(h('span', { class: 'chip', title: `Difficulty ${profile.difficulty} of 10: ${profile.steps} steps, ${profile.ingredients} ingredients${profile.techniques.length ? ', ' + profile.techniques.join(', ') : ''}` },
@@ -3168,6 +3169,7 @@ function normalizeMeal(m) {
         builtin: m.builtin ? true : undefined,
         adapted: Array.isArray(m.adapted) && m.adapted.length ? m.adapted.map(String).slice(0, 4) : undefined,
         description: m.description ? String(m.description).slice(0, 200) : undefined,
+        rating: m.rating && Number(m.rating.value) > 0 ? { value: toNumber(m.rating.value), count: toNumber(m.rating.count) || 0 } : undefined,
         cuisine: m.cuisine ? String(m.cuisine).slice(0, 30) : undefined,
         // The meal the recipe's source files it under: part of telling a breakfast from a dinner.
         category: Array.isArray(m.category) ? m.category.map(String).slice(0, 6) : m.category ? String(m.category).slice(0, 80) : undefined,

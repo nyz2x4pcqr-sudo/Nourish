@@ -521,6 +521,8 @@
         cost -= Math.min(2, P.likeScore(r, ctx.likes)) * 0.5;
         if (ctx.goal === 'Cut' && r.healthy) cost -= 0.3;
         if (r.nutrition_unmatched) cost += 0.2;
+        // Highly rated on its own site (with enough ratings to mean something) comes first.
+        if (r.rating && r.rating.count >= 5) cost -= Math.max(-0.4, Math.min(0.4, (r.rating.value - 4.2) * 0.5));
         if (r.reseasoned) cost += 0.4;
         cost += (ctx.sourcePenalty && ctx.sourcePenalty(r)) || 0;
         // What the app has learned the person likes (taste.js): −1…1, worth up to about a slot's worth of fit.

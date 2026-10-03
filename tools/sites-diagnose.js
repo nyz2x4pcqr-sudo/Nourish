@@ -42,7 +42,8 @@ async function diagnose(site) {
         cache: { get: k => (k in store ? JSON.parse(store[k]) : null), set: (k, v) => { store[k] = JSON.stringify(v); } },
         trace: m => lines.push(m), log: m => lines.push('log: ' + m), limits: { seconds: 45, searches: 12, pages: 18, parallel: 2 },
     });
-    return { lines, stats: res.stats, pools: res.pools };
+    const all = [...new Set(res.pools.breakfast.concat(res.pools.lunch, res.pools.dinner))];
+    return { lines, stats: res.stats, pools: res.pools, rated: all.filter(r => r.rating).length, ownNutrition: all.filter(r => r.nutrition_basis === 'source').length, failures: res.stats.failed.length ? JSON.parse(store.nourish_source_failures || '{}') : {} };
 }
 
 (async () => {
@@ -50,10 +51,11 @@ async function diagnose(site) {
     const sites = S.SITES.filter(s => (only.length ? only.includes(s.id) : s.status === 'ok' || s.recheck));
     const summary = [];
     for (const site of sites) {
-        const { lines, stats } = await diagnose(site);
+        const { lines, stats, rated, ownNutrition, failures } = await diagnose(site);
         const p = stats.perMeal || {};
-        const got = ['breakfast', 'lunch', 'dinner'].map(m => `${m} ${(p[m] && p[m].web) || 0}`).join(', ');
-        const fail = site.id in (stats.failures || {}) ? '' : (stats.failed || []).includes(site.id) ? ' · FAILED' : '';
+        const got = ['breakfast', 'lunch', 'dinner'].map(m => `${m} ${(p[m] && p[m].web) || 0}`).join(', ') + ` · ${rated} rated · ${ownNutrition} with the site's own nutrition`;
+        const f = failures[site.id];
+        const fail = f ? ` · FAILED: ${f.why}${f.blocked ? ' (refuses the app)' : ''}` : '';
         console.log(`\n=== ${site.id} (${site.domain}): ${stats.recipes} recipes [${got}] from ${stats.searches} searches, ${stats.pages} pages${fail}`);
         lines.forEach(l => console.log('  ' + l));
         if (stats.why) console.log('  turned away: ' + JSON.stringify(stats.why));

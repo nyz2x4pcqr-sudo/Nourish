@@ -129,6 +129,12 @@
             // The recipe's own cuisine and keywords: help tell a meal from a drink, a dessert or a sauce.
             cuisine: cleanText(list(recipe.recipeCuisine).join(', ')).slice(0, 40) || undefined,
             keywords: cleanText(list(recipe.keywords).join(', ')).slice(0, 200) || undefined,
+            // The site's own star rating, when it gives one.
+            rating: (() => {
+                const r = recipe.aggregateRating;
+                const value = r && firstNumber(r.ratingValue), count = r && (firstNumber(r.ratingCount) || firstNumber(r.reviewCount));
+                return value > 0 && value <= 5 ? { value: Math.round(value * 10) / 10, count: count > 0 ? Math.round(count) : 0 } : undefined;
+            })(),
         };
     }
     function fromJsonLd(doc, url) {

@@ -19,8 +19,8 @@
     const N = root.NourishNutrition || req('./nutrition.js');
 
     // Gentle and quick: a few requests at a time, caps on searches and pages, and a time limit.
-    const LIMITS = { parallel: 4, searches: 36, pages: 72, seconds: 40, cachedRecipes: 1200, perSlot: 21 };
-    const CACHE = { recipes: 'nourish_recipe_cache', searches: 'nourish_search_cache', sitemaps: 'nourish_sitemap_cache', failures: 'nourish_source_failures', categories: 'nourish_site_categories' };
+    const LIMITS = { parallel: 4, searches: 36, pages: 72, seconds: 25, cachedRecipes: 1200, perSlot: 21 };
+    const CACHE = { recipes: 'nourish_recipe_cache', searches: 'nourish_search_cache', sitemaps: 'nourish_sitemap_cache', failures: 'nourish_source_failures', categories: 'nourish_site_categories', pages: 'nourish_search_pages', listings: 'nourish_search_listings', robots: 'nourish_site_robots' };
     const DAY = 24 * 3600 * 1000;
 
     // What to look for, meal by meal (breakfast words for breakfast, and so on). Each plan starts
@@ -82,6 +82,7 @@
             nutrition: !r.builtin && r.nutrition && Number(r.nutrition.calories) > 0 ? r.nutrition : null,
             category: Array.isArray(r.category) ? r.category.join(', ') : String(r.category || ''),
             keywords: r.keywords ? String(r.keywords).slice(0, 200) : undefined,
+            rating: r.rating && Number(r.rating.value) > 0 ? { value: Number(r.rating.value), count: Number(r.rating.count) || 0 } : undefined,
             source_url: r.source_url || r.url || undefined,
             source_name: r.source_name || (source && source.name) || undefined,
             source_id: (source && source.id) || r.source_id || undefined,
@@ -162,6 +163,11 @@
             o, now, cache, failures, stats,
             categories: cache.get(CACHE.categories) || {},
             sitemapsRead: {},
+            feeds: {},
+            robots: cache.get(CACHE.robots) || {},
+            robotsReading: {},
+            listings: {},   // filled from the cache in findRecipes
+            memo: {},
             skip: new Set(),   // sites that failed during this search: not asked again this time
             log: o.log || (() => {}),
             trace: o.trace || (() => {}),
@@ -188,7 +194,68 @@
 
     // === SEARCHING ===
     // 403/405 (refused) and 429 (too many requests) mean "leave us alone": the site is blocked.
+    // Search and list pages are remembered by address for 3 days, so the same address is never
+    // asked for twice (lunch and dinner can lead to the same search).
+    async function getListing(ctx, url, browser) {
+        const hit = ctx.listings[url];
+        if (hit && hit.at > ctx.now() - 3 * DAY) return hit.res;
+        if (ctx.memo[url]) return ctx.memo[url];
+        const res = await getPage(ctx, url, browser);
+        const small = { status: res.status, url: res.url, body: String(res.body || '') };
+        ctx.memo[url] = small;
+        if (small.body.length < 60000) ctx.listings[url] = { at: ctx.now(), res: small };
+        return small;
+    }
+    // Each site's robots.txt, read about once a month: a page it asks robots not to read is never
+    // fetched. A site that won't even let the app read its robots.txt (403) is treated as refusing.
+    function robotsRules(text) {
+        const rules = [];
+        let mine = false, inGroup = false;
+        String(text || '').split(/\r?\n/).forEach(line => {
+            const m = line.replace(/#.*/, '').trim().match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
+            if (!m) return;
+            const k = m[1].toLowerCase(), v = m[2].trim();
+            if (k === 'user-agent') { if (!inGroup) mine = false; inGroup = true; if (v === '*' || /nourish/i.test(v)) mine = true; return; }
+            inGroup = false;
+            if (mine && (k === 'allow' || k === 'disallow') && v) rules.push([k, v]);
+        });
+        return rules;
+    }
+    function robotsAllow(rules, path) {
+        let best = null;
+        (rules || []).forEach(([k, v]) => {
+            const re = new RegExp('^' + v.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\\\$$/, '$'));
+            if (re.test(path) && (!best || v.length > best[1].length || (v.length === best[1].length && k === 'allow'))) best = [k, v];
+        });
+        return !best || best[0] === 'allow';
+    }
+    async function robotsFor(ctx, site, origin) {
+        const all = ctx.robots;
+        const hit = all[site.id];
+        if (hit && hit.at > ctx.now() - 30 * DAY) return hit;
+        if (!ctx.robotsReading[site.id]) {
+            ctx.robotsReading[site.id] = (async () => {
+                let res = null;
+                try { res = await ctx.o.fetchPage(`${origin || 'https://' + site.domain}/robots.txt`, { browser: false }); } catch (e) { res = null; }
+                const status = res && res.status;
+                const entry = { at: ctx.now(), rules: status === 200 ? robotsRules(res.body).slice(0, 300) : [], refused: status === 403 || status === 401 };
+                if (status === 200 || status === 403 || status === 401 || status === 404 || status === 410) all[site.id] = entry;   // otherwise asked again next time
+                return entry;
+            })();
+        }
+        return ctx.robotsReading[site.id];
+    }
     async function getPage(ctx, url, browser) {
+        const site = S.siteForUrl(url);
+        if (site && !site.custom) {
+            let origin = '';
+            try { origin = new URL(url).origin; } catch (e) { /* none */ }
+            const rb = await robotsFor(ctx, site, origin);
+            if (rb.refused) { const e = new Error('refuses to show its robots.txt (403)'); e.blocked = true; throw e; }
+            let path = '/';
+            try { const u = new URL(url); path = u.pathname + u.search; } catch (e) { /* keep "/" */ }
+            if (!robotsAllow(rb.rules, path)) throw new Error('robots.txt asks robots not to read this page');
+        }
         const res = await ctx.o.fetchPage(url, { browser });
         if (!res || !res.status) throw new Error('no answer');
         if (res.status === 402 || res.status === 403 || res.status === 405 || res.status === 429) {
@@ -200,29 +267,83 @@
         return res;
     }
 
-    // WordPress search, inside the site's own breakfast/lunch/dinner category when it has one.
-    async function searchWp(ctx, site, q, meal) {
-        const base = `https://${site.domain}`;
-        const cat = meal ? await wpCategory(ctx, site, meal) : null;
-        // Best match first, by the recipe's title: WordPress otherwise lists the newest posts that
-        // mention the word anywhere ("eggs" → a coconut cake), which is how searches used to bring
-        // back drinks, desserts and sauces. Older WordPress doesn't know search_columns: asked without.
-        const plain = ctx.categories[`${site.id}|plain`];
-        const url = `${base}/wp-json/wp/v2/posts?search=${encodeURIComponent(q)}&per_page=10&orderby=relevance${plain ? '' : '&search_columns=post_title'}&_fields=link,title${cat ? '&categories=' + cat : ''}`;
-        let res;
-        try { res = await getPage(ctx, url, false); } catch (e) {
-            if (e.blocked || plain || !/HTTP 400/.test(e.message)) throw e;
-            ctx.categories[`${site.id}|plain`] = { at: ctx.now(), id: 1 };
-            return searchWp(ctx, site, q, meal);
+    // === WAYS TO FIND RECIPES ON A SITE (sources.js `find`, best first) ===
+    // 'wp'       WordPress search (the site's /wp-json feed)
+    // 'page'     the site's own search results page (`searchUrl`, {q} and {page})
+    // 'category' its breakfast/lunch/dinner/healthy/quick pages (`categories`)
+    // 'sitemap'  its list of recipe addresses (`sitemap`): the index once a month, then one more
+    //            part of it per run, never the whole thing every time
+    // 'rss'      its public feed (`feed`)
+    // Each recipe page is then read with the same structured-data reader (importer.js).
+    const GENERIC_WORDS = /^(easy|quick|healthy|best|simple|recipe|recipes|bowl|bowls|salad|soup|breakfast|lunch|dinner|homemade)$/i;
+    function mainWord(q) {
+        const words = String(q).toLowerCase().split(/\s+/).filter(Boolean);
+        return words.filter(w => !GENERIC_WORDS.test(w)).sort((a, b) => b.length - a.length)[0] || words[0] || q;
+    }
+    // Links on a page that look like recipe pages on the same site (`recipePath` narrows them down).
+    function linksFromHtml(html, site, base) {
+        const out = [];
+        const seen = new Set();
+        const keep = site.recipePath ? new RegExp(site.recipePath, 'i') : null;
+        for (const m of String(html || '').matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]{0,400}?)<\/a>/gi)) {
+            let u;
+            try { u = new URL(decode(m[1]), base); } catch (e) { continue; }
+            const host = u.hostname.replace(/^www\./, '').toLowerCase();
+            if (!(host === site.domain || host.endsWith('.' + site.domain))) continue;
+            const path = u.pathname;
+            if (keep ? !keep.test(path) : !(path.length > 12 && /-/.test(path))) continue;
+            if (ROUNDUP.test(path) || /\.(css|js|png|jpe?g|gif|svg|webp|xml|json|pdf)$/i.test(path) || /\/(search|login|account|cart|privacy|terms|tag|author|page)\b/i.test(path)) continue;
+            const url = u.origin + path;
+            if (seen.has(url)) continue;
+            seen.add(url);
+            const title = decode(m[2]).replace(/\s+/g, ' ').trim().slice(0, 120);
+            out.push({ url, title: title && title.length > 3 ? title : slugWords(url) });
         }
-        ctx.trace(`${site.id}: "${q}" (${meal || 'any'}${cat ? ', its ' + meal + ' category' : ''})`);
+        return out;
+    }
+    // Keeps the links that match the words; when none do, all of them (a category or feed is already about the meal).
+    function matching(links, q) {
+        const words = String(q || '').toLowerCase().split(/\s+/).filter(w => w.length > 2 && !GENERIC_WORDS.test(w));
+        if (!words.length) return links;
+        const hit = links.filter(l => words.some(w => (`${l.title} ${slugWords(l.url)}`).toLowerCase().indexOf(w.replace(/s$/, '')) >= 0));
+        return hit.length ? hit : links;
+    }
+
+    // WordPress search: by title first, best match first, inside the site's own meal category when
+    // it has one. A search that finds nothing tries again more broadly: the whole text instead of
+    // titles ("breakfast tacos" is rarely a title word for word), then the main word alone
+    // ("omelette"), then simply the newest recipes in the meal's category.
+    async function wpPosts(ctx, site, params) {
+        const base = `https://${site.domain}`;
+        const res = await getListing(ctx, `${base}/wp-json/wp/v2/posts?${params}&_fields=link,title`, false);
         let list;
         try { list = JSON.parse(res.body); } catch (e) { throw new Error('not a WordPress answer'); }
         if (!Array.isArray(list)) throw new Error('not a WordPress answer');
-        const out = list.map(p => ({ url: p && p.link, title: decode(p && p.title && p.title.rendered) })).filter(x => x.url);
-        // Nothing in the category for these words: the whole site.
-        if (!out.length && cat) return searchWp(ctx, site, q, null);
-        return out;
+        return list.map(p => ({ url: p && p.link, title: decode(p && p.title && p.title.rendered) })).filter(x => x.url);
+    }
+    async function searchWp(ctx, site, q, meal, page = 1) {
+        const cat = meal ? await wpCategory(ctx, site, meal) : null;
+        const inCat = cat ? '&categories=' + cat : '';
+        const plain = ctx.categories[`${site.id}|plain`];
+        const tries = [];
+        if (!plain) tries.push([`title "${q}"`, `search=${encodeURIComponent(q)}&search_columns=post_title&orderby=relevance&per_page=10&page=${page}${inCat}`]);
+        tries.push([`"${q}"`, `search=${encodeURIComponent(q)}&orderby=relevance&per_page=10&page=${page}${inCat}`]);
+        const word = mainWord(q);
+        if (word !== q) tries.push([`"${word}"`, `search=${encodeURIComponent(word)}&orderby=relevance&per_page=10&page=${page}${inCat}`]);
+        if (cat) tries.push([`its ${meal} recipes`, `categories=${cat}&per_page=10&page=${page + (ctx.seed || 0) % 5}`]);
+        for (const [how, params] of tries) {
+            let list;
+            try { list = await wpPosts(ctx, site, params); } catch (e) {
+                // Older WordPress doesn't know search_columns: asked without from now on.
+                if (!e.blocked && /HTTP 400/.test(e.message) && /search_columns/.test(params)) { ctx.categories[`${site.id}|plain`] = { at: ctx.now(), id: 1 }; continue; }
+                throw e;
+            }
+            // Roundups ("25 Best Dinner Ideas") don't count: only links that could be a recipe.
+            const usable = list.filter(l => !ROUNDUP.test(l.url) && !NOT_RECIPE_TITLE.test(l.title || ''));
+            if (usable.length) { ctx.trace(`${site.id}: ${how} (${meal || 'any'}${cat ? ', in its ' + meal + ' category' : ''}): ${usable.length}`); return usable; }
+        }
+        ctx.trace(`${site.id}: "${q}" (${meal || 'any'}): nothing`);
+        return [];
     }
     // The site's category for a meal ("Breakfast", "Lunch", "Main Course"…), looked up once a month.
     const MEAL_CATEGORY = { breakfast: ['breakfast', 'brunch'], lunch: ['lunch'], dinner: ['dinner', 'main-course', 'main-dishes', 'main-dish', 'mains', 'entrees'] };
@@ -242,36 +363,100 @@
         return id || null;
     }
 
-    // A site's list of recipe addresses, downloaded at most once a month and kept small (just the
-    // paths), so a big sitemap isn't downloaded on every plan.
-    async function sitemapUrls(ctx, site) {
-        const all = ctx.cache.get(CACHE.sitemaps) || {};
-        const hit = all[site.id];
-        const prefix = `https://${site.domain}`;
-        if (hit && hit.at > ctx.now() - 30 * DAY && hit.paths && hit.paths.length) return hit.paths.map(p => prefix + p);
-        if (ctx.sitemapsRead[site.id]) return ctx.sitemapsRead[site.id];
-        const res = await getPage(ctx, site.sitemap, false);
-        let urls = (String(res.body).match(/<loc>([^<]+)<\/loc>/g) || []).map(x => decode(x.replace(/<\/?loc>/g, '')));
-        const maps = urls.filter(u => /\.xml/i.test(u) && /recipe/i.test(u)).slice(0, 2);
-        for (const m of maps) {
-            const r2 = await getPage(ctx, m, false);
-            urls = urls.concat((String(r2.body).match(/<loc>([^<]+)<\/loc>/g) || []).map(x => decode(x.replace(/<\/?loc>/g, ''))));
-        }
-        urls = urls.filter(u => !/\.xml/i.test(u) && !ROUNDUP.test(u) && domainOf(u) === site.domain).slice(0, 2500);
-        ctx.sitemapsRead[site.id] = urls;
-        all[site.id] = { at: ctx.now(), paths: urls.map(u => { try { return new URL(u).pathname; } catch (e) { return ''; } }).filter(Boolean) };
-        saveCache(ctx, CACHE.sitemaps, all);
-        return urls;
+    // The site's own search results page.
+    async function searchPage(ctx, site, q, meal, page = 1) {
+        if (!site.searchUrl) return [];
+        const url = site.searchUrl.replace('{q}', encodeURIComponent(q)).replace('{page}', String(page));
+        const res = await getListing(ctx, url, true);
+        let links = linksFromHtml(res.body, site, res.url || url);
+        if (!links.length && q !== mainWord(q)) return searchPage(ctx, site, mainWord(q), meal, page);
+        ctx.trace(`${site.id}: search page "${q}": ${links.length}`);
+        return links;
     }
-    async function searchSitemap(ctx, site, q) {
-        const words = q.toLowerCase().split(/\s+/);
-        return (await sitemapUrls(ctx, site)).filter(u => words.every(w => slugWords(u).indexOf(w) >= 0)).slice(0, 10).map(url => ({ url, title: slugWords(url) }));
+    // The site's breakfast, lunch or dinner pages (and healthy or quick ones), a different page each run.
+    async function searchCategory(ctx, site, q, meal, page = 1) {
+        const list = ((site.categories || {})[meal] || []).concat((site.categories || {}).any || []);
+        if (!list.length) return [];
+        const pick = list[((ctx.seed || 0) + page - 1) % list.length];
+        const url = (/^https?:/.test(pick) ? pick : `https://${site.domain}${pick}`).replace('{page}', String(page));
+        const res = await getListing(ctx, url, true);
+        const links = linksFromHtml(res.body, site, res.url || url);
+        ctx.trace(`${site.id}: ${meal} page ${url}: ${links.length}`);
+        return matching(links, q);
+    }
+    // The site's public feed (RSS or Atom), read at most once a day.
+    async function searchFeed(ctx, site, q) {
+        if (!site.feed) return [];
+        let items = ctx.feeds[site.id];
+        if (!items) {
+            const res = await getListing(ctx, site.feed, false);
+            items = [...String(res.body).matchAll(/<(item|entry)[\s>]([\s\S]*?)<\/\1>/g)].map(m => {
+                const body = m[2];
+                const link = (body.match(/<link>([^<]+)<\/link>/) || body.match(/<link[^>]+href=["']([^"']+)["']/) || [])[1];
+                const title = (body.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/) || [])[1];
+                return link ? { url: decode(link).trim(), title: decode(title || '') } : null;
+            }).filter(Boolean);
+            ctx.feeds[site.id] = items;
+        }
+        ctx.trace(`${site.id}: feed: ${items.length}`);
+        return matching(items, q);
     }
 
-    async function searchSite(ctx, site, q, meal) {
-        if (site.search === 'wp') return searchWp(ctx, site, q, meal);
-        if (site.search === 'sitemap') return searchSitemap(ctx, site, q);
-        if (site.search === 'web' && ctx.o.webSearch) return ctx.o.webSearch(`site:${site.domain} ${q} recipe`, 8);
+    // A site's list of recipe addresses, read a little at a time: the index once a month, then one
+    // more part of it per run, kept small (just the paths). Never the whole thing on every run.
+    function sitemapUrls(ctx, site) {
+        // One read per run, shared by every search that asks at the same time.
+        if (!ctx.sitemapsRead[site.id]) ctx.sitemapsRead[site.id] = readSitemap(ctx, site).catch(e => { delete ctx.sitemapsRead[site.id]; throw e; });
+        return ctx.sitemapsRead[site.id];
+    }
+    async function readSitemap(ctx, site) {
+        const all = ctx.cache.get(CACHE.sitemaps) || {};
+        let st = all[site.id] || {};
+        const keep = site.recipePath ? new RegExp(site.recipePath, 'i') : null;
+        const paths = list => list.filter(u => !/\.xml/i.test(u) && !ROUNDUP.test(u) && domainOf(u) === site.domain && (!keep || keep.test(new URL(u).pathname)))
+            .map(u => { try { return new URL(u).pathname; } catch (e) { return ''; } }).filter(Boolean);
+        const locs = body => (String(body).match(/<loc>([^<]+)<\/loc>/g) || []).map(x => decode(x.replace(/<\/?loc>/g, '')).trim());
+        let changed = false;
+        if (!st.at || st.at < ctx.now() - 30 * DAY || !Array.isArray(st.maps)) {
+            const res = await getPage(ctx, site.sitemap, false);
+            const found = locs(res.body);
+            const maps = found.filter(u => /\.xml/i.test(u));
+            // Recipe parts first, newest-looking last parts first (they're the recently added recipes).
+            maps.sort((a, b) => (/recipe/i.test(b) ? 1 : 0) - (/recipe/i.test(a) ? 1 : 0));
+            st = { at: ctx.now(), maps: maps.slice(0, 60), next: 0, origin: new URL(res.url || site.sitemap).origin, paths: [...new Set((st.paths || []).concat(paths(found)))] };
+            changed = true;
+        }
+        if (st.next < st.maps.length && (st.paths || []).length < 4000) {
+            try {
+                const res = await getPage(ctx, st.maps[st.next], false);
+                st.paths = [...new Set(st.paths.concat(paths(locs(res.body))))].slice(0, 4000);
+            } catch (e) { if (e.blocked) throw e; }
+            st.next++;
+            changed = true;
+        }
+        if (changed) { all[site.id] = st; saveCache(ctx, CACHE.sitemaps, all); }
+        const origin = st.origin || `https://${site.domain}`;
+        ctx.trace(`${site.id}: sitemap: ${st.paths.length} recipe addresses (${st.next} of ${st.maps.length} parts read)`);
+        return st.paths.map(p => origin + p);
+    }
+    async function searchSitemap(ctx, site, q, meal, page = 1) {
+        const urls = await sitemapUrls(ctx, site);
+        const words = String(q).toLowerCase().split(/\s+/).filter(Boolean);
+        let hits = urls.filter(u => words.every(w => slugWords(u).indexOf(w.replace(/s$/, '')) >= 0));
+        if (!hits.length) hits = urls.filter(u => slugWords(u).indexOf(mainWord(q).replace(/s$/, '')) >= 0);
+        return hits.slice((page - 1) * 10, page * 10).map(url => ({ url, title: slugWords(url) }));
+    }
+
+    // Tries the site's ways of finding recipes in order until one finds something.
+    async function searchSite(ctx, site, q, meal, page = 1) {
+        const ways = site.find || [site.search || 'wp'];
+        for (const way of ways) {
+            const fn = { wp: searchWp, page: searchPage, category: searchCategory, sitemap: searchSitemap, rss: searchFeed, feed: searchFeed }[way];
+            if (way === 'web' && ctx.o.webSearch) return ctx.o.webSearch(`site:${site.domain} ${q} recipe`, 8);
+            if (!fn) continue;
+            const list = await fn(ctx, site, q, meal, page);
+            if (list.length) return list;
+        }
         return [];
     }
 
@@ -382,7 +567,8 @@
         const MEALS = ['breakfast', 'lunch', 'dinner'];
         const mealsOn = PL.mealsOf(o.settings || {});
         const limits = Object.assign({}, LIMITS, o.limits || {});
-        const perSlot = Math.max(3, Math.min(limits.perSlot, days * 3));
+        // Growing the library (in the background): aim for several hundred web recipes per meal.
+        const perSlot = o.grow ? (limits.growTo || 300) : Math.max(3, Math.min(limits.perSlot, days * 3));
         const want = m => (mealsOn.indexOf(m) >= 0 ? perSlot : 0);
         const enabled = o.enabled || (() => true);
         const recent = PL.dishList(o.already || []);
@@ -399,7 +585,7 @@
         };
         // Good candidates for a meal: not Nourish's own (always there), not TheMealDB (a few, less
         // tested), not from a recent plan.
-        const have = m => found.filter(r => r._fit[m] && r.source_id !== 'themealdb' && r.source_id !== 'builtin' && !recent.has(r.name)).length;
+        const have = m => found.filter(r => r._fit[m] && r.source_id !== 'themealdb' && r.source_id !== 'builtin' && (o.grow || !recent.has(r.name))).length;
         const short = m => want(m) - have(m);
 
         // 1. Your files, favourites and the local recipe library.
@@ -452,10 +638,15 @@
         ctx.stats.blocked = sites.filter(s => !siteOk(ctx, s.id)).map(s => `${s.id} (${(ctx.failures[s.id] || {}).why || 'failed'})`);
         sites = sites.filter(s => siteOk(ctx, s.id));
         const seed = Math.floor(ctx.now() / DAY);
+        ctx.seed = seed;
         sites = shuffle(sites, seed);
         // Healthier sites first when losing weight; sites with their own nutrition next; your own sites first of all.
         sites.sort((a, b) => (b.custom ? 2 : 0) - (a.custom ? 2 : 0) + (goal === 'Cut' ? (b.healthy ? 1 : 0) - (a.healthy ? 1 : 0) : 0) + ((b.nutrition ? 0.5 : 0) - (a.nutrition ? 0.5 : 0)));
         const searchCache = ctx.cache.get(CACHE.searches) || {};
+        // How deep each search has been read (page 1, 2, 3…), so the library keeps finding new
+        // recipes instead of the same first page of results every time.
+        const searchPages = ctx.cache.get(CACHE.pages) || {};
+        ctx.listings = ctx.cache.get(CACHE.listings) || {};
         const queries = Object.fromEntries(MEALS.map(m => [m, queriesFor(m, o, seed)]));
         const seenLinks = new Set(Object.keys(recipeCache));
         const tried = new Set();
@@ -508,29 +699,39 @@
             while (!ctx.timeUp()) {
                 const t = nextTask();
                 if (!t) return;
-                const key = `${t.site.id}|${t.meal}|${t.q}`;
-                let list = searchCache[key] && searchCache[key].at > ctx.now() - 3 * DAY ? searchCache[key].links : null;
-                if (!list) {
-                    if (searches >= limits.searches) return;
-                    searches++;
-                    ctx.stats.searches++;
-                    try {
-                        list = (await searchSite(ctx, t.site, t.q, t.meal)).slice(0, 10);
-                        siteWorked(ctx, t.site.id);
-                        searchCache[key] = { at: ctx.now(), links: list };
-                    } catch (e) {
-                        ctx.trace(`${t.site.id}: "${t.q}" failed: ${e.message}${e.blocked ? ' (the site refuses the app: left alone for a while)' : ''}`);
-                        siteFailed(ctx, t.site.id, e.message, e.blocked);
-                        ctx.skip.add(t.site.id);
-                        continue;
+                const base = `${t.site.id}|${t.meal}|${t.q}`;
+                // Pages of results already read through are skipped; the next one is asked for.
+                let page = Math.max(1, (searchPages[base] && searchPages[base].page) || 1);
+                const maxPage = page + (o.grow ? 3 : 1);
+                for (; page <= maxPage && !ctx.timeUp(); page++) {
+                    const key = `${base}|${page}`;
+                    let list = searchCache[key] && searchCache[key].at > ctx.now() - 3 * DAY ? searchCache[key].links : null;
+                    if (!list) {
+                        if (searches >= limits.searches) return;
+                        searches++;
+                        ctx.stats.searches++;
+                        try {
+                            list = (await searchSite(ctx, t.site, t.q, t.meal, page)).slice(0, 12);
+                            siteWorked(ctx, t.site.id);
+                            searchCache[key] = { at: ctx.now(), links: list };
+                        } catch (e) {
+                            ctx.trace(`${t.site.id}: "${t.q}" failed: ${e.message}${e.blocked ? ' (the site refuses the app: left alone for a while)' : ''}`);
+                            siteFailed(ctx, t.site.id, e.message, e.blocked);
+                            ctx.skip.add(t.site.id);
+                            break;
+                        }
                     }
-                }
-                const good = list.filter(l => goodLink(l, t.site, t.meal, ctx)).map(l => Object.assign({}, l, { url: String(l.url).split('#')[0] })).filter(l => !seenLinks.has(l.url));
-                count(ctx, t.site.id, "links");
-                for (const l of good.slice(0, 4)) {
-                    if (ctx.timeUp() || pages >= limits.pages || short(t.meal) <= 0 || !usableSite(t.site) || (sitePages[t.site.id] || 0) >= fairPages) break;
-                    seenLinks.add(l.url);
-                    await readPage(l, t.site, t.meal);
+                    if (!list.length) { searchPages[base] = { at: ctx.now(), page: 1 }; break; }   // the end: start again next time
+                    const good = list.filter(l => goodLink(l, t.site, t.meal, ctx)).map(l => Object.assign({}, l, { url: String(l.url).split('#')[0] })).filter(l => !seenLinks.has(l.url));
+                    count(ctx, t.site.id, 'links');
+                    for (const l of good.slice(0, o.grow ? 6 : 4)) {
+                        if (ctx.timeUp() || pages >= limits.pages || short(t.meal) <= 0 || !usableSite(t.site) || (sitePages[t.site.id] || 0) >= fairPages) break;
+                        seenLinks.add(l.url);
+                        await readPage(l, t.site, t.meal);
+                    }
+                    // Everything on this page was already in the library: next time, the next page.
+                    if (!good.length) searchPages[base] = { at: ctx.now(), page: page + 1 };
+                    if (good.length) break;
                 }
             }
         };
@@ -546,9 +747,14 @@
         const trim = (obj, n) => Object.fromEntries(Object.entries(obj).sort((a, b) => b[1].at - a[1].at).slice(0, n));
         recipeCache = saveCache(ctx, CACHE.recipes, trim(recipeCache, limits.cachedRecipes));
         ctx.stats.library = Object.keys(recipeCache).length;
-        saveCache(ctx, CACHE.searches, trim(searchCache, 400));
+        saveCache(ctx, CACHE.searches, trim(searchCache, 600));
+        saveCache(ctx, CACHE.pages, trim(searchPages, 800));
+        // Listings are kept small: only the links matter, not the whole page.
+        Object.keys(ctx.listings).forEach(u => { const l = ctx.listings[u]; if (l.at < ctx.now() - 3 * DAY) delete ctx.listings[u]; });
+        saveCache(ctx, CACHE.listings, trim(ctx.listings, 120));
         ctx.cache.set(CACHE.failures, ctx.failures);
         ctx.cache.set(CACHE.categories, ctx.categories);
+        saveCache(ctx, CACHE.robots, ctx.robots);
 
         const pools = { breakfast: [], lunch: [], dinner: [] };
         found.forEach(r => MEALS.forEach(m => { if (r._fit[m]) pools[m].push(r); }));
@@ -602,7 +808,7 @@
         return Object.assign(plan, { stats, pools, adaptable });
     }
 
-    const api = { findRecipes, planFromSources, sourceCost, notAMeal, balance, siteSuits, siteQueries, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
+    const api = { robotsRules, robotsAllow, linksFromHtml, matching, mainWord, searchSite, findRecipes, planFromSources, sourceCost, notAMeal, balance, siteSuits, siteQueries, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishFinder = api;
 })(typeof window !== 'undefined' ? window : globalThis);
