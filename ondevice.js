@@ -460,7 +460,7 @@ async function makeMeal(job, run, h) {
 // herbs, toppings) or dropped, too many steps are merged, a missing serving step is added, and the
 // AI's own calories and macros are thrown away: they're worked out from the ingredients.
 const Nutrition = typeof NourishNutrition !== 'undefined' ? NourishNutrition : (() => { try { return require('./nutrition.js'); } catch (e) { return null; } })();
-const DAY_WORDS = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekday|weekend|today|tomorrow|tonight|day\s*\d+|week\s*\d+|#\s*\d+)\b/i;
+const DISH_DAY_WORDS = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekday|weekend|today|tomorrow|tonight|day\s*\d+|week\s*\d+|#\s*\d+)\b/i;
 const LABEL_WORDS = new Set(('breakfast brunch lunch dinner supper snack meal meals recipe dish dishes plate bowl morning evening midday noon night day daily of the for a an and my your our his her their special ' +
     'healthy simple easy quick power delight fuel energy boost start good great perfect tasty yummy light hearty classic box combo platter favorite favourite option idea balanced nutritious protein').split(/\s+/));
 function personNames() {
@@ -472,7 +472,7 @@ function nameProblem(name, people) {
     if (n.length < 3) return 'no real name';
     const words = n.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
     if ((people || personNames()).some(p => words.indexOf(p) >= 0)) return "a person's name, not a dish";
-    if (DAY_WORDS.test(n)) return 'a day, not a dish';
+    if (DISH_DAY_WORDS.test(n)) return 'a day, not a dish';
     if (!words.length || words.every(w => LABEL_WORDS.has(w))) return 'a label, not a dish';
     return '';
 }
@@ -590,7 +590,7 @@ async function aiDescribe(run, meal) {
     { grammar: 'root ::= [A-Z] [^"\\\x00-\x1F]{20,140} "."', maxTokens: 60, id: 'describe' });
     const t = String(text || '').trim();
     const people = personNames();
-    return t && !people.some(p => t.toLowerCase().indexOf(p) >= 0) && !DAY_WORDS.test(t) ? t.slice(0, 160) : '';
+    return t && !people.some(p => t.toLowerCase().indexOf(p) >= 0) && !DISH_DAY_WORDS.test(t) ? t.slice(0, 160) : '';
 }
 
 // Which try to keep: a complete one before an incomplete one, then the one with the fewest problems.

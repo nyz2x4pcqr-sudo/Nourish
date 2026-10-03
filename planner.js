@@ -101,6 +101,8 @@
         // A recipe's own total that includes an overnight wait is replaced by the active time.
         let minutes = given != null ? given : estimate;
         if (given != null && fromSteps.passive >= 60 && given >= fromSteps.passive) minutes = Math.max(5, given - fromSteps.passive);
+        // "Refrigerate overnight" with no hours given: the total includes the night, the work doesn't.
+        else if (given != null && given >= 120 && /\bovernight\b/i.test(text) && !(Number(r.active_minutes) > 0)) minutes = Math.min(given, estimate);
         const hard = HARD.test(text);
         const heat = HEAT.test(text) && !/^(no[- ]cook|overnight)/i.test(r.name || '');
         const score = 1 + Math.max(0, steps.length - 3) * 0.45 + Math.max(0, ingredients - 5) * 0.3
@@ -679,7 +681,8 @@
     // The last check on every plan, whoever made it: a day more than 10% off the calorie target has
     // its furthest-off meal swapped for one that brings it back (from `pools`, never a dish already
     // in the plan, always fitting the slot), then is sized again. Returns the days and what changed.
-    function keepToTargets(days, { pools = {}, settings = {}, people = 1, exclude, weekday, tolerance = 0.1 } = {}) {
+    function keepToTargets(days, { pools = {}, settings = {}, people = 1, exclude, weekday, tolerance = 0.1, already = [] } = {}) {
+        const recent = dishList(already);
         const targets = targetsOf(settings);
         const split = splitOf(settings);
         const used = dishList(days.flatMap(d => MEALS.map(m => d && d[m] && d[m].name).filter(Boolean)));
@@ -702,7 +705,7 @@
                 const pick = (pools[worst.m] || []).filter(r => r && r.nutrition && r.nutrition.calories > 0 && !used.has(r.name) && !(exclude && exclude(r)) && !slotProblem(r, worst.m, limits)
                     && !others.some(o => mainProtein(o) && mainProtein(o) === mainProtein(r)))
                     .map(r => ({ r, f: want / r.nutrition.calories })).filter(x => x.f >= 0.55 && x.f <= 2)
-                    .sort((a, b) => Math.abs(Math.log(a.f)) - Math.abs(Math.log(b.f)))[0];
+                    .sort((a, b) => (recent.has(a.r.name) ? 1 : 0) - (recent.has(b.r.name) ? 1 : 0) || Math.abs(Math.log(a.f)) - Math.abs(Math.log(b.f)))[0];
                 if (!pick) break;
                 changes.push(`day ${d + 1}: ${Math.round(total)} kcal against ${targets.kcal}; ${worst.m} "${cur[worst.m].name}" → "${pick.r.name}"`);
                 used.add(pick.r.name);
@@ -872,7 +875,7 @@
         }).join('');
     }
 
-    const api = { keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

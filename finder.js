@@ -78,7 +78,8 @@
             wait_minutes: Number(r.wait_minutes) > 0 ? Math.round(Number(r.wait_minutes)) : undefined,
             cuisine: r.cuisine ? String(Array.isArray(r.cuisine) ? r.cuisine[0] : r.cuisine).toLowerCase().slice(0, 30) : undefined,
             builtin: r.builtin || undefined,
-            nutrition: r.nutrition && Number(r.nutrition.calories) > 0 ? r.nutrition : null,
+            // Nourish's own recipes carry no numbers of their own: they're worked out like any other's.
+            nutrition: !r.builtin && r.nutrition && Number(r.nutrition.calories) > 0 ? r.nutrition : null,
             category: Array.isArray(r.category) ? r.category.join(', ') : String(r.category || ''),
             keywords: r.keywords ? String(r.keywords).slice(0, 200) : undefined,
             source_url: r.source_url || r.url || undefined,

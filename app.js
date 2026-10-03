@@ -1714,7 +1714,7 @@ const SETTINGS_RENDERERS = {
                 infoRow('Recipes', settings.plan_source === 'ai' ? 'Written by the AI' : 'Real recipes first'),
             ], settings.plan_source === 'ai'
                 ? 'The AI writes every meal (changed in Advanced → Recipe sources & keys).'
-                : `Nourish searches ${NourishSources.usable().length} trusted recipe sites, TheMealDB and your own recipe files at once, picks the best recipe for each meal and sizes it to your targets. The AI only writes a meal when nothing suitable is found.`),
+                : `Nourish uses your own recipe files, its library of recipes found before, ${typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.all().length + ' of its own recipes' : 'its own recipes'}, ${NourishSources.usable().length} trusted recipe sites and TheMealDB, picks the best recipe for each meal and sizes it to your targets. No meal is repeated. The AI only writes a meal when nothing suitable is found.`),
             ...libraryGroup(),
             ...settingsGroup('Nutrition', [infoRow('Data', 'USDA FoodData Central')], USDA_CREDIT),
         ];
@@ -2116,8 +2116,12 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
     const ingredients = NourishGrocery.dedupeIngredients(meal.ingredients || []).map(line => NourishUnits.formatIngredient(NourishUnits.clampIngredient(line).line, units));
     const n = meal.nutrition;
     const profile = (meal.ingredients || []).length ? NourishPlanner.recipeProfile(meal) : null;
-    const chips = [h('span', { class: 'chip' }, icon('i-clock'), meal.time_minutes ? formatMinutes(meal.time_minutes) : profile ? `about ${formatMinutes(profile.minutes)}` : formatMinutes(meal.time_minutes))];
-    if (meal.servings) chips.push(h('span', { class: 'chip' }, icon('i-user'), `Serves ${meal.servings}`));
+    const time = mealTime(meal);
+    const chips = [h('span', { class: 'chip', title: time.estimated ? 'Estimated from the steps: the recipe gives no time' : 'Hands-on time' + (time.makeAhead ? ', then waiting' : '') }, icon('i-clock'), time.text)];
+    if (time.makeAhead) chips.push(h('span', { class: 'chip accent', text: 'Make ahead' }));
+    if (portionLabel(meal)) chips.push(h('span', { class: 'chip', title: 'Your portion, sized to fit your day. The amounts and calories below are for this portion.' }, icon('i-user'), portionLabel(meal)));
+    if (meal.leftover) chips.push(h('span', { class: 'chip', text: 'Leftovers' }));
+    if (meal.servings && !portionLabel(meal)) chips.push(h('span', { class: 'chip' }, icon('i-user'), `Serves ${meal.servings}`));
     // How much work it is (steps, ingredients, techniques), so a busy morning isn't a surprise.
     if (profile) chips.push(h('span', { class: 'chip', title: `Difficulty ${profile.difficulty} of 10: ${profile.steps} steps, ${profile.ingredients} ingredients${profile.techniques.length ? ', ' + profile.techniques.join(', ') : ''}` },
         icon('i-utensils'), profile.difficulty <= 3 ? 'Easy' : profile.difficulty <= 6 ? 'Medium' : 'Involved'));
@@ -2190,6 +2194,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
         meal.source_url ? h('a', { class: 'btn btn-secondary recipe-source', href: meal.source_url, target: '_blank', rel: 'noopener noreferrer' },
             icon('i-link'), `Recipe from ${meal.source_name || 'the web'}${meal.via_name ? ` · via ${meal.via_name}` : ''}`)
             : meal.library_path ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), `From your recipe library: ${meal.library_path}`)
+            : meal.builtin ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), "One of Nourish's own recipes (works offline)")
             : h('div', { style: 'height:20px' }),
     );
     content.scrollTop = 0;
@@ -2263,11 +2268,13 @@ function nutritionPanel(meal) {
         h('span', { class: 'v num' }, g(key) != null ? String(Math.round(g(key))) : '—', h('small', { text: 'g' })));
     return h('section', { class: 'nutrition-panel', 'aria-label': 'Nutrition' },
         h('div', { class: 'nutrition-top' },
-            h('div', { class: 'nutrition-kcal num' }, h('small', { class: 'about', text: 'about' }), formatCalories(n.calories), h('small', { text: meal.servings ? 'kcal per serving' : 'kcal' })),
+            h('div', { class: 'nutrition-kcal num' }, h('small', { class: 'about', text: 'about' }), formatCalories(n.calories), h('small', { text: portionLabel(meal) ? 'kcal for your portion' : meal.servings ? 'kcal per serving' : 'kcal' })),
             meal.nutrition_unmatched || meal.nutrition_estimated ? h('span', { class: 'chip warn', text: 'Approximate' }) : null),
         sum > 0 ? split : null,
         h('div', { class: 'nutrition-macros' }, macro('Protein', 'protein_g', 'protein'), macro('Carbs', 'carbs_g', 'carbs'), macro('Fat', 'fat_g', 'fat')),
-        meal.servings ? h('p', { class: 'recipe-note', text: `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null,
+        meal.servings ? h('p', { class: 'recipe-note', text: portionLabel(meal)
+            ? `Nutrition is for one person's portion (${portionLabel(meal)} of the recipe). Ingredient amounts are for ${meal.servings} ${meal.servings > 1 ? 'people' : 'person'}.`
+            : `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null,
         nutritionNotes(meal).map(t => h('p', { class: 'recipe-note', text: t })),
         calorieBreakdown(meal));
 }
@@ -2302,7 +2309,7 @@ function nutritionNotes(meal) {
     if (meal.nutrition_basis === 'source') notes.push(`Numbers from ${meal.source_name || 'the recipe'}, checked against USDA data.`);
     else if (meal.nutrition_basis === 'calculated') notes.push('Numbers worked out from the ingredients with USDA data.');
     if (meal.nutrition_unmatched) notes.push(`Not counted (not in the food table): ${meal.nutrition_unmatched.join('; ')}.`);
-    if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion: ${portionWords(meal.scaled.portion)} of the original serving, to fit your day. The amounts and calories are for that portion.`);
+    if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion: ${portionLabel(meal)} (${portionWords(meal.scaled.portion)} the recipe's serving), sized to fit this day. The ingredient amounts and calories are for that portion, so the same recipe can show different calories on different days.`);
     if (meal.trimmed) notes.push('Less oil or sugar than the original, to fit your calories. Seasoning is unchanged.');
     if (meal.reseasoned) notes.push(`Seasoning added: ${meal.reseasoned.join(', ')}.`);
     return notes;
@@ -2379,6 +2386,29 @@ function formatCalories(cal) {
 }
 function formatMinutes(min) {
     return Number.isFinite(min) && min > 0 ? `${Math.round(min)} min` : '— min';
+}
+// A recipe's time in plain words, never "— min": hands-on time, plus any waiting ("10 min +
+// overnight", not "250 min"), estimated from the steps when the source gives none ("about 20 min").
+function mealTime(meal) {
+    if (!meal) return { text: '', estimated: false, makeAhead: false };
+    let p = null;
+    try { p = (meal.ingredients || []).length || (meal.steps || []).length ? NourishPlanner.recipeProfile(meal) : null; } catch (e) { p = null; }
+    const total = Number(meal.time_minutes) > 0 ? Number(meal.time_minutes) : 0;
+    const hands = p ? p.minutes : total;
+    if (!(hands > 0)) return { text: 'about 10 min', estimated: true, makeAhead: false };
+    const passive = p ? NourishPlanner.stepMinutes(meal.steps || []).passive : 0;
+    let wait = Number(meal.wait_minutes) > 0 ? Number(meal.wait_minutes) : total > hands + 10 ? total - hands : 0;
+    if (!wait && passive >= 15) wait = passive;
+    const overnight = /\bovernight\b/i.test((meal.steps || []).join(' ') + ' ' + (meal.name || '')) || wait >= 360;
+    const handsText = `${p && p.timeEstimated && !(Number(meal.active_minutes) > 0) ? 'about ' : ''}${Math.round(hands)} min`;
+    const waitText = overnight ? 'overnight' : wait >= 60 ? `${Math.round(wait / 60 * 2) / 2} h waiting` : wait >= 15 ? `${Math.round(wait)} min waiting` : '';
+    return { text: waitText ? `${handsText} + ${waitText}` : handsText, estimated: !!(p && p.timeEstimated), makeAhead: overnight || wait >= 60 };
+}
+// "1.25 servings" when a recipe's portion was changed to fit the day.
+function portionLabel(meal) {
+    const p = meal && meal.scaled && Number(meal.scaled.portion);
+    if (!(p > 0) || Math.abs(p - 1) < 0.05) return '';
+    return `${Math.round(p * 100) / 100} servings`;
 }
 function sumNutrient(day, key) {
     return daySlots(day).reduce((sum, [, m]) => sum + ((m.nutrition && m.nutrition[key]) || 0), 0);
@@ -2592,8 +2622,10 @@ function mealCard(type, meal, dayIndex, status) {
             h('div', { class: 'meal-type', text: MEAL_LABELS[type] }),
             h('div', { class: 'meal-name', text: meal.name }),
             h('div', { class: 'meal-badges' },
-                h('span', { class: 'chip' }, icon('i-clock'), formatMinutes(meal.time_minutes)),
+                h('span', { class: 'chip' }, icon('i-clock'), mealTime(meal).text),
                 on('show_nutrition') ? h('span', { class: 'chip' }, icon('i-flame'), `${formatCalories(meal.nutrition && meal.nutrition.calories)} kcal`) : null,
+                portionLabel(meal) ? h('span', { class: 'chip', text: portionLabel(meal) }) : null,
+                meal.leftover ? h('span', { class: 'chip', text: 'Leftovers' }) : null,
                 status === 'eaten' ? h('span', { class: 'chip ok' }, icon('i-check'), 'Eaten') : status === 'skipped' ? h('span', { class: 'chip', text: 'Skipped' }) : null,
                 meal.incomplete ? h('span', { class: 'chip warn', text: 'May be incomplete' }) : null)),
         icon('i-chevron', 'chev'));
@@ -2892,7 +2924,7 @@ function updatePlanScreen() {
                     h('span', { class: 'plan-meal-type', text: MEAL_LABELS[t] }),
                     h('span', { class: 'plan-meal-name', text: day[t].name }),
                     day[t].incomplete ? h('span', { class: 'plan-meal-warn', text: 'May be incomplete · tap to try again' }) : null),
-                h('span', { class: 'plan-meal-meta', text: on('show_nutrition') ? `${formatMinutes(day[t].time_minutes)} · ${formatCalories(day[t].nutrition && day[t].nutrition.calories)} kcal` : formatMinutes(day[t].time_minutes) }))
+                h('span', { class: 'plan-meal-meta', text: [mealTime(day[t]).text, on('show_nutrition') ? `${formatCalories(day[t].nutrition && day[t].nutrition.calories)} kcal` : '', portionLabel(day[t])].filter(Boolean).join(' · ') }))
             : h('button', { type: 'button', class: 'plan-meal empty', 'data-meal-type': t, onclick: () => showImportSheet(idx, t) },
                 h('span', { class: `dot art-${t}` }, icon('i-plus')),
                 h('span', { class: 'plan-meal-body' },
@@ -2903,7 +2935,7 @@ function updatePlanScreen() {
                 h('span', { class: 'plan-meal-body' },
                     h('span', { class: 'plan-meal-type', text: 'Snack' }),
                     h('span', { class: 'plan-meal-name', text: m.name })),
-                h('span', { class: 'plan-meal-meta', text: on('show_nutrition') ? `${formatCalories(m.nutrition && m.nutrition.calories)} kcal` : formatMinutes(m.time_minutes) })))))));
+                h('span', { class: 'plan-meal-meta', text: on('show_nutrition') ? `${formatCalories(m.nutrition && m.nutrition.calories)} kcal` : mealTime(m).text })))))));
 }
 
 // === GROCERY SCREEN ===
@@ -3137,6 +3169,8 @@ function normalizeMeal(m) {
         adapted: Array.isArray(m.adapted) && m.adapted.length ? m.adapted.map(String).slice(0, 4) : undefined,
         description: m.description ? String(m.description).slice(0, 200) : undefined,
         cuisine: m.cuisine ? String(m.cuisine).slice(0, 30) : undefined,
+        // The meal the recipe's source files it under: part of telling a breakfast from a dinner.
+        category: Array.isArray(m.category) ? m.category.map(String).slice(0, 6) : m.category ? String(m.category).slice(0, 80) : undefined,
         library_path: m.library_path ? String(m.library_path).slice(0, 300) : undefined,
     }, safeSource(m));
     // Nutrition is never taken on trust: it's calculated from the ingredients (USDA data, nutrition.js),
@@ -3275,11 +3309,12 @@ function tasteScorer() {
 // closest to the slot's share of the day; the quick meals when the built-in set has nothing.
 function builtinFor(type, d, taken) {
     const used = NourishPlanner.dishList(taken || []);
+    const recent = NourishPlanner.dishList(recentPlanDishes());
     const kcal = (Number(settings.calorie_target) || 2000) * (NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(type)] || 0.33);
     const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
     const list = typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(type) : [];
     const ok = list.filter(r => !used.has(r.name) && !exclude(r) && !slotCheck(r, type, d))
-        .sort((a, b) => Math.abs(Math.log(kcal / a.nutrition.calories)) - Math.abs(Math.log(kcal / b.nutrition.calories)));
+        .sort((a, b) => (recent.has(a.name) ? 1 : 0) - (recent.has(b.name) ? 1 : 0) || Math.abs(Math.log(kcal / a.nutrition.calories)) - Math.abs(Math.log(kcal / b.nutrition.calories)));
     const pick = ok.length ? ok[Math.floor(Math.random() * Math.min(5, ok.length))] : null;
     return pick ? JSON.parse(JSON.stringify(pick)) : quickMealFor(type, d, taken);
 }
@@ -3474,7 +3509,11 @@ function libraryGroup() {
         h('div', { class: 'settings-row settings-row-stack' },
             h('span', { class: 'settings-label', text: 'Where they are' }),
             h('span', { class: 'settings-hint selectable', text: where })),
-        settingsButton('Add files', addLibraryFiles, 'settings-button-primary'),
+        // Sideloaded inside LiveContainer: iOS files the folders under that app, deep in its own folders.
+        container ? h('div', { class: 'settings-row settings-row-stack' },
+            h('span', { class: 'settings-label', text: 'Why are they there?' }),
+            h('span', { class: 'settings-hint', text: 'Nourish is running inside another app (LiveContainer), so your iPhone keeps its files inside that app\'s folders instead of a "Nourish" folder. The easiest way to add recipe books is the Add files button below.' })) : null,
+        settingsButton(container ? 'Add files (the easy way)' : 'Add files', addLibraryFiles, 'settings-button-primary'),
         !android && !container ? settingsButton(phone ? 'Show the folder in Files' : 'Open my recipe folder', openLibraryFolder) : null,
         infoRow('Recipes found', libraryState.busy ? 'Reading…' : `${libraryState.count} from ${libraryState.files} file${libraryState.files === 1 ? '' : 's'}`),
         ...listed.map(f => h('div', { class: 'settings-row settings-row-stack library-file' },
@@ -3584,7 +3623,7 @@ async function runSmartPlan(likes, hates) {
         // The last check, with or without an AI: every day within 10% of the calorie target.
         const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (plan.pools[m] || []).concat(typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(m) : [])]));
         const kept = NourishPlanner.keepToTargets(days, { pools, settings: planSettings, people: servingsWanted(),
-            exclude: NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }), weekday: d => (dayBase() + d) % 7 });
+            exclude: NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }), weekday: d => (dayBase() + d) % 7, already: recentPlanDishes() });
         days = kept.days;
         if (kept.changes.length) nlog('plan', `Kept ${kept.changes.length} day(s) to the calorie target`, kept.changes);
         if (!days.some(d => MEAL_TYPES.some(t => d[t]))) {
@@ -4456,7 +4495,7 @@ function renderCookbook() {
                         h('span', { class: 'cookbook-card-body' },
                             h('span', { class: 'plan-meal-type', text: MEAL_LABELS[e.meal_type] }),
                             h('span', { class: 'plan-meal-name', text: e.recipe.name }),
-                            h('span', { class: 'plan-meal-meta', text: [formatMinutes(e.recipe.time_minutes), on('show_nutrition') && e.recipe.nutrition ? `${formatCalories(e.recipe.nutrition.calories)} kcal` : ''].filter(Boolean).join(' · ') }),
+                            h('span', { class: 'plan-meal-meta', text: [mealTime(e.recipe).text, on('show_nutrition') && e.recipe.nutrition ? `${formatCalories(e.recipe.nutrition.calories)} kcal` : ''].filter(Boolean).join(' · ') }),
                             h('span', { class: 'cookbook-source' }, icon(e.source === 'imported' ? 'i-link' : 'i-sparkle'), e.source === 'imported' ? (e.recipe.source_name || 'Imported') : 'Made by Nourish')),
                         icon('i-chevron', 'chev'))))));
     if (hadFocus) { const s = $('cookbookSearch'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
