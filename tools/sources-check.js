@@ -65,16 +65,38 @@ const CANDIDATES = [
     ['vegrecipesofindia', "Dassana's Veg Recipes", 'vegrecipesofindia.com', 'world', 1, ''],
     ['seonkyoung', 'Seonkyoung Longest', 'seonkyounglongest.com', 'world', 0, ''],
     ['isabeleats', 'Isabel Eats', 'isabeleats.com', 'world', 0, ''],
+    // Big and public sources checked again for 0.2 (search pages, category pages, sitemaps, feeds).
+    ['bbcfood', 'BBC Food', 'bbc.co.uk', 'general', 0, 'https://www.bbc.co.uk/food/search?q={q}', { home: 'https://www.bbc.co.uk/food', paths: ['/food/'] }],
+    ['canadafoodguide', "Canada's Food Guide recipes", 'food-guide.canada.ca', 'public', 1, 'https://food-guide.canada.ca/en/recipes/?search_api_fulltext={q}', { home: 'https://food-guide.canada.ca/en/recipes/', paths: ['/en/recipes/'] }],
+    ['bhf', 'British Heart Foundation recipes', 'bhf.org.uk', 'public', 1, 'https://www.bhf.org.uk/informationsupport/heart-matters-magazine/recipes?q={q}', { home: 'https://www.bhf.org.uk/informationsupport/heart-matters-magazine/recipes', paths: ['/recipes/'] }],
+    ['diabetesuk', 'Diabetes UK recipes', 'diabetes.org.uk', 'public', 1, 'https://www.diabetes.org.uk/living-with-diabetes/eating/recipes?search={q}', { home: 'https://www.diabetes.org.uk/living-with-diabetes/eating/recipes', paths: ['/recipes/'] }],
+    ['jamieoliver', 'Jamie Oliver', 'jamieoliver.com', 'general', 0, 'https://www.jamieoliver.com/search/?s={q}', { paths: ['/recipes/'] }],
+    ['olivemagazine', 'olive magazine', 'olivemagazine.com', 'general', 0, 'https://www.olivemagazine.com/search/?q={q}', { paths: ['/recipes/'] }],
+    ['deliciousmag', 'delicious. magazine', 'deliciousmagazine.co.uk', 'general', 0, '', { paths: ['/recipes/'] }],
+    ['sbsfood', 'SBS Food', 'sbs.com.au', 'world', 0, 'https://www.sbs.com.au/food/search?q={q}', { home: 'https://www.sbs.com.au/food', paths: ['/food/recipe/'] }],
+    ['tasteau', 'taste.com.au', 'taste.com.au', 'general', 0, 'https://www.taste.com.au/search-recipes/?q={q}', { paths: ['/recipes/'] }],
+    ['heartandstroke', 'Heart & Stroke recipes', 'heartandstroke.ca', 'public', 1, '', { home: 'https://www.heartandstroke.ca/healthy-living/recipes', paths: ['/recipes/'] }],
+    ['kitchenstories', 'Kitchen Stories', 'kitchenstories.com', 'general', 0, 'https://www.kitchenstories.com/en/search?search={q}', { paths: ['/en/recipes/'] }],
+    ['thespruceeats', 'The Spruce Eats', 'thespruceeats.com', 'general', 0, 'https://www.thespruceeats.com/search?q={q}', {}],
+    ['bonappetit', 'Bon Appétit', 'bonappetit.com', 'general', 0, 'https://www.bonappetit.com/search?q={q}', {}],
+    ['nytcooking', 'NYT Cooking', 'cooking.nytimes.com', 'general', 0, 'https://cooking.nytimes.com/search?q={q}', {}],
 ];
+// Category pages to try for each meal (the first that lists recipe links is used).
+const CATEGORY_PATHS = ['/recipes/breakfast', '/recipes/breakfast-recipes', '/breakfast', '/breakfast-recipes', '/category/breakfast', '/recipes/collection/breakfast-recipes',
+    '/recipes/meal-type/breakfast', '/recipes/breakfast-and-brunch', '/food/collections/breakfast_recipes', '/en/recipes/?f%5B0%5D=meal%3Abreakfast', '/recipes/category/breakfast'];
 const QUERY = 'chicken';
 // The owners' own terms pages, for sites whose terms live on the parent company's site.
 const TERMS_OF = {
-    allrecipes: 'https://www.dotdashmeredith.com/brands-termsofservice', seriouseats: 'https://www.dotdashmeredith.com/brands-termsofservice',
-    simplyrecipes: 'https://www.dotdashmeredith.com/brands-termsofservice', eatingwell: 'https://www.dotdashmeredith.com/brands-termsofservice',
+    allrecipes: 'https://www.people.inc/brands-termsofservice', seriouseats: 'https://www.people.inc/brands-termsofservice',
+    simplyrecipes: 'https://www.people.inc/brands-termsofservice', eatingwell: 'https://www.people.inc/brands-termsofservice',
     epicurious: 'https://www.condenast.com/user-agreement', tasty: 'https://www.buzzfeed.com/about/useragreement',
     bbcgoodfood: 'https://www.bbcgoodfood.com/terms-and-conditions', food52: 'https://food52.com/terms', foodnetwork: 'https://www.foodnetwork.com/terms-of-use',
     nhs: 'https://www.nhs.uk/our-policies/terms-and-conditions/', myplate: 'https://www.myplate.gov/policies', marleyspoon: 'https://marleyspoon.com/terms',
     dinnerly: 'https://dinnerly.com/terms', gousto: 'https://www.gousto.co.uk/legal/terms', recipetineats: 'https://www.recipetineats.com/terms-of-use/',
+    bbcfood: 'https://www.bbc.co.uk/usingthebbc/terms', canadafoodguide: 'https://www.canada.ca/en/transparency/terms.html', thespruceeats: 'https://www.people.inc/brands-termsofservice',
+    bonappetit: 'https://www.condenast.com/user-agreement', nytcooking: 'https://help.nytimes.com/hc/en-us/articles/115014893428-Terms-of-Service', olivemagazine: 'https://www.immediate.co.uk/terms-and-conditions/',
+    deliciousmag: 'https://www.deliciousmagazine.co.uk/terms-and-conditions/', tasteau: 'https://www.taste.com.au/terms-of-use', sbsfood: 'https://www.sbs.com.au/aboutus/terms-and-conditions',
+    hellofresh: 'https://www.hellofresh.com/about/termsandconditions', homechef: 'https://www.homechef.com/terms', delish: 'https://www.hearst.com/-/us-magazines-terms-of-use',
 };
 const TERMS_PATHS = ['/terms', '/terms-of-use', '/terms-of-service', '/terms-and-conditions', '/legal/terms', '/legal', '/about/terms-of-use', '/termsofuse', '/legal/terms-of-use'];
 // A ban on robots reading the site (not, say, an "automatic telephone dialing system").
@@ -143,8 +165,8 @@ function linksTo(html, domain, base) {
     return [...out];
 }
 
-async function checkSite([id, name, domain, group, healthy, page]) {
-    const base = `https://www.${domain}`;
+async function checkSite([id, name, domain, group, healthy, page, extra = {}]) {
+    const base = /^(cooking|food-guide)\./.test(domain) ? `https://${domain}` : `https://www.${domain}`;
     const v = { id, name, domain, group, healthy: !!healthy };
     const rb = await get(`${base}/robots.txt`);
     const r = robots(rb.status === 200 ? rb.body : '');
@@ -164,6 +186,25 @@ async function checkSite([id, name, domain, group, healthy, page]) {
             break;
         }
     }
+    // A public feed (RSS/Atom) and category pages: two more ways to find recipes.
+    const homePage = extra.home ? await get(extra.home, { browser: true, timeout: 15000 }) : home;
+    const feedLink = (String(homePage.body).match(/<link[^>]+type=["']application\/(rss|atom)\+xml["'][^>]*>/i) || [''])[0].match(/href=["']([^"']+)["']/);
+    for (const f of (feedLink ? [new URL(feedLink[1], homePage.url || base).href] : []).concat([base + '/feed/', base + '/rss', base + '/feeds/rss.xml'])) {
+        const fr = await get(f, { timeout: 12000 });
+        const items = fr.status === 200 ? [...String(fr.body).matchAll(/<(item|entry)[\s>][\s\S]*?<\/\1>/g)].length : 0;
+        if (items) { v.feed = `${f} (${items} items)`; v.feedAllowed = r.ok(new URL(f).pathname); break; }
+    }
+    for (const cp of CATEGORY_PATHS) {
+        const c = await get(base + cp, { browser: true, timeout: 12000 });
+        const found = c.status === 200 ? linksTo(c.body, domain, c.url).filter(u => !extra.paths || extra.paths.some(pp => new URL(u).pathname.includes(pp))) : [];
+        if (found.length >= 5) { v.category = `${cp} (${found.length} links)`; v.categoryAllowed = r.ok(cp); v.categoryLinks = found.slice(0, 6); break; }
+        if (c.status === 403 || c.status === 429) { v.category = `blocked (${c.status})`; break; }
+    }
+    if (extra.home && !v.category) {
+        const found = homePage.status === 200 ? linksTo(homePage.body, domain, homePage.url).filter(u => !extra.paths || extra.paths.some(pp => new URL(u).pathname.includes(pp))) : [];
+        if (found.length >= 5) { v.category = `${extra.home} (${found.length} links)`; v.categoryLinks = found.slice(0, 6); v.categoryAllowed = r.ok(new URL(extra.home).pathname); }
+        else v.homeStatus = homePage.status || homePage.error;
+    }
     // Finding recipes
     const urls = [];
     const wp = await get(`${base}/wp-json/wp/v2/posts?search=${QUERY}&per_page=12&_fields=link,title`);
@@ -174,11 +215,12 @@ async function checkSite([id, name, domain, group, healthy, page]) {
     }
     if (!urls.length && page) {
         const sp = await get(page.replace('{q}', QUERY), { browser: true });
-        const found = sp.status === 200 ? linksTo(sp.body, domain, sp.url) : [];
+        const found = sp.status === 200 ? linksTo(sp.body, domain, sp.url).filter(u => !extra.paths || extra.paths.some(pp => new URL(u).pathname.includes(pp))) : [];
         if (found.length) { urls.push(...found.slice(0, 8)); v.search = 'page'; v.searchUrl = page; }
         v.searchPage = `${sp.status || sp.error}, ${found.length} links`;
         try { v.pageAllowed = r.ok(new URL(page.replace('{q}', QUERY)).pathname + new URL(page.replace('{q}', QUERY)).search); } catch (e) { /* bad */ }
     }
+    if (!urls.length && v.categoryLinks) { urls.push(...v.categoryLinks); v.search = 'category'; }
     if (!urls.length) {
         for (const sm of ['/sitemap.xml', '/sitemap_index.xml', '/recipe-sitemap.xml', '/sitemaps/recipes.xml']) {
             const s = await get(base + sm, { max: 3_000_000 });
@@ -208,7 +250,7 @@ async function checkSite([id, name, domain, group, healthy, page]) {
         }
         const rec = p.status === 200 ? jsonLdRecipe(p.body) : null;
         if (rec && (rec.recipeIngredient || []).length) {
-            v.recipe = { url: u, via, name: String(rec.name).slice(0, 80), ingredients: (rec.recipeIngredient || []).length, nutrition: !!(rec.nutrition && rec.nutrition.calories), category: rec.recipeCategory || null, pathAllowed: r.ok(new URL(u).pathname) };
+            v.recipe = { url: u, via, rating: rec.aggregateRating ? `${rec.aggregateRating.ratingValue} (${rec.aggregateRating.ratingCount || rec.aggregateRating.reviewCount || '?'})` : null, times: !!(rec.totalTime || rec.cookTime), name: String(rec.name).slice(0, 80), ingredients: (rec.recipeIngredient || []).length, nutrition: !!(rec.nutrition && rec.nutrition.calories), category: rec.recipeCategory || null, pathAllowed: r.ok(new URL(u).pathname) };
             break;
         }
         v.recipeTried = (v.recipeTried || []).concat(`${p.status || p.error} ${u.slice(0, 90)}`);

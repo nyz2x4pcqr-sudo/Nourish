@@ -29,7 +29,7 @@ jobs:
         run: python3 tools/usda-table.py > nutrition-data.js 2> usda-log.txt; cat usda-log.txt; wc -c nutrition-data.js
       - name: Check recipe sites
         if: inputs.what == 'sources' || inputs.what == 'both'
-        run: node tools/sources-check.js > sources-report.txt; tail -c 3000 sources-report.txt
+        run: node tools/sources-check.js > sources-report.txt; cat sources-report.txt
       - name: Real plans from the real sites (timing)
         if: inputs.what == 'plan'
         run: npm i --no-save linkedom@0.18 >/dev/null && node tools/plan-live.js > plan-live.txt 2>&1; cat plan-live.txt
