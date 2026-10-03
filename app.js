@@ -2493,11 +2493,13 @@ function renderFoodSheet() {
             editing ? null : h('div', { class: 'input-group' },
                 h('div', { class: 'label', text: 'Packaged food' }),
                 h('div', { class: 'food-barcode' },
-                    h('label', { class: 'btn btn-secondary' }, icon('i-image'), 'Photo of the barcode',
+                    !(typeof BarcodeDetector !== 'undefined' || canReadTextOnPhone()) ? null : h('label', { class: 'btn btn-secondary' }, icon('i-image'), 'Photo of the barcode',
                         h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: e => { const f = e.target.files && e.target.files[0]; if (f) scanBarcode(f); e.target.value = ''; } })),
                     h('input', { id: 'foodBarcode', type: 'text', inputmode: 'numeric', placeholder: 'or type the barcode number', autocomplete: 'off',
                         onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); lookupBarcode(e.target.value); } } })),
-                h('p', { class: 'sheet-hint', text: 'Barcodes are looked up in Open Food Facts, a free food database.' })),
+                h('p', { class: 'sheet-hint', text: typeof BarcodeDetector !== 'undefined' || canReadTextOnPhone()
+                    ? 'Barcodes are looked up in Open Food Facts, a free food database.'
+                    : 'Type the number under the barcode; it\u2019s looked up in Open Food Facts, a free food database. (This device can\u2019t read barcodes from photos.)' })),
             h('p', { class: 'sheet-hint', text: 'Calories are worked out from USDA food data and typical portions, so they’re estimates. Change the amount if yours was bigger or smaller.' }),
             h('div', { class: 'food-actions' },
                 editing ? h('button', { type: 'button', class: 'btn btn-secondary danger', onclick: () => { NourishLog.remove(foodLog, logKey(d.idx), d.editId); changed('log'); closeFoodSheet(); updateTodayScreen(); showToast('Removed', false); } }, icon('i-trash'), 'Delete') : null,
