@@ -14,6 +14,15 @@
     src: url("font-fraunces.woff2") format("woff2-variations"), url("font-fraunces.woff2") format("woff2");
     font-weight: 100 900; font-style: normal; font-display: swap;
 }
+/* Numbers: digits (and the marks that sit between them) always come from the body font, which has
+   true lining, tabular figures, even inside serif headings ("Day 3", "1,500"). The heading serif's
+   own figures are old-style and uneven, so a heading's font list starts with this digits-only face. */
+@font-face {
+    font-family: "Nourish Digits";
+    src: url("font-figtree.woff2") format("woff2-variations"), url("font-figtree.woff2") format("woff2");
+    font-weight: 300 900; font-style: normal; font-display: swap;
+    unicode-range: U+0030-0039, U+002C, U+002E, U+0025, U+00BC-00BE, U+2150-215E, U+00D7, U+2013;
+}
 @font-face {
     font-family: "Figtree";
     src: url("font-figtree.woff2") format("woff2-variations"), url("font-figtree.woff2") format("woff2");
@@ -31,7 +40,9 @@
 
     /* Type */
     --font: "Figtree", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
-    --font-display: "Fraunces", "Iowan Old Style", "Palatino", Georgia, serif;
+    --font-display: "Nourish Digits", "Fraunces", "Iowan Old Style", "Palatino", Georgia, serif;
+    --font-num: "Nourish Digits", var(--font);   /* anything that is mostly a number */
+    --num-features: "tnum" 1, "lnum" 1, "pnum" 0;
     --display-axes: "SOFT" 60, "WONK" 0;
     --fs-hero: 2.55rem;     /* screen titles */
     --fs-title-1: 1.95rem;  /* recipe name */
@@ -197,6 +208,14 @@ body {
     -webkit-tap-highlight-color: transparent;
     text-rendering: optimizeLegibility;
     font-feature-settings: "ss01", "cv11";
+    font-variant-numeric: lining-nums tabular-nums;
+}
+/* Every number in the app: same-height, same-width digits that line up. */
+.num, .ring-value, .d-num, .nutrition-kcal, .nutrition-macro .v, .cooking-count, .recipe-step-number,
+.grocery-progress .big, .count, input[type="number"] {
+    font-family: var(--font-num);
+    font-variant-numeric: lining-nums tabular-nums;
+    font-feature-settings: var(--num-features);
 }
 /* An opaque strip behind the status bar, so nothing scrolls under the clock. */
 body::before {
