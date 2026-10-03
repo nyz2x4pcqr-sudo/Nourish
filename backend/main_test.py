@@ -546,6 +546,27 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(got["kind"], "text")
         self.assertIn("1 onion", got["text"])
 
+    def test_each_folder_has_a_read_me_that_is_not_a_recipe(self):
+        folder = Path(self.client.get("/api/library").json()["folder"])
+        for name in ("Recipe Books", "My Recipes"):
+            self.assertIn("Nourish", (folder / name / "Read me.txt").read_text(encoding="utf-8"))
+        self.assertFalse(any(f["path"].endswith("Read me.txt") for f in self.client.get("/api/library").json()["files"]))
+
+    def test_add_files_from_the_app(self):
+        import base64
+        text = "# Toast\n## Ingredients\n- 1 slice bread\n"
+        r = self.client.post("/api/library/add", json={"name": "../../toast.md", "data": base64.b64encode(text.encode()).decode()})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["path"], "My Recipes/toast.md")   # no way out of the folder
+        again = self.client.post("/api/library/add", json={"name": "toast.md", "data": base64.b64encode(b"x").decode()}).json()
+        self.assertEqual(again["path"], "My Recipes/toast 2.md")      # never overwrites
+        self.assertIn("My Recipes/toast.md", [f["path"] for f in self.client.get("/api/library").json()["files"]])
+        self.assertEqual(self.client.post("/api/library/add", json={"name": "virus.exe", "data": "eA=="}).status_code, 400)
+        self.assertEqual(self.client.post("/api/library/add", json={"name": "a.txt", "data": "not base64!"}).status_code, 400)
+        folder = Path(self.client.get("/api/library").json()["folder"])
+        for name in ("toast.md", "toast 2.md"):
+            (folder / "My Recipes" / name).unlink()
+
     def test_nothing_outside_the_library_can_be_read(self):
         self.client.get("/api/library")
         for bad in ["../nourish-data.json", "/etc/passwd", "My Recipes/../../nourish-data.json"]:

@@ -1129,6 +1129,11 @@ select.settings-input:focus { background-color: var(--surface-2); }
 .settings-button { width: 100%; justify-content: center; color: var(--accent-text); font-size: var(--fs-body); font-weight: 750; transition: background var(--t-fast); }
 .settings-button:active { background: var(--surface-2); }
 .settings-button.danger { color: var(--danger); }
+.settings-button-primary { background: var(--accent); color: var(--on-accent, #fff); }
+.settings-button-primary:active { background: var(--accent); filter: brightness(0.94); }
+.library-file { gap: 2px; padding-top: 10px; padding-bottom: 10px; }
+.library-file .settings-label { font-weight: 600; overflow-wrap: anywhere; }
+.selectable { user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
 a.settings-button { display: flex; text-decoration: none; }
 .settings-row-stack { flex-direction: column; align-items: stretch; gap: var(--s-2); }
 .settings-row-top { display: flex; justify-content: space-between; align-items: center; }

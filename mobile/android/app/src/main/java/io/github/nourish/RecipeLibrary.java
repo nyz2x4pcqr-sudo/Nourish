@@ -33,11 +33,29 @@ final class RecipeLibrary {
 
     private RecipeLibrary() {}
 
+    static final String README_NAME = "Read me.txt";
+    private static final String[] READMES = {
+        "Recipe Books\n\nDrop cookbooks here: PDF files, text or Markdown files, saved web pages, or photos of pages.\n"
+            + "Nourish reads them in the background and learns from them: which ingredients go together,\n"
+            + "how dishes are seasoned and cooked. Their recipes can also turn up in your plans, next to\n"
+            + "recipes from other places.\n\nOn Android, add files from Nourish: Settings > Recipes > Add files.\n",
+        "My Recipes\n\nDrop your own recipes here: family recipes, notes, saved web pages or photos of recipe cards.\n"
+            + "Each one needs a title, a list of ingredients and the steps.\n\n"
+            + "On Android, add files from Nourish: Settings > Recipes > Add files.\n",
+    };
+
     static File root(Context c) {
         File base = c.getExternalFilesDir(null);
         File dir = new File(base != null ? base : c.getFilesDir(), "Nourish");
-        for (String f : FOLDERS) //noinspection ResultOfMethodCallIgnored
-            new File(dir, f).mkdirs();
+        for (int i = 0; i < FOLDERS.length; i++) {
+            File folder = new File(dir, FOLDERS[i]);
+            //noinspection ResultOfMethodCallIgnored
+            folder.mkdirs();
+            File readme = new File(folder, README_NAME);
+            if (!readme.exists()) {
+                try (OutputStream os = new FileOutputStream(readme)) { os.write(READMES[i].getBytes(StandardCharsets.UTF_8)); } catch (Exception ignored) { }
+            }
+        }
         return dir;
     }
 
@@ -70,7 +88,7 @@ final class RecipeLibrary {
         for (File f : list) {
             if (out.length() >= 2000 || f.getName().startsWith(".")) continue;
             if (f.isDirectory()) { walk(root, f, folder, out); continue; }
-            if (kind(f.getName()) == null) continue;
+            if (kind(f.getName()) == null || f.getName().equals(README_NAME)) continue;
             JSONObject o = new JSONObject();
             o.put("path", root.toURI().relativize(f.toURI()).getPath());
             o.put("folder", folder);

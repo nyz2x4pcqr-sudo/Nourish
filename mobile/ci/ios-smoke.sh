@@ -64,6 +64,17 @@ print('Built-in app with native bridge; phone:', v['specs']['device'], v['specs'
 sleep 2; xcrun simctl io "$UDID" screenshot shots/ios-1-local.png
 [ "$(tail -n +"$((BEFORE + 1))" "$LOG" | grep -c 'GET /app.js')" = "0" ] || fail "phone-only mode loaded the app from the PC"
 
+echo "== 1b. Recipe folders: created on first launch, each with a Read me, file sharing on"
+for f in "Recipe Books" "My Recipes"; do
+  [ -f "$DATA/Documents/$f/Read me.txt" ] || fail "folder $f (with its Read me) wasn't created on first launch"
+done
+ls -la "$DATA/Documents" "$DATA/Documents/Recipe Books"
+probe "return JSON.stringify(await nativeCall('library', { op: 'where' }));" 60
+python3 -c "
+import json; r = json.load(open('$PROBE')); assert r['ok'], r; v = json.loads(r['value'])
+assert v['fileSharing'] and v['foldersMade'], v
+print('Recipe folders:', v['folder'], '| file sharing on | path', v['path'])" || fail "recipe folders not set up for the Files app"
+
 echo "== 2. Saved data survives a restart"
 probe "return localStorage.getItem('probe_saved');" 60
 python3 -c "import json; r = json.load(open('$PROBE')); assert r['value'] == 'kept', r" || fail "localStorage was not kept"

@@ -94,3 +94,15 @@ test('the index reads only new or changed files, in small batches', async () => 
     assert.deepEqual(reads, ['My Recipes/soup.txt']);
     assert.equal(L.allRecipes(res.index).length, 0);
 });
+
+test("Nourish's own Read me notes in the folders aren't read as recipes", async () => {
+    const reads = [];
+    const io = {
+        list: async () => [{ path: 'My Recipes/Read me.txt', size: 1, mtime: 1 }, { path: 'About these folders.txt', size: 1, mtime: 1 }, { path: 'My Recipes/soup.txt', size: 1, mtime: 1, folder: 'My Recipes' }],
+        read: async p => { reads.push(p); return { kind: 'text', text: '' }; },
+    };
+    const res = await L.refresh(null, io);
+    assert.deepEqual(reads, ['My Recipes/soup.txt']);
+    assert.deepEqual(res.index.listed.map(f => f.path), ['My Recipes/soup.txt']);
+    assert.ok(L.isReadme('Recipe Books/Read me.txt') && !L.isReadme('My Recipes/readme pancakes.txt'));
+});

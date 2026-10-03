@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 import asyncio
+import base64
+import binascii
 import logging
 import os
 import socket
@@ -13,7 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import httpx
 
 import library
@@ -425,6 +427,25 @@ def library_read(req: LibraryReadRequest):
         raise HTTPException(status_code=404, detail=str(e))
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"Couldn't read that file ({type(e).__name__})")
+
+
+class LibraryAddRequest(BaseModel):
+    name: str = Field(max_length=300)
+    data: str = Field(max_length=60_000_000)   # base64 of at most 40 MB
+
+
+@app.post("/api/library/add")
+def library_add(req: LibraryAddRequest):
+    try:
+        raw = base64.b64decode(req.data, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=400, detail="That file didn't arrive in one piece. Try again.")
+    try:
+        return {"added": 1, "path": library.add_file(req.name, raw), "folder": str(library.root())}
+    except library.LibraryError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Couldn't save that file ({type(e).__name__})")
 
 
 @app.post("/api/library/open")

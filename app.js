@@ -265,6 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('online', () => { checkBackend(); syncNow(); });
     // The recipe library: read a little after start, then when the app comes back (at most every 5 minutes).
     librarySummary(libraryIndex());
+    setTimeout(libraryLocation, 2500);
     let libraryChecked = 0;
     const checkLibrary = () => { if (Date.now() - libraryChecked > 300000) { libraryChecked = Date.now(); indexLibrary(); } };
     setTimeout(checkLibrary, 8000);
@@ -2884,7 +2885,7 @@ function applyEdits(parsed) {
 // Files in the Nourish folders (Recipe Books, My Recipes) on this phone or the PC, read in the
 // background in small batches whenever they change (library.js), and used as a preferred source.
 const LIBRARY_KEY = 'nourish_library_index';
-const libraryState = { count: 0, files: 0, folder: '', busy: false, error: '', notes: [] };
+const libraryState = { count: 0, files: 0, folder: '', where: null, busy: false, error: '', notes: [] };
 function libraryIndex() { return loadJSON(LIBRARY_KEY, { files: {} }); }
 function libraryRecipes() { return NourishLibrary.allRecipes(libraryIndex()); }
 function librarySummary(index) {
@@ -2932,28 +2933,98 @@ async function openLibraryFolder() {
     }
 }
 
+// "Add files": on the phones the system file picker (the files are copied into the library);
+// on the PC (or a browser) a file chooser whose files are sent to the PC's folder.
 async function addLibraryFiles() {
-    try {
-        const r = await api('/api/library/add', { method: 'POST', body: {} });
-        if (r && r.added) { showToast(`Added ${r.added} file${r.added > 1 ? 's' : ''}. Reading them now…`, false); indexLibrary({ quiet: false }); }
-    } catch (e) {
-        showToast(`Couldn't add the files: ${e.message}`);
+    if (isLocalMode()) {
+        try {
+            const r = await api('/api/library/add', { method: 'POST', body: {} });
+            if (r && r.added) { showToast(`Added ${r.added} file${r.added > 1 ? 's' : ''}. Reading ${r.added > 1 ? 'them' : 'it'} now…`, false); indexLibrary({ quiet: false }); }
+        } catch (e) {
+            showToast(`Couldn't add the files: ${plainError(e.message)}`);
+        }
+        return;
     }
+    const input = h('input', { type: 'file', multiple: true, accept: '.pdf,.txt,.text,.md,.markdown,.html,.htm,.mhtml,.webarchive,.jpg,.jpeg,.png,.heic,.webp', style: 'display:none' });
+    input.addEventListener('change', async () => {
+        const files = [...(input.files || [])];
+        input.remove();
+        let added = 0;
+        for (const file of files) {
+            try {
+                if (file.size > 40 * 1024 * 1024) throw new Error('it is over 40 MB');
+                const data = await new Promise((ok, bad) => {
+                    const reader = new FileReader();
+                    reader.onload = () => ok(String(reader.result).replace(/^data:[^,]*,/, ''));
+                    reader.onerror = () => bad(new Error("it couldn't be read"));
+                    reader.readAsDataURL(file);
+                });
+                await api('/api/library/add', { method: 'POST', timeoutMs: 180000, body: { name: file.name, data } });
+                added++;
+            } catch (e) {
+                showToast(`Couldn't add ${file.name}: ${plainError(e.message)}`);
+            }
+        }
+        if (added) { showToast(`Added ${added} file${added > 1 ? 's' : ''}. Reading ${added > 1 ? 'them' : 'it'} now…`, false); indexLibrary({ quiet: false }); }
+    });
+    document.body.appendChild(input);
+    input.click();
+}
+
+// Where the folders are, as the phone or PC reports it (inside LiveContainer, the iPhone's Files
+// app shows them in LiveContainer's folder, not as "Nourish").
+async function libraryLocation() {
+    if (!libraryAvailable()) return;
+    try {
+        if (isLocalMode()) {
+            const r = await api('/api/library/where', {});
+            libraryState.folder = (r && r.folder) || libraryState.folder;
+            libraryState.where = r || null;
+            if (r && r.path) nlog('library', `Recipe folders: ${r.folder}`, `${r.path}${r.fileSharing === false ? ' (file sharing is OFF in this build)' : ''}${r.container ? ' (running inside another app)' : ''}`);
+        } else if (!libraryState.folder) {
+            const r = await api('/api/library', { timeoutMs: 30000 });
+            libraryState.folder = (r && r.folder) || '';
+        }
+    } catch (e) { /* older app without "where": the folder name from the last listing is used */ }
+    if (settingsPage === 'sources') renderSettings();
+}
+
+// One line per file: how far reading it has got.
+function libraryFileStatus(path) {
+    const entry = (libraryIndex().files || {})[path];
+    if (!entry) return libraryState.busy ? 'Reading…' : 'Waiting to be read';
+    if (entry.recipes && entry.recipes.length) return `Read · ${entry.recipes.length} recipe${entry.recipes.length > 1 ? 's' : ''}`;
+    if (entry.passages && entry.passages.length) return 'Read · used as cooking knowledge';
+    return entry.note ? `Not used: ${entry.note}` : 'Read';
 }
 
 function libraryGroup() {
-    if (!libraryAvailable()) return settingsGroup('Your recipe library', [infoRow('Folders', 'in the phone app or on your PC')], 'Drop cookbooks and recipe files into the Nourish folders and they become recipes for your plans.');
-    const android = isLocalMode() && /Android/i.test(navigator.userAgent);
-    const where = !isLocalMode() ? `on your PC${libraryState.folder ? `: ${libraryState.folder}` : ''}`
-        : android ? 'in this app (use "Add recipe files")' : 'in the Files app: On My iPhone → Nourish';
-    return settingsGroup('Your recipe library', [
+    if (!libraryAvailable()) return settingsGroup('My recipe files', [infoRow('Folders', 'in the phone app or on your PC')], 'Drop cookbooks and recipe files into the Nourish folders and Nourish learns from them.');
+    const phone = isLocalMode();
+    const android = phone && /Android/i.test(navigator.userAgent);
+    const container = !!(libraryState.where && libraryState.where.container);
+    const where = !phone ? (libraryState.folder || 'the Nourish folder next to your data file')
+        : android ? 'Inside the Nourish app' : (libraryState.folder || 'On My iPhone › Nourish');
+    const listed = (libraryIndex().listed || []).slice(0, 60);
+    const rows = [
+        h('div', { class: 'settings-row settings-row-stack' },
+            h('span', { class: 'settings-label', text: 'Where they are' }),
+            h('span', { class: 'settings-hint selectable', text: where })),
+        settingsButton('Add files', addLibraryFiles, 'settings-button-primary'),
+        !android && !container ? settingsButton(phone ? 'Show the folder in Files' : 'Open my recipe folder', openLibraryFolder) : null,
         infoRow('Recipes found', libraryState.busy ? 'Reading…' : `${libraryState.count} from ${libraryState.files} file${libraryState.files === 1 ? '' : 's'}`),
-        android ? settingsButton('Add recipe files', addLibraryFiles) : settingsButton(isLocalMode() ? 'Show my recipe folder' : 'Open my recipe folder', openLibraryFolder),
+        ...listed.map(f => h('div', { class: 'settings-row settings-row-stack library-file' },
+            h('span', { class: 'settings-label', text: f.path.split('/').pop() }),
+            h('span', { class: 'settings-hint', text: `${f.folder || ''}${f.folder ? ' · ' : ''}${libraryFileStatus(f.path)}` }))),
+        listed.length ? null : h('div', { class: 'settings-row' }, h('span', { class: 'settings-hint', text: 'No files yet. Tap Add files, or drop files into the folders.' })),
         settingsButton('Check for new files now', () => indexLibrary({ quiet: false })),
-        libraryState.notes.length ? h('details', { class: 'settings-row settings-help' }, h('summary', { text: `${libraryState.notes.length} file${libraryState.notes.length > 1 ? 's' : ''} with no recipe found` }),
-            h('span', { text: libraryState.notes.join('\n') })) : null,
-    ], help(`Put recipe files (PDF, text, Markdown, saved web pages${isLocalMode() && !android ? ', photos' : ''}) in the Recipe Books or My Recipes folder ${where}, and Nourish uses them in your plans first.`,
-        'Nourish looks for a title, an ingredients list and steps in each file. Scanned cookbooks work best as photos on iPhone, which can read the text in pictures. Files are only read again when they change.'));
+    ];
+    const how = android ? 'Tap Add files to choose files on this phone.'
+        : container ? `Nourish is running inside another app (LiveContainer), so the Files app shows these folders under that app: ${where}. Add files is the easiest way in.`
+        : phone ? 'In the Files app: On My iPhone → Nourish → Recipe Books or My Recipes. Or tap Add files.'
+        : 'Drop files into the Recipe Books or My Recipes folder on this PC, or tap Add files.';
+    return settingsGroup('My recipe files', rows, help(`Cookbooks and your own recipes (PDF, text, Markdown, saved web pages${phone && !android ? ', photos' : ''}). ${how}`,
+        'Nourish reads each file in the background and learns from it: which ingredients go together, how dishes are seasoned and cooked. Its recipes can also turn up in your plans, next to recipes from everywhere else; they are not put first. Each folder has a "Read me" note. Files are only read again when they change.'));
 }
 
 // === GENERATE MEAL PLAN ===

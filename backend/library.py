@@ -21,12 +21,57 @@ class LibraryError(Exception):
     pass
 
 
+README_NAME = "Read me.txt"
+NOTE_NAMES = {"read me.txt", "readme.txt", "about these folders.txt"}   # Nourish's own notes, not recipes
+READMES = {
+    "Recipe Books": (
+        "Recipe Books\n\n"
+        "Drop cookbooks here: PDF files, text or Markdown files, saved web pages, or photos of pages.\n"
+        "Nourish reads them in the background and learns from them: which ingredients go together,\n"
+        "how dishes are seasoned and cooked. Their recipes can also turn up in your plans, next to\n"
+        "recipes from other places.\n\n"
+        "You can also add files from Nourish: Settings > Recipes > Add files.\n"
+    ),
+    "My Recipes": (
+        "My Recipes\n\n"
+        "Drop your own recipes here: family recipes, notes, saved web pages or photos of recipe cards.\n"
+        "Each one needs a title, a list of ingredients and the steps.\n"
+        "Nourish reads them in the background and can use them in your plans.\n\n"
+        "You can also add files from Nourish: Settings > Recipes > Add files.\n"
+    ),
+}
+
+
 def root() -> Path:
     base = os.getenv("NOURISH_LIBRARY_DIR")
     folder = Path(base) if base else store.DATA_FILE.resolve().parent / "Nourish"
     for name in FOLDERS:
         (folder / name).mkdir(parents=True, exist_ok=True)
+        readme = folder / name / README_NAME
+        if not readme.exists():
+            try:
+                readme.write_text(READMES[name], encoding="utf-8")
+            except OSError:
+                pass
     return folder
+
+
+def add_file(name: str, data: bytes) -> str:
+    """Saves a file chosen in the app (Settings > Recipes > Add files) into the library: big PDFs
+    (probably books) into Recipe Books, everything else into My Recipes. Returns its library path."""
+    clean = "".join("_" if c in '\\/:*?"<>|' or ord(c) < 32 else c for c in Path(str(name)).name).strip(" .")
+    suffix = Path(clean).suffix.lower()
+    if not clean or suffix not in KINDS:
+        raise LibraryError("Nourish can't read that kind of file. Use PDF, text, Markdown, a saved web page or a photo.")
+    if len(data) > MAX_FILE_BYTES:
+        raise LibraryError("That file is too big (over 40 MB).")
+    folder = root() / ("Recipe Books" if suffix == ".pdf" and len(data) > 3_000_000 else "My Recipes")
+    dest, n = folder / clean, 2
+    while dest.exists():
+        dest = folder / f"{Path(clean).stem} {n}{suffix}"
+        n += 1
+    dest.write_bytes(data)
+    return dest.relative_to(root()).as_posix()
 
 
 def list_files():
@@ -34,7 +79,7 @@ def list_files():
     files = []
     for name in FOLDERS:
         for path in sorted((base / name).rglob("*")):
-            if path.is_file() and path.suffix.lower() in KINDS and not path.name.startswith("."):
+            if path.is_file() and path.suffix.lower() in KINDS and not path.name.startswith(".") and path.name.lower() not in NOTE_NAMES:
                 st = path.stat()
                 files.append({"path": path.relative_to(base).as_posix(), "folder": name, "size": st.st_size, "mtime": int(st.st_mtime)})
     return {"folder": str(base), "files": files[:2000]}

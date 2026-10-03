@@ -10,6 +10,8 @@
     const KINDS = { txt: 'text', text: 'text', md: 'text', markdown: 'text', html: 'html', htm: 'html', webarchive: 'html', mhtml: 'html', pdf: 'pdf',
         jpg: 'image', jpeg: 'image', png: 'image', heic: 'image', webp: 'image' };
     function kindOf(path) { const m = String(path).toLowerCase().match(/\.([a-z0-9]+)$/); return (m && KINDS[m[1]]) || null; }
+    // The notes Nourish puts in its own folders ("Read me.txt") aren't recipes.
+    function isReadme(path) { return /^(read ?me|about these folders)\.txt$/i.test(String(path).split('/').pop()); }
 
     // === RECIPES IN PLAIN TEXT (a cookbook's text, notes, markdown) ===
     const ING_HEAD = /^\W{0,4}(ingredients?|you(?:'|’)ll need|what you need|shopping list)\b[^a-z]{0,20}$/i;
@@ -116,7 +118,7 @@
     // index: { files: { path: { sig, recipes, note } } }. Returns { index, changed, read, errors }.
     async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60 } = {}) {
         const idx = index && index.files ? index : { files: {} };
-        const listed = (await io.list()).filter(f => kindOf(f.path));
+        const listed = (await io.list()).filter(f => kindOf(f.path) && !isReadme(f.path));
         const seen = new Set(listed.map(f => f.path));
         let changed = 0;
         Object.keys(idx.files).forEach(p => { if (!seen.has(p)) { delete idx.files[p]; changed++; } });
@@ -147,6 +149,7 @@
             if (i + batch < todo.length && io.sleep) await io.sleep(pause);
         }
         idx.at = Date.now();
+        idx.listed = listed.map(f => ({ path: f.path, folder: f.folder, size: f.size }));
         return { index: idx, changed, read, errors, pending: Math.max(0, listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).length) };
     }
 
@@ -156,7 +159,7 @@
         return out;
     }
 
-    const api = { parseRecipeText, recipesFromFile, refresh, allRecipes, kindOf };
+    const api = { parseRecipeText, recipesFromFile, refresh, allRecipes, kindOf, isReadme };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishLibrary = api;
 })(typeof window !== 'undefined' ? window : globalThis);

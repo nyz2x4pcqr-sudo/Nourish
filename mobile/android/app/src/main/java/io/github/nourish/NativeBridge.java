@@ -180,6 +180,13 @@ final class NativeBridge {
         switch (a.optString("op")) {
             case "list": return RecipeLibrary.list(context);
             case "read": return RecipeLibrary.read(context, a.optString("path"));
+            case "where": {
+                JSONObject o = new JSONObject();
+                o.put("folder", "Inside the Nourish app (use Add files)");
+                o.put("path", RecipeLibrary.root(context).getAbsolutePath());
+                o.put("foldersMade", true);
+                return o;
+            }
             case "open":
             case "add": {
                 java.util.concurrent.CompletableFuture<Integer> done = new java.util.concurrent.CompletableFuture<>();

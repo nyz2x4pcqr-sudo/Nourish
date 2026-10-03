@@ -154,6 +154,7 @@ async function localApi(path, { method = 'GET', body } = {}) {
     if (route === '/api/library') return nativeCall('library', { op: 'list' }, { timeoutMs: 30000 });
     if (route === '/api/library/read') return nativeCall('library', { op: 'read', path: body.path }, { timeoutMs: 120000 });
     if (route === '/api/library/open') return nativeCall('library', { op: 'open' });
+    if (route === '/api/library/where') return nativeCall('library', { op: 'where' }, { timeoutMs: 10000 });
     if (route === '/api/library/add') return nativeCall('library', { op: 'add' }, { timeoutMs: 600000 });
     const err = new Error('That needs Nourish on your PC (Settings → Server & devices).');
     err.status = 501;

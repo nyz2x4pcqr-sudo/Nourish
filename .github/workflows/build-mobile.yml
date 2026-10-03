@@ -153,6 +153,11 @@ jobs:
             SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build -quiet
           mkdir -p Payload
           cp -R build/Release-iphoneos/Nourish.app Payload/
+          # The recipe folders only show in the Files app if these two settings are in the built app.
+          for key in UIFileSharingEnabled LSSupportsOpeningDocumentsInPlace; do
+            [ "$(/usr/libexec/PlistBuddy -c "Print :$key" Payload/Nourish.app/Info.plist)" = "true" ] || { echo "Built app is missing $key"; exit 1; }
+          done
+          echo "Built app has file sharing on (Files → On My iPhone → Nourish)"
           zip -qry "$GITHUB_WORKSPACE/Nourish-unsigned.ipa" Payload
       - uses: actions/upload-artifact@v4
         with:

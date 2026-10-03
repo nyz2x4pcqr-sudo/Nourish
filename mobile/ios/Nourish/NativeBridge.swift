@@ -148,7 +148,9 @@ final class NativeBridge: NSObject {
             case "list": return RecipeLibrary.list()
             case "read": return try RecipeLibrary.read(a["path"] as? String ?? "")
             case "open": return RecipeLibrary.open()
-            default: throw BridgeError(message: "On iPhone, add recipe files in the Files app: On My iPhone → Nourish.")
+            case "add": return try RecipeLibrary.pick()
+            case "where": return RecipeLibrary.location()
+            default: throw BridgeError(message: "Unknown recipe library request.")
             }
         case "setMode":
             let mode = a["mode"] as? String ?? "local"
