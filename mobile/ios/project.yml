@@ -33,7 +33,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.nourish.app
         PRODUCT_NAME: Nourish
-        MARKETING_VERSION: "0.2.0"
+        MARKETING_VERSION: "0.1.10"
         CURRENT_PROJECT_VERSION: "19"
         INFOPLIST_FILE: Nourish/Info.plist
         GENERATE_INFOPLIST_FILE: NO
