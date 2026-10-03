@@ -126,6 +126,9 @@
             nutrition: Object.keys(nutrition).some(k => nutrition[k] != null) ? nutrition : null,
             ingredients: ingredients.slice(0, 60), steps: steps.slice(0, 40),
             category: cleanText(list(recipe.recipeCategory).join(', ')).slice(0, 80),
+            // The recipe's own cuisine and keywords: help tell a meal from a drink, a dessert or a sauce.
+            cuisine: cleanText(list(recipe.recipeCuisine).join(', ')).slice(0, 40) || undefined,
+            keywords: cleanText(list(recipe.keywords).join(', ')).slice(0, 200) || undefined,
         };
     }
     function fromJsonLd(doc, url) {

@@ -1,0 +1,25 @@
+# Why each recipe site gives (or doesn't give) recipes: the app's own searches and recipe reader
+# against the real sites, from GitHub's machines (tools/sites-diagnose.js). A report, never a failure:
+# sites change, and some refuse cloud machines.
+name: Recipe sites check
+on:
+  push:
+    paths:
+      - "sources.js"
+      - "tools/sites-diagnose.js"
+      - ".github/workflows/sites-diagnose.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  sites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check every recipe site
+        run: node tools/sites-diagnose.js | tee sites-report.txt

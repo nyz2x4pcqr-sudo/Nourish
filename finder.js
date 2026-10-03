@@ -73,6 +73,7 @@
             builtin: r.builtin || undefined,
             nutrition: r.nutrition && Number(r.nutrition.calories) > 0 ? r.nutrition : null,
             category: Array.isArray(r.category) ? r.category.join(', ') : String(r.category || ''),
+            keywords: r.keywords ? String(r.keywords).slice(0, 200) : undefined,
             source_url: r.source_url || r.url || undefined,
             source_name: r.source_name || (source && source.name) || undefined,
             source_id: (source && source.id) || r.source_id || undefined,
@@ -83,23 +84,47 @@
         return out;
     }
 
+    // Drinks, desserts, sauces, condiments and sides, from the recipe's own category, course and
+    // keywords (its structured data) as well as its name: never counted as meals.
+    const DRINK = /\b(drinks?|beverages?|cocktails?|mocktails?|smoothies?|shakes?|juices?|lemonade|agua fresca|horchata|tea|latte|coffee|punch|sangria|spritz|margarita|lassi|kombucha|hot chocolate|cocoa)\b/i;
+    const SWEET = /\b(desserts?|sweets?|baking|baked goods|cakes?|cookies?|pies?|tarts?|candy|candies|treats?|puddings?|ice cream|frozen desserts?|pastr(y|ies)|brownies?|bars|cupcakes?|curd|jams?|jellies|preserves|compote|sorbet|fudge|frosting|cobbler|crumble|crisp)\b/i;
+    const CONDIMENT = /\b(sauces?|condiments?|dressings?|dips?|spreads?|marinades?|seasonings?|spice (mix|blend|rub)s?|rubs?|salsas?|crema|pesto|chutney|relish|pickles?|vinaigrettes?|gravy|syrups?|stocks?|broths?|butter|aioli|mayo(nnaise)?)\b/i;
+    const SIDEDISH = /\b(side dish(es)?|sides?|appetizers?|starters?|snacks?|breads?|rolls|biscuits|muffins? \(sweet\)|applesauce|apple sauce|baby food)\b/i;
+    function notAMeal(r) {
+        // The site's own category and course (keywords are too loose: "garlic butter sauce" on a steak).
+        const cat = [].concat(r.category || [], r.course || []).join(', ');
+        const name = String(r.name || '');
+        const dish = name.replace(/\s+(with|on|over|served with)\s+.*$/i, '');
+        const mealish = /\b(main( course| dish)?|entr[eé]e|dinner|lunch|breakfast|brunch|supper)\b/i.test(cat);
+        // Smoothies stay: they're a breakfast here (the breakfast check decides).
+        if ((DRINK.test(dish) && !/smoothie|shake/i.test(dish)) || (/\b(drinks?|beverages?|cocktails?)\b/i.test(cat) && !mealish)) return 'a drink';
+        if (/\bcurd\b|\b(applesauce|apple sauce|jam|jelly|compote)$/i.test(dish) || (/\b(desserts?|sweets?|baking|baked goods|treats?)\b/i.test(cat) && !mealish)) return 'a dessert';
+        if ((CONDIMENT.test(dish.split(/\s+/).slice(-1)[0] || '') && !/\b(bowls?|pasta|noodles|chicken|salmon|tofu|steak|shrimp)\b/i.test(dish)) || (/\b(sauces?|condiments?|dressings?|dips?|spreads?|marinades?|seasonings?)\b/i.test(cat) && !mealish)) return 'a sauce or condiment';
+        if (SIDEDISH.test(dish) && !mealish && /^(side|sides|side dish|appetizer|snack|bread)/i.test(cat || dish)) return 'a side or snack';
+        return '';
+    }
+
     // Checks one recipe; returns it ready to plan with (nutrition settled, seasoning fixed) or null.
+    // Why recipes were turned away, counted for the log ("a drink: 3, a dessert: 5…").
+    function turnedAway(ctx, why) { const w = ctx.stats.why || (ctx.stats.why = {}); w[why] = (w[why] || 0) + 1; return null; }
     function vet(r, ctx) {
         if (!r) return null;
-        if (ctx.exclude(r)) { ctx.stats.excluded++; return null; }
+        if (ctx.exclude(r)) { ctx.stats.excluded++; return turnedAway(ctx, 'has something you avoid'); }
+        const kind = notAMeal(r);
+        if (kind) return turnedAway(ctx, kind);
         // The source's numbers are per serving of the recipe as written; settle() checks them.
         if (r.nutrition && !(r.nutrition.calories > 0)) r.nutrition = null;
         N.settle(r);
-        if (!r.nutrition || !(r.nutrition.calories > 40)) return null;
+        if (!r.nutrition || !(r.nutrition.calories > 40)) return turnedAway(ctx, 'too few calories to be a meal');
         const unmatched = (r.nutrition_unmatched || []).length;
-        if (r.nutrition_basis === 'calculated' && unmatched > r.ingredients.length * 0.4) { ctx.stats.unsure++; return null; }
+        if (r.nutrition_basis === 'calculated' && unmatched > r.ingredients.length * 0.4) { ctx.stats.unsure++; return turnedAway(ctx, 'ingredients the calculator can\'t read'); }
         const fit = PL.mealFit(r);
-        if (!fit.breakfast && !fit.lunch && !fit.dinner) return null;
+        if (!fit.breakfast && !fit.lunch && !fit.dinner) return turnedAway(ctx, fit.why || 'not a meal');
         r._fit = fit;
         if (!PL.flavorCheck(r).ok) {
             PL.reseason(r);
             N.settle(r);
-            if (!PL.flavorCheck(r).ok) { ctx.stats.bland++; return null; }
+            if (!PL.flavorCheck(r).ok) { ctx.stats.bland++; return turnedAway(ctx, 'bland'); }
         }
         r.sameAs = [PL.dishKey(r.name)];
         return r;
@@ -412,7 +437,7 @@
         return Object.assign(plan, { stats, pools });
     }
 
-    const api = { findRecipes, planFromSources, sourceCost, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
+    const api = { findRecipes, planFromSources, sourceCost, notAMeal, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishFinder = api;
 })(typeof window !== 'undefined' ? window : globalThis);
