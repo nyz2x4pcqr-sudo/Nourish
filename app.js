@@ -2790,7 +2790,8 @@ function normalizeMeal(m) {
     // and a source's own numbers are kept only when they agree within 15%.
     if (!out.nutrition_basis && out.ingredients.length && typeof NourishNutrition !== 'undefined') {
         NourishNutrition.settle(Object.assign(out, { servings: out.servings || 1 }));
-        if (!out.nutrition || !(out.nutrition.calories > 0)) out.nutrition = null;
+        // Nothing could be counted (no amounts): unknown, shown as "—", never the AI's guess.
+        if (!out.nutrition || !(out.nutrition.calories > 0)) out.nutrition = n ? { calories: null, protein_g: null, carbs_g: null, fat_g: null } : null;
     }
     Object.keys(out).forEach(k => { if (out[k] === undefined) delete out[k]; });
     return out;
