@@ -55,6 +55,49 @@ FOODS = {
     "skim milk": ("Milk, nonfat, fluid, with added vitamin A and vitamin D (fat free or skim)", ["nonfat milk", "fat free milk"]),
     "almond milk": ("Beverages, almond milk, unsweetened, shelf stable", ["unsweetened almond milk"]),
     "oat milk": ("(manual)", []),
+    # --- everyday foods and drinks, for logging what someone ate outside the plan ---
+    "pepperoni pizza": ("Pizza, pepperoni topping, regular crust, frozen, cooked", ["pizza pepperoni", "slice of pepperoni pizza"]),
+    "pizza": ("Pizza, cheese topping, regular crust, frozen, cooked", ["cheese pizza", "slice of pizza", "pizza slice", "slices of pizza"]),
+    "hamburger": ("Fast foods, hamburger; single, regular patty; plain", ["burger", "hamburgers", "burgers"]),
+    "cheeseburger": ("Fast foods, cheeseburger; single, regular patty; plain", ["cheeseburgers"]),
+    "french fries": ("Fast foods, potato, french fried in vegetable oil", ["fries", "chips (fries)"]),
+    "hot dog": ("Fast foods, hotdog, plain", ["hotdog", "hot dogs"]),
+    "fried chicken": ("Fast foods, fried chicken, breast, meat and skin and breading", ["chicken nuggets", "nuggets", "chicken tenders"]),
+    "bean burrito": ("Fast foods, burrito, with beans and cheese", ["burrito", "burritos"]),
+    "potato chips": ("Snacks, potato chips, plain, salted", ["chips", "crisps", "bag of chips"]),
+    "tortilla chips": ("Snacks, tortilla chips, plain, white corn, salted", ["nachos chips", "corn chips"]),
+    "popcorn": ("Snacks, popcorn, air-popped", ["air popped popcorn"]),
+    "buttered popcorn": ("Snacks, popcorn, microwave, regular (butter) flavor, made with partially hydrogenated oil", ["movie popcorn", "microwave popcorn"]),
+    "pretzels": ("Snacks, pretzels, hard, plain, salted", ["pretzel"]),
+    "crackers": ("Crackers, standard snack-type, regular", ["cracker", "saltines"]),
+    "cookie": ("Cookies, chocolate chip, commercially prepared, regular, higher fat", ["cookies", "chocolate chip cookie", "chocolate chip cookies"]),
+    "donut": ("Doughnuts, cake-type, plain (includes unsugared, old-fashioned)", ["doughnut", "donuts", "doughnuts"]),
+    "glazed donut": ("Doughnuts, yeast-leavened, glazed, enriched (includes honey buns)", ["glazed doughnut"]),
+    "muffin": ("Muffins, blueberry, commercially prepared (Includes mini-muffins)", ["blueberry muffin", "muffins"]),
+    "croissant": ("Croissants, butter", ["croissants"]),
+    "pancakes": ("Pancakes, plain, prepared from recipe", ["pancake"]),
+    "waffle": ("Waffles, plain, frozen, ready -to-heat, toasted", ["waffles"]),
+    "cereal": ("Cereals ready-to-eat, KELLOGG, KELLOGG'S CORN FLAKES", ["corn flakes", "breakfast cereal"]),
+    "ice cream": ("Ice creams, vanilla", ["vanilla ice cream", "scoop of ice cream"]),
+    "milk chocolate": ("Candies, milk chocolate", ["chocolate bar", "chocolate"]),
+    "candy bar": ("Candies, MARS SNACKFOOD US, SNICKERS Bar", ["snickers"]),
+    "granola bar": ("Snacks, granola bars, hard, plain", ["granola bars", "cereal bar"]),
+    "rice cake": ("Snacks, rice cakes, brown rice, plain", ["rice cakes"]),
+    "trail mix": ("Snacks, trail mix, regular", []),
+    "beef jerky": ("Snacks, beef jerky, chopped and formed", ["jerky"]),
+    "string cheese": ("Cheese, mozzarella, low moisture, part-skim", ["cheese stick"]),
+    "cola": ("Beverages, carbonated, cola, regular", ["soda", "coke", "pop", "soft drink", "can of coke", "can of soda"]),
+    "diet soda": ("Beverages, carbonated, low calorie, cola or pepper-type, with aspartame, contains caffeine", ["diet coke", "coke zero", "diet cola"]),
+    "lemonade": ("Lemonade, frozen concentrate, white, prepared with water", []),
+    "apple juice": ("Apple juice, canned or bottled, unsweetened, without added ascorbic acid", []),
+    "energy drink": ("Beverages, Energy drink, RED BULL", ["red bull"]),
+    "sports drink": ("Beverages, Sports drink, PEPSICO QUAKER GATORADE G, 0-calorie", ["gatorade"]),
+    "beer": ("Alcoholic beverage, beer, regular, all", ["beers", "pint of beer", "lager"]),
+    "light beer": ("Alcoholic beverage, beer, light", ["lite beer"]),
+    "liquor": ("Alcoholic beverage, distilled, all (gin, rum, vodka, whiskey) 80 proof", ["vodka", "whiskey", "rum", "gin", "tequila", "shot"]),
+    "tea": ("Beverages, tea, black, brewed, prepared with tap water", ["black tea", "green tea", "cup of tea"]),
+    "coffee cream": ("Cream, fluid, light (coffee cream or table cream)", ["cream", "creamer", "light cream"]),
+    "chocolate milk": ("Milk, chocolate, fluid, commercial, reduced fat", []),
     "soy milk": ("Soymilk, original and vanilla, unfortified", []),
     "coconut milk": ("Nuts, coconut milk, canned (liquid expressed from grated meat and water)", ["canned coconut milk"]),
     "light coconut milk": ("Beverages, coconut milk, sweetened, fortified with calcium, vitamins A, B12, D2", []),
@@ -272,7 +315,7 @@ FOODS = {
     "lemon zest": ("Lemon peel, raw", ["zest", "lime zest", "orange zest"]),
 }
 
-PORTION_WORDS = ("cup", "tbsp", "tablespoon", "tsp", "teaspoon", "large", "medium", "small", "slice", "clove", "piece", "stalk", "leaf", "sprig", "can", "fillet", "breast", "thigh", "chop", "link", "egg", "whole", "fruit", "pepper", "head", "bunch", "oz")
+PORTION_WORDS = ("bar", "bottle", "serving", "bag", "package", "patty", "sandwich", "item", "order", "fl oz", "scoop", "cookie", "doughnut", "muffin", "pancake", "waffle", "burrito", "frank", "jigger", "shot", "container", "nugget", "cup", "tbsp", "tablespoon", "tsp", "teaspoon", "large", "medium", "small", "slice", "clove", "piece", "stalk", "leaf", "sprig", "can", "fillet", "breast", "thigh", "chop", "link", "egg", "whole", "fruit", "pepper", "head", "bunch", "oz")
 
 def main():
     sys.stderr.write("Downloading SR Legacy...\n")
@@ -326,7 +369,7 @@ def main():
         for amount, d, g in portions.get(fid, []):
             if any(w in d for w in PORTION_WORDS) and amount > 0:
                 ps.append([round(g / amount, 1), d[:40]])
-        out[key] = {"n": [round(n.get("kcal", 0)), round(n.get("p", 0), 1), round(n.get("c", 0), 1), round(n.get("f", 0), 1)], "a": aliases, "u": ps[:8], "id": int(fid)}
+        out[key] = {"n": [round(n.get("kcal", 0)), round(n.get("p", 0), 1), round(n.get("c", 0), 1), round(n.get("f", 0), 1)], "a": aliases, "u": ps[:14], "id": int(fid)}
     # Not in SR Legacy: from USDA's Branded Foods averages for unsweetened oat milk.
     if "oat milk" in missing:
         out["oat milk"] = {"n": [46, 0.4, 7.5, 1.5], "a": [], "u": [[240.0, "cup"]], "id": 0}
