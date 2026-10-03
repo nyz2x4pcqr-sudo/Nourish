@@ -140,3 +140,17 @@ test('when the recipes run out, the empty slot is reported (for the AI to fill) 
     const names = res.days.flatMap(d => PL.MEALS.map(m => d[m] && d[m].name).filter(Boolean));
     assert.equal(new Set(names).size, names.length);
 });
+
+test('portion sizing lowers the numbers even when an amount can\'t be scaled', () => {
+    const r = N.settle({ name: 'Herby Bean Bowl', servings: 1, steps: ['Cook.'], ingredients: ['a handful of spinach', '1 can chickpeas', '2 tbsp olive oil', '1 tsp salt', '1 lemon'] });
+    const half = PL.scaleRecipe(r, 0.5, 1);
+    near(half.nutrition.calories, r.nutrition.calories / 2, 0.02);
+    assert.equal(half.scaled.portion, 0.5);
+});
+
+test('breads, snack bars and sauces are not meals', () => {
+    ['Cheese, Garlic and Herb Quick Bread (no yeast)', 'High Protein Granola Bars', 'Easy Pesto Sauce'].forEach(name => {
+        const f = PL.mealFit({ name, ingredients: ['1 cup flour', '1 cup oats'] });
+        assert.deepEqual([f.breakfast, f.lunch, f.dinner], [false, false, false], name);
+    });
+});

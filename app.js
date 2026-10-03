@@ -82,7 +82,15 @@ const SETTINGS_DEFAULTS = {
     servings: '1',
     skill: 'Intermediate',
     budget: 'Any',
-    // recipe sources
+    // recipe sources (Settings → Advanced)
+    plan_source: 'auto',          // 'auto': real recipes first, AI fills gaps; 'ai': the AI writes every meal
+    sources_off: '',              // ids of sources switched off (sources.js)
+    custom_sites: '',             // extra recipe sites to search, e.g. "mysite.com"
+    source_priority: '',          // ids searched and preferred first
+    calorie_split: 'dinner',      // planner.js SPLITS: 'dinner' | 'even' | 'breakfast' | 'custom'
+    split_breakfast: '25',
+    split_lunch: '30',
+    split_dinner: '45',
     spoonacular_api_key: '',
     web_engine: 'duckduckgo',
     brave_api_key: '',
@@ -233,8 +241,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     setInterval(() => { if (!document.hidden) syncNow(); }, 15000);
     window.addEventListener('online', () => { checkBackend(); syncNow(); });
+    // The recipe library: read a little after start, then when the app comes back (at most every 5 minutes).
+    librarySummary(libraryIndex());
+    let libraryChecked = 0;
+    const checkLibrary = () => { if (Date.now() - libraryChecked > 300000) { libraryChecked = Date.now(); indexLibrary(); } };
+    setTimeout(checkLibrary, 8000);
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) return;
+        setTimeout(checkLibrary, 3000);
         if (isLocalMode()) resumeLocalPlan();
         if (backendOnline === false) checkBackend();
         syncNow();
@@ -1082,14 +1096,16 @@ const SETTINGS_PAGES = {
     ai: { icon: 'i-sparkle', color: '#8A79C9', title: 'AI model' },
     chat: { icon: 'i-chat', color: '#6FA77A', title: 'Chat' },
     profile: { icon: 'i-user', color: '#D9893A', title: 'Your profile' },
-    sources: { icon: 'i-book', color: '#C9675A', title: 'Recipe sources' },
+    sources: { icon: 'i-book', color: '#C9675A', title: 'Recipes' },
+    advanced: { icon: 'i-gear', color: '#6E7F8E', title: 'Recipe sources & keys' },
     grocery: { icon: 'i-cart', color: '#4E9E92', title: 'Grocery list' },
     server: { icon: 'i-server', color: '#7C8A96', title: 'Server & devices' },
     updates: { icon: 'i-update', color: '#5B8DBE', title: 'Updates' },
     data: { icon: 'i-shield', color: '#8B7E6E', title: 'Data & privacy' },
     logs: { icon: 'i-list', color: '#6E6862', title: 'Activity log' },
 };
-const SETTINGS_GROUPS = [['appearance', 'ai', 'chat'], ['profile', 'sources', 'grocery'], ['server', 'updates', 'data', 'logs']];
+const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'sources', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
+const SETTINGS_GROUP_TITLES = ['', '', 'Advanced', ''];
 
 function settingsSummary(page) {
     const s = settings;
@@ -1100,7 +1116,11 @@ function settingsSummary(page) {
             : `${PROVIDERS[s.active_provider].replace(' (local)', '')} · ${s[`${s.active_provider}_model`] || 'auto'}`;
         case 'chat': return `${s.chef_style.charAt(0).toUpperCase() + s.chef_style.slice(1)} · ${on('chat_actions') ? 'can edit plan' : 'chat only'}`;
         case 'profile': return `${s.calorie_target} kcal · ${s.diet === 'No restriction' ? 'any diet' : s.diet}`;
-        case 'sources': return s.web_engine === 'brave' ? 'Web: Brave' : 'Web: DuckDuckGo';
+        case 'sources': return libraryState.count ? `${libraryState.count} of your own` : 'Automatic';
+        case 'advanced': {
+            const off = String(s.sources_off || '').split(',').filter(Boolean).length;
+            return s.plan_source === 'ai' ? 'AI writes every meal' : off ? `${off} switched off` : 'All on';
+        }
         case 'grocery': return grocery.custom.length ? `${grocery.custom.length} added by you` : '';
         case 'logs': {
             const errors = activityLog.filter(e => e.level === 'error' && Date.now() - e.t < 864e5).length;
@@ -1114,8 +1134,16 @@ function settingsSummary(page) {
 
 function openSettingsPage(page) {
     settingsPage = page;
+    if (page === 'sources') indexLibrary();
     renderSettings();
     window.scrollTo(0, 0);
+}
+
+const USDA_CREDIT = 'Nutrition is calculated with data from USDA FoodData Central (U.S. Department of Agriculture, public domain), and Open Food Facts when online.';
+
+// A one-line explanation plus a "What is this?" note that opens for people who want to know more.
+function help(line, more) {
+    return h('span', {}, line, ' ', h('details', { class: 'settings-help' }, h('summary', { text: 'What is this?' }), h('span', { text: more })));
 }
 
 function settingsGroup(title, rows, note) {
@@ -1145,7 +1173,7 @@ function renderSettings() {
                         h('div', { class: 'title', text: settings.name || 'Set up your profile' }),
                         h('div', { class: 'text-dim', text: `${goalText} · ${settings.calorie_target} kcal · ${settings.diet === 'No restriction' ? 'any diet' : settings.diet}` })),
                     icon('i-chevron', 'chev'))),
-            SETTINGS_GROUPS.map(group => h('div', { class: 'settings-group' }, group.map(key => {
+            SETTINGS_GROUPS.map((group, gi) => [SETTINGS_GROUP_TITLES[gi] ? h('div', { class: 'settings-group-label', text: SETTINGS_GROUP_TITLES[gi] }) : null, h('div', { class: 'settings-group' }, group.map(key => {
                 const p = SETTINGS_PAGES[key];
                 const badge = key === 'updates' && updateInfo && updateInfo.update_available;
                 return h('button', { type: 'button', class: 'settings-row settings-nav', onclick: () => openSettingsPage(key) },
@@ -1153,8 +1181,9 @@ function renderSettings() {
                     h('span', { class: 'settings-label', text: p.title }),
                     h('span', { id: `settingsSummary-${key}`, class: 'settings-value settings-nav-summary' + (badge ? ' badge' : ''), text: settingsSummary(key) }),
                     icon('i-chevron', 'chev'));
-            }))),
+            }))]),
             h('p', { class: 'settings-note', text: `Nourish${serverInfo && serverInfo.version ? ' v' + serverInfo.version : ''} · free & open source (AGPL-3.0) · changes save automatically and sync with your PC` }),
+            h('p', { class: 'settings-note', text: USDA_CREDIT }),
         );
         updateBackendStatus();
         return;
@@ -1250,7 +1279,9 @@ const SETTINGS_RENDERERS = {
             ...settingsGroup('Daily targets', [
                 settingsRow('Calories', settingsInput('calorie_target', { type: 'number', inputmode: 'numeric', min: '1000', max: '6000' })),
                 settingsRow('Protein (g)', settingsInput('protein_target', { type: 'number', inputmode: 'numeric', min: '20', max: '400' })),
-            ]),
+                settingsRow('Calories by meal', settingsSelect('calorie_split', Object.assign({ dinner: 'Bigger dinner', even: 'Even', breakfast: 'Bigger breakfast' },
+                    settings.calorie_split === 'custom' ? { custom: 'Custom (Advanced)' } : {}))),
+            ], 'Each day of your plan is sized to land within about 5% of your calories. "Bigger dinner" gives about 25% at breakfast, 30% at lunch and 45% at dinner.'),
             ...settingsGroup('Food', [
                 settingsRow('Diet', settingsSelect('diet', DIETS)),
                 settingsRow('Allergies', settingsInput('allergies', { placeholder: 'e.g. peanuts, shellfish' })),
@@ -1267,21 +1298,57 @@ const SETTINGS_RENDERERS = {
         ];
     },
     sources() {
-        const brave = settings.web_engine === 'brave';
-        const sources = { aiChef: 'AI Chef', web: 'Web search', themealdb: 'TheMealDB', spoonacular: 'Spoonacular' };
         return [
-            ...settingsGroup('Default', [
-                settingsRow('New plans use', selectInput(prefs.source, sources, v => { setPref('source', v); syncChoiceButtons(); showToast('Saved ✓', false); }, 'Default source')),
-            ]),
-            ...settingsGroup('Web search', [
-                settingsRow('Search with', settingsSelect('web_engine', { duckduckgo: 'DuckDuckGo', brave: 'Brave Search' }, { onchange: () => renderSettings() })),
-                brave ? secretRow('brave_api_key', 'Brave key', 'from brave.com/search/api') : null,
-            ], 'Finds real recipes on recipe websites and reads them in full: ingredients, steps, time and (when the site lists it) nutrition. DuckDuckGo needs no key but sometimes limits searches; Brave\'s free plan is more reliable.'),
-            ...settingsGroup('Spoonacular', [
-                secretRow('spoonacular_api_key', 'API key', 'free key'),
-            ], 'Recipes with nutrition, filtered by your diet, allergies and cook time. Free key: spoonacular.com/food-api.'),
-            ...settingsGroup('TheMealDB', [infoRow('Ready to use', 'no key needed')],
-                'A free collection of recipes from around the world. It has no nutrition data.'),
+            ...settingsGroup('How plans are made', [
+                infoRow('Recipes', settings.plan_source === 'ai' ? 'Written by the AI' : 'Real recipes first'),
+            ], settings.plan_source === 'ai'
+                ? 'The AI writes every meal (changed in Advanced → Recipe sources & keys).'
+                : `Nourish searches ${NourishSources.usable().length} trusted recipe sites, TheMealDB and your own recipe files at once, picks the best recipe for each meal and sizes it to your targets. The AI only writes a meal when nothing suitable is found.`),
+            ...libraryGroup(),
+            ...settingsGroup('Nutrition', [infoRow('Data', 'USDA FoodData Central')], USDA_CREDIT),
+        ];
+    },
+    advanced() {
+        const off = new Set(String(settings.sources_off || '').split(',').filter(Boolean));
+        const toggle = id => {
+            if (off.has(id)) off.delete(id); else off.add(id);
+            setSetting('sources_off', [...off].join(','), { quiet: true });
+        };
+        const sourceRow = src => h('button', {
+            type: 'button', class: 'settings-row settings-nav switch-row', role: 'switch', 'aria-checked': String(!off.has(src.id)),
+            onclick: e => { toggle(src.id); const v = !off.has(src.id); e.currentTarget.setAttribute('aria-checked', String(v)); e.currentTarget.querySelector('.switch').setAttribute('aria-checked', String(v)); },
+        }, h('span', { class: 'settings-label' }, src.name, h('span', { class: 'settings-hint', text: src.note || `${src.domain}${src.healthy ? ' · lighter cooking' : ''}${src.nutrition ? ' · lists nutrition' : ''}` })),
+            h('span', { class: 'switch', 'aria-checked': String(!off.has(src.id)), 'aria-hidden': 'true' }));
+        const names = Object.fromEntries(NourishSources.all().map(x => [x.id, x.name]));
+        return [
+            ...settingsGroup('Where recipes come from', [
+                settingsRow('New plans', settingsSelect('plan_source', { auto: 'Real recipes first (recommended)', ai: 'AI writes every meal' }, { onchange: () => renderSettings() })),
+            ], help('"Real recipes first" uses tested recipes from cooking sites and only asks the AI when nothing fits. "AI writes every meal" is the older way: slower, especially on a phone.',
+                'Real recipes have been cooked and tested by people, and most sites list their own nutrition, which Nourish checks against USDA data. On a phone, writing a whole week with the AI can take 20 minutes or more; finding recipes takes seconds.')),
+            ...settingsGroup('Recipe sites', NourishSources.usable().map(sourceRow),
+                help('Switch off any site you don’t want recipes from.', 'Each site was checked: it publishes recipe data for search engines, its robots.txt allows reading recipe pages, and its terms don’t forbid it. Nourish only reads the few pages a plan needs, a few at a time, and remembers them so it doesn’t ask twice. A site that fails is skipped quietly.')),
+            ...settingsGroup('Recipe databases', NourishSources.SOURCES.filter(x => x.kind === 'api').map(sourceRow).concat([
+                secretRow('spoonacular_api_key', 'Spoonacular key', 'optional, free key'),
+            ]), help('TheMealDB works without a key. Spoonacular is an optional extra that needs a free key.', 'An API is a service apps can ask directly for recipes. Get a free Spoonacular key at spoonacular.com/food-api, then paste it here.')),
+            ...settingsGroup('Your own sites', [
+                settingsRow('Also search', settingsInput('custom_sites', { placeholder: 'e.g. mysite.com' }), { hint: 'separate several with commas' }),
+            ], help('Add a recipe site you like and Nourish searches it too.', 'Works best with sites built on WordPress (most food blogs). Nourish uses the site\'s own search, so nothing is crawled.')),
+            ...settingsGroup('Search these first', [
+                settingsRow('Priority', textInput(() => String(settings.source_priority || '').split(',').filter(Boolean).map(id => names[id] || id).join(', '), v => {
+                    const want = v.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+                    const ids = want.map(w => (NourishSources.all().find(x => x.name.toLowerCase() === w || x.id === w || (x.domain || '') === w) || {}).id).filter(Boolean);
+                    setSetting('source_priority', ids.join(','));
+                }, { placeholder: 'e.g. Skinnytaste, Budget Bytes' })),
+            ], help('Sites named here are preferred when their recipes fit just as well.', 'Type site names separated by commas, in the order you prefer them.')),
+            ...settingsGroup('Calories by meal (custom)', [
+                settingsRow('Breakfast %', textInput(() => settings.split_breakfast, v => { setSetting('split_breakfast', v); setSetting('calorie_split', 'custom', { quiet: true }); }, { type: 'number', inputmode: 'numeric', min: '10', max: '60' })),
+                settingsRow('Lunch %', textInput(() => settings.split_lunch, v => { setSetting('split_lunch', v); setSetting('calorie_split', 'custom', { quiet: true }); }, { type: 'number', inputmode: 'numeric', min: '10', max: '60' })),
+                settingsRow('Dinner %', textInput(() => settings.split_dinner, v => { setSetting('split_dinner', v); setSetting('calorie_split', 'custom', { quiet: true }); }, { type: 'number', inputmode: 'numeric', min: '10', max: '70' })),
+            ], help('Typing a number here switches "Calories by meal" in your profile to Custom.', 'The three numbers are shares of your daily calories. They don\'t have to add up to exactly 100: Nourish scales them.')),
+            ...settingsGroup('AI model', [
+                h('button', { type: 'button', class: 'settings-row settings-nav', onclick: () => openSettingsPage('ai') },
+                    h('span', { class: 'settings-label', text: 'Choose the AI' }), h('span', { class: 'settings-value', text: settingsSummary('ai') }), icon('i-chevron', 'chev')),
+            ], help('The AI writes a meal when no recipe fits, and powers the chat.', 'It can run on this phone (private, no account, slower) or use Claude, OpenAI or a model on your PC.')),
         ];
     },
     grocery() {
@@ -1574,19 +1641,12 @@ function initSheets() {
     document.querySelectorAll('.segment-btn[data-goal]').forEach(btn => {
         btn.addEventListener('click', () => { setPref('goal', btn.dataset.goal); syncChoiceButtons(); });
     });
-    document.querySelectorAll('.source-btn').forEach(btn => {
-        btn.addEventListener('click', () => { setPref('source', btn.dataset.source); syncChoiceButtons(); });
-    });
 }
 
 function syncChoiceButtons() {
     document.querySelectorAll('.segment-btn[data-goal]').forEach(b => {
         b.classList.toggle('active', b.dataset.goal === prefs.goal);
         b.setAttribute('aria-pressed', b.dataset.goal === prefs.goal);
-    });
-    document.querySelectorAll('.source-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.source === prefs.source);
-        b.setAttribute('aria-pressed', b.dataset.source === prefs.source);
     });
 }
 
@@ -1679,7 +1739,9 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
                 h('span', { class: 'recipe-step-number', text: idx + 1 }),
                 h('span', { class: 'recipe-step-text' }, highlightStep(NourishUnits.convertText(s, units))))))) : null,
         meal.source_url ? h('a', { class: 'btn btn-secondary recipe-source', href: meal.source_url, target: '_blank', rel: 'noopener noreferrer' },
-            icon('i-link'), `Original recipe on ${meal.source_name || 'the web'}${meal.via_name ? ` · via ${meal.via_name}` : ''}`) : h('div', { style: 'height:20px' }),
+            icon('i-link'), `Recipe from ${meal.source_name || 'the web'}${meal.via_name ? ` · via ${meal.via_name}` : ''}`)
+            : meal.library_path ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), `From your recipe library: ${meal.library_path}`)
+            : h('div', { style: 'height:20px' }),
     );
     content.scrollTop = 0;
     $('recipeSheet').classList.add('active');
@@ -1737,10 +1799,23 @@ function nutritionPanel(meal) {
     return h('section', { class: 'nutrition-panel', 'aria-label': 'Nutrition' },
         h('div', { class: 'nutrition-top' },
             h('div', { class: 'nutrition-kcal num' }, formatCalories(n.calories), h('small', { text: meal.servings ? 'kcal per serving' : 'kcal' })),
-            meal.nutrition_estimated ? h('span', { class: 'chip warn', text: 'Estimated' }) : null),
+            meal.nutrition_unmatched || meal.nutrition_estimated ? h('span', { class: 'chip warn', text: 'Approximate' }) : null),
         sum > 0 ? split : null,
         h('div', { class: 'nutrition-macros' }, macro('Protein', 'protein_g', 'protein'), macro('Carbs', 'carbs_g', 'carbs'), macro('Fat', 'fat_g', 'fat')),
-        meal.servings ? h('p', { class: 'recipe-note', text: `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null);
+        meal.servings ? h('p', { class: 'recipe-note', text: `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null,
+        nutritionNotes(meal).map(t => h('p', { class: 'recipe-note', text: t })));
+}
+
+// Where the numbers come from, and what was changed to fit the person's targets, in plain words.
+function nutritionNotes(meal) {
+    const notes = [];
+    if (meal.nutrition_basis === 'source') notes.push(`Numbers from ${meal.source_name || 'the recipe'}, checked against USDA data.`);
+    else if (meal.nutrition_basis === 'calculated') notes.push('Numbers worked out from the ingredients with USDA data.');
+    if (meal.nutrition_unmatched) notes.push(`Not counted (not in the food table): ${meal.nutrition_unmatched.join('; ')}.`);
+    if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion sized to your targets: ${meal.scaled.portion}× the original serving.`);
+    if (meal.trimmed) notes.push('Less oil or sugar than the original, to fit your calories. Seasoning is unchanged.');
+    if (meal.reseasoned) notes.push(`Seasoning added: ${meal.reseasoned.join(', ')}.`);
+    return notes;
 }
 
 function closeRecipeSheet() {
@@ -2192,8 +2267,9 @@ function normalizeMeal(m) {
     if (!m || typeof m !== 'object' || !m.name) return null;
     const n = m.nutrition && typeof m.nutrition === 'object' ? m.nutrition : null;
     const ingredients = cleanIngredients(toStringList(m.ingredients), m.name);
-    return Object.assign({
-        name: String(m.name).trim(),
+    const written = !m.source_url && !m.library_path;   // by the AI: its spelling is checked
+    const out = Object.assign({
+        name: written && typeof NourishPlanner !== 'undefined' ? NourishPlanner.fixName(String(m.name).trim()) : String(m.name).trim(),
         servings: toNumber(m.servings) >= 1 ? Math.round(toNumber(m.servings)) : undefined,
         time_minutes: toNumber(m.time_minutes),
         nutrition: n ? { calories: toNumber(n.calories), protein_g: toNumber(n.protein_g), carbs_g: toNumber(n.carbs_g), fat_g: toNumber(n.fat_g) } : null,
@@ -2202,8 +2278,21 @@ function normalizeMeal(m) {
         steps: toStringList(m.steps),
         // What the recipe checks (recipes.js) still found wrong after the remakes; shown on the recipe.
         incomplete: Array.isArray(m.incomplete) && m.incomplete.length ? m.incomplete.map(String).slice(0, 12) : undefined,
-        nutrition_estimated: n && m.nutrition_estimated ? true : undefined,   // the AI estimated it (an import without nutrition)
+        nutrition_basis: m.nutrition_basis === 'source' || m.nutrition_basis === 'calculated' ? m.nutrition_basis : undefined,
+        nutrition_unmatched: Array.isArray(m.nutrition_unmatched) && m.nutrition_unmatched.length ? m.nutrition_unmatched.map(String).slice(0, 12) : undefined,
+        scaled: m.scaled && Number(m.scaled.portion) > 0 ? { from_servings: toNumber(m.scaled.from_servings), portion: toNumber(m.scaled.portion) } : undefined,
+        reseasoned: Array.isArray(m.reseasoned) && m.reseasoned.length ? m.reseasoned.map(String).slice(0, 6) : undefined,
+        trimmed: m.trimmed ? true : undefined,
+        library_path: m.library_path ? String(m.library_path).slice(0, 300) : undefined,
     }, safeSource(m));
+    // Nutrition is never taken on trust: it's calculated from the ingredients (USDA data, nutrition.js),
+    // and a source's own numbers are kept only when they agree within 15%.
+    if (!out.nutrition_basis && out.ingredients.length && typeof NourishNutrition !== 'undefined') {
+        NourishNutrition.settle(Object.assign(out, { servings: out.servings || 1 }));
+        if (!out.nutrition || !(out.nutrition.calories > 0)) out.nutrition = null;
+    }
+    Object.keys(out).forEach(k => { if (out[k] === undefined) delete out[k]; });
+    return out;
 }
 
 function safeSource(m) {
@@ -2268,33 +2357,198 @@ function applyEdits(parsed) {
     return { replacedPlan: false, changes: done };
 }
 
+// === YOUR RECIPE LIBRARY ===
+// Files in the Nourish folders (Recipe Books, My Recipes) on this phone or the PC, read in the
+// background in small batches whenever they change (library.js), and used as a preferred source.
+const LIBRARY_KEY = 'nourish_library_index';
+const libraryState = { count: 0, files: 0, folder: '', busy: false, error: '', notes: [] };
+function libraryIndex() { return loadJSON(LIBRARY_KEY, { files: {} }); }
+function libraryRecipes() { return NourishLibrary.allRecipes(libraryIndex()); }
+function librarySummary(index) {
+    const files = Object.keys(index.files || {});
+    libraryState.files = files.length;
+    libraryState.count = NourishLibrary.allRecipes(index).length;
+    libraryState.notes = files.filter(f => index.files[f].note).map(f => `${f}: ${index.files[f].note}`).slice(0, 20);
+}
+function libraryAvailable() { return !isLocalMode() || nativeAvailable(); }
+
+async function indexLibrary({ quiet = true } = {}) {
+    if (libraryState.busy || !libraryAvailable()) return;
+    libraryState.busy = true;
+    libraryState.error = '';
+    try {
+        const io = {
+            list: async () => { const r = await api('/api/library', { timeoutMs: 30000 }); libraryState.folder = r.folder || ''; return r.files || []; },
+            read: path => api('/api/library/read', { method: 'POST', timeoutMs: 120000, body: { path } }),
+            ocr: canReadTextOnPhone() ? async image => ((await nativeCall('ocr', { image }, { timeoutMs: 60000 })) || {}).text || '' : null,
+            readStructured: (html, url) => { try { return NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } },
+            readText: html => { try { return NourishImport.readableText(new DOMParser().parseFromString(html, 'text/html')); } catch (e) { return ''; } },
+            sleep: ms => new Promise(ok => setTimeout(ok, ms)),
+        };
+        const res = await NourishLibrary.refresh(libraryIndex(), io, { batch: 2, pause: 500, maxFiles: 20 });
+        store(LIBRARY_KEY, res.index);
+        librarySummary(res.index);
+        if (res.changed) nlog('library', `Recipe library: ${libraryState.count} recipes from ${libraryState.files} files (${res.read} read now${res.pending ? `, ${res.pending} more next time` : ''})`, res.errors.length ? res.errors : null);
+        if (res.pending) setTimeout(() => indexLibrary(), 20000);   // big folders: the rest a little later
+    } catch (e) {
+        libraryState.error = e.message;
+        if (!quiet) showToast(`Couldn't read your recipe folder: ${e.message}`);
+        nlog('library', `Couldn't read the recipe folder: ${e.message}`, null, 'warn');
+    } finally {
+        libraryState.busy = false;
+        if (settingsPage === 'sources') renderSettings();
+    }
+}
+
+async function openLibraryFolder() {
+    try {
+        const r = await api('/api/library/open', { method: 'POST', body: {} });
+        if (r && r.opened === false && r.folder) showToast(`Your recipe folder is on the PC: ${r.folder}`, false);
+    } catch (e) {
+        showToast(`Couldn't open the folder: ${e.message}`);
+    }
+}
+
+async function addLibraryFiles() {
+    try {
+        const r = await api('/api/library/add', { method: 'POST', body: {} });
+        if (r && r.added) { showToast(`Added ${r.added} file${r.added > 1 ? 's' : ''}. Reading them now…`, false); indexLibrary({ quiet: false }); }
+    } catch (e) {
+        showToast(`Couldn't add the files: ${e.message}`);
+    }
+}
+
+function libraryGroup() {
+    if (!libraryAvailable()) return settingsGroup('Your recipe library', [infoRow('Folders', 'in the phone app or on your PC')], 'Drop cookbooks and recipe files into the Nourish folders and they become recipes for your plans.');
+    const android = isLocalMode() && /Android/i.test(navigator.userAgent);
+    const where = !isLocalMode() ? `on your PC${libraryState.folder ? `: ${libraryState.folder}` : ''}`
+        : android ? 'in this app (use "Add recipe files")' : 'in the Files app: On My iPhone → Nourish';
+    return settingsGroup('Your recipe library', [
+        infoRow('Recipes found', libraryState.busy ? 'Reading…' : `${libraryState.count} from ${libraryState.files} file${libraryState.files === 1 ? '' : 's'}`),
+        android ? settingsButton('Add recipe files', addLibraryFiles) : settingsButton(isLocalMode() ? 'Show my recipe folder' : 'Open my recipe folder', openLibraryFolder),
+        settingsButton('Check for new files now', () => indexLibrary({ quiet: false })),
+        libraryState.notes.length ? h('details', { class: 'settings-row settings-help' }, h('summary', { text: `${libraryState.notes.length} file${libraryState.notes.length > 1 ? 's' : ''} with no recipe found` }),
+            h('span', { text: libraryState.notes.join('\n') })) : null,
+    ], help(`Put recipe files (PDF, text, Markdown, saved web pages${isLocalMode() && !android ? ', photos' : ''}) in the Recipe Books or My Recipes folder ${where}, and Nourish uses them in your plans first.`,
+        'Nourish looks for a title, an ingredients list and steps in each file. Scanned cookbooks work best as photos on iPhone, which can read the text in pictures. Files are only read again when they change.'));
+}
+
 // === GENERATE MEAL PLAN ===
+// Automatic by default: real recipes from every source at once (finder.js), sized to the person's
+// targets (planner.js); the AI writes only the meals no source had a good match for. Advanced →
+// "Where recipes come from" can switch to the AI writing every meal (the older way).
 async function generateMealPlan() {
     const likes = $('inputLikes').value.trim();
     const hates = $('inputHates').value.trim();
-    if (!likes && !hates) { showToast('Enter at least one food you like or avoid'); return; }
-    if (planJob) { showToast('A plan is already cooking'); return; }
+    if (planJob) { showToast('A plan is already being made'); return; }
     prefs.likes = likes;
     prefs.hates = hates;
     changed('prefs');
     closeGenerateSheet();
-
-    if (prefs.source !== 'aiChef') {
-        const names = { themealdb: 'TheMealDB', spoonacular: 'Spoonacular', web: 'the web (this can take a minute)' };
-        showJobBar('busy', `Searching ${names[prefs.source] || prefs.source}…`);
-        try {
-            const generators = { themealdb: generateWithTheMealDB, spoonacular: generateWithSpoonacular, web: generateWithWeb };
-            applyPlan(await (generators[prefs.source] || generateWithTheMealDB)(likes, hates));
-            showJobBar(null);
-        } catch (err) {
-            showJobBar('error', (err && err.message) || 'Something went wrong');
-        }
+    if (settings.plan_source === 'ai') {
+        await runPlanJob({ kind: 'plan', origin: 'sheet', messages: [
+            { role: 'system', content: planSystemPrompt() },
+            { role: 'user', content: `Goal: ${GOALS[prefs.goal]}. Likes: ${likes || 'anything'}. Avoids: ${hates || 'nothing'}. Generate the 7-day meal plan JSON.` },
+        ] });
         return;
     }
-    await runPlanJob({ kind: 'plan', origin: 'sheet', messages: [
-        { role: 'system', content: planSystemPrompt() },
-        { role: 'user', content: `Goal: ${GOALS[prefs.goal]}. Likes: ${likes || 'anything'}. Avoids: ${hates || 'nothing'}. Generate the 7-day meal plan JSON.` },
-    ] });
+    await runSmartPlan(likes, hates);
+}
+
+// What finder.js needs from the app: how to fetch a page, read recipe data, call the recipe APIs,
+// and which sources are switched on.
+function finderOptions(likes, hates) {
+    const off = new Set(String(settings.sources_off || '').split(',').filter(Boolean));
+    return {
+        settings: Object.assign({}, settings, { goal: prefs.goal }),
+        goal: prefs.goal, likes, avoid: hates, days: 7, people: servingsWanted(),
+        enabled: id => !off.has(id),
+        customSites: String(settings.custom_sites || '').split(/[\s,]+/).filter(Boolean),
+        spoonacularKeySaved: !isLocalMode() && !!secretsSet.spoonacular_api_key,
+        spoonacularDiet: SPOONACULAR_DIETS[settings.diet],
+        fetchPage: (url, { browser } = {}) => fetchForImport(url, { browser }),
+        readRecipe: (html, url) => { try { return NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } },
+        api: (path, body) => api(path, { method: 'POST', timeoutMs: 45000, body }),
+        library: () => libraryRecipes(),
+        cache: { get: k => loadJSON(k, null), set: (k, v) => store(k, v) },
+        log: m => nlog('plan', m),
+    };
+}
+
+async function runSmartPlan(likes, hates) {
+    const started = Date.now();
+    localPlanCancelled = false;
+    planJob = { id: 'stepwise', started, provider: settings.active_provider, kind: 'plan', origin: 'sheet', local: settings.active_provider === 'local' };
+    showJobBar('busy', 'Finding recipes for your week…');
+    const btn = $('generateBtn');
+    try {
+        const plan = await NourishFinder.planFromSources(finderOptions(likes, hates));
+        const st = plan.stats;
+        nlog('plan', `Found ${st.recipes} usable recipes in ${st.seconds} s (${st.searches} searches, ${st.pages} pages, ${st.fromCache} from earlier plans); ${plan.missing.length} meals still to fill`,
+            { perSource: st.perSource, skipped: st.failed, excluded: st.excluded, bland: st.bland });
+        if (localPlanCancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+        if (plan.missing.length) await fillMissingMeals(plan);
+        const days = plan.days.map(d => NourishPlanner.fitDay(d, Object.assign({}, settings, { goal: prefs.goal }), servingsWanted()));
+        if (!days.some(d => MEAL_TYPES.some(t => d[t]))) {
+            throw new Error(aiReady()
+                ? "Couldn't find or write any recipes. Check your internet connection and try again."
+                : 'No recipes could be found right now. Check your internet connection, or download an AI model in Settings so Nourish can write recipes itself.');
+        }
+        applyPlan({ days });
+        nlog('plan', `Plan ready in ${Math.round((Date.now() - started) / 100) / 10} s`, days.map((d, i) => `Day ${i + 1}: ${Math.round(NourishPlanner.dayTotals(d).kcal)} kcal`));
+        showJobBar(null);
+    } catch (err) {
+        nlog('plan', err.cancelled ? 'Cancelled' : `Plan failed: ${err.message}`, err.stack, err.cancelled ? 'info' : 'error');
+        if (err.cancelled) { showJobBar(null); showToast('Meal plan cancelled', false); }
+        else showJobBar('error', `Couldn't make the plan: ${err.message}`);
+    } finally {
+        planJob = null;
+        btn.disabled = false;
+        btn.textContent = 'Generate Plan';
+    }
+}
+
+// The meals no source matched: written by the AI when one is set up; otherwise the closest recipe
+// found is used again on another day (better than an empty slot), and the person is told.
+async function fillMissingMeals(plan) {
+    const onPhone = settings.active_provider === 'local';
+    const canWrite = aiReady() && !(onPhone && !settings.local_model);
+    let reused = 0;
+    for (const slot of plan.missing) {
+        if (localPlanCancelled) break;
+        const day = plan.days[slot.day];
+        let meal = null;
+        if (canWrite) {
+            const others = plan.days.flatMap(d => MEAL_TYPES.map(t => d[t] && d[t].name).filter(Boolean));
+            const sameDay = MEAL_TYPES.map(t => day[t] && day[t].name).filter(Boolean);
+            showJobBar('busy', `Writing ${dayName(slot.day)} ${slot.meal} (no recipe matched)…`);
+            const servings = servingsWanted();
+            const ask = mealAsk({ type: slot.meal, d: slot.day, recent: sameDay,
+                extra: [prefs.likes ? `They like: ${prefs.likes}.` : '', prefs.hates ? `Never use: ${prefs.hates}.` : '',
+                    sameDay.length ? 'Use a different main protein and vegetable from the other meals that day.' : ''].filter(Boolean).join(' ') });
+            const run = onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled: () => localPlanCancelled }) : aiRunner();
+            try {
+                const r = await makeMeal({ type: slot.meal, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null,
+                    earlier: others, id: `fill-${slot.day}-${slot.meal}`, label: `${dayName(slot.day)} ${slot.meal}` }, run, { isCancelled: () => localPlanCancelled });
+                if (r && r.meal) {
+                    meal = normalizeMeal(r.meal);
+                    const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
+                    if (meal && exclude(meal)) { nlog('plan', `The AI's ${slot.meal} "${meal.name}" has ${exclude(meal)}, which is avoided; not used`, null, 'warn'); meal = null; }
+                    if (meal && !NourishPlanner.flavorCheck(meal).ok) { NourishPlanner.reseason(meal); NourishNutrition.settle(meal); }
+                }
+            } catch (e) {
+                nlog('plan', `The AI couldn't write ${dayName(slot.day)} ${slot.meal}: ${e.message}`, null, 'warn');
+            }
+        }
+        if (!meal) {
+            // The best recipe for this slot from the whole pool, even if it's already in the week.
+            const pool = (plan.pools[slot.meal] || []).filter(r => !MEAL_TYPES.some(t => day[t] && NourishPlanner.normName(day[t].name) === NourishPlanner.normName(r.name)));
+            const best = pool.sort((a, b) => Math.abs(a.nutrition.calories - slot.kcal) - Math.abs(b.nutrition.calories - slot.kcal))[0];
+            if (best) { meal = JSON.parse(JSON.stringify(best)); reused++; }
+        }
+        if (meal) day[slot.meal] = meal;
+    }
+    if (reused) showToast(canWrite ? `${reused} meal${reused > 1 ? 's' : ''} repeat from earlier in the week.` : `${reused} meal${reused > 1 ? 's' : ''} repeat. Download an AI model in Settings for more variety.`, false);
 }
 
 function chatPlanMessages() {
@@ -2567,81 +2821,6 @@ function resumePendingJobs() {
     if (chat && chat.id && !chatBusy) requestChatReply(chat);
 }
 
-function spreadOverWeek(meals, toMeal) {
-    if (!meals.length) throw new Error('No recipes found for those foods. Try different "likes".');
-    return {
-        days: Array.from({ length: 7 }, (_, d) => Object.fromEntries(
-            MEAL_TYPES.map((t, m) => [t, toMeal(meals[(d * 3 + m) % meals.length])]))),
-    };
-}
-
-function joinList(...parts) {
-    return parts.filter(Boolean).join(', ');
-}
-
-async function generateWithTheMealDB(likes, hates) {
-    const data = await api('/api/recipes/themealdb', {
-        method: 'POST', timeoutMs: 45000,
-        body: { query: likes || 'chicken', exclude: joinList(hates, settings.allergies) },
-    });
-    return spreadOverWeek((data && data.meals) || [], r => {
-        const ingredients = [];
-        for (let i = 1; i <= 20; i++) {
-            const ing = r && r[`strIngredient${i}`];
-            if (ing && ing.trim()) ingredients.push(`${r[`strMeasure${i}`] || ''} ${ing}`.trim());
-        }
-        // Split into sentences without regex lookbehind (unsupported before iOS 16.4).
-        const steps = ((r && r.strInstructions) || '').replace(/\.\s+/g, '.\n').split(/\r?\n/).map(s => s.trim()).filter(s => s.length > 3).slice(0, 12);
-        // TheMealDB has no nutrition or cooking-time data; leave them unknown rather than invent numbers.
-        return { name: r && r.strMeal, time_minutes: null, nutrition: null, ingredients, steps };
-    });
-}
-
-async function generateWithSpoonacular(likes, hates) {
-    if (!settings.spoonacular_api_key && !secretsSet.spoonacular_api_key) throw new Error('Spoonacular needs a free API key. Add it in Settings → Recipe sources.');
-    const data = await api('/api/recipes/spoonacular', {
-        method: 'POST', timeoutMs: 45000,
-        body: {
-            api_key: settings.spoonacular_api_key || undefined, query: likes || 'chicken', exclude: hates, number: 21,
-            diet: SPOONACULAR_DIETS[settings.diet], intolerances: settings.allergies || undefined,
-            max_ready_time: Number(settings.max_cook_time) || undefined,
-        },
-    });
-    return spreadOverWeek((data && data.results) || [], r => {
-        const nutrient = name => { const f = ((r && r.nutrition && r.nutrition.nutrients) || []).find(n => n && n.name === name); return f ? f.amount : null; };
-        return {
-            name: r && r.title,
-            time_minutes: r && r.readyInMinutes,
-            nutrition: r && r.nutrition ? { calories: nutrient('Calories'), protein_g: nutrient('Protein'), carbs_g: nutrient('Carbohydrates'), fat_g: nutrient('Fat') } : null,
-            ingredients: ((r && r.extendedIngredients) || []).map(i => i && i.original),
-            steps: ((r && r.analyzedInstructions && r.analyzedInstructions[0] && r.analyzedInstructions[0].steps) || []).map(s => s && s.step).slice(0, 12),
-        };
-    });
-}
-
-async function generateWithWeb(likes, hates) {
-    const base = [likes || 'healthy', settings.diet !== 'No restriction' ? settings.diet : '', settings.cuisines].filter(Boolean).join(' ');
-    const body = mealType => ({
-        query: `${base} ${mealType} recipe`, number: 7, exclude: joinList(hates, settings.allergies),
-        brave_key: settings.web_engine === 'brave' ? settings.brave_api_key || undefined : undefined,
-        engine: settings.web_engine,
-    });
-    const results = await Promise.allSettled(MEAL_TYPES.map(t => api('/api/recipes/web', { method: 'POST', timeoutMs: 120000, body: body(t) })));
-    const byType = Object.fromEntries(MEAL_TYPES.map((t, i) => [t, results[i].status === 'fulfilled' ? (results[i].value && results[i].value.recipes) || [] : []]));
-    if (!MEAL_TYPES.some(t => byType[t].length)) {
-        const err = results.find(r => r.status === 'rejected');
-        throw new Error((err && err.reason && err.reason.message) || 'No recipes found on the web for those foods. Try different "likes".');
-    }
-    // Fill each slot from its own search; borrow from the others if one came back empty.
-    const all = MEAL_TYPES.reduce((acc, t) => acc.concat(byType[t]), []);
-    return {
-        days: Array.from({ length: 7 }, (_, d) => Object.fromEntries(MEAL_TYPES.map(t => {
-            const pool = byType[t].length ? byType[t] : all;
-            return [t, pool[d % pool.length]];
-        }))),
-    };
-}
-
 // === RECIPES FROM A LINK, PASTED TEXT OR A SCREENSHOT ===
 // importer.js finds the recipe (embedded recipe data, a social post's caption or transcript, or the
 // page's text read by the AI); it's shown in an editable preview before anything is saved.
@@ -2793,17 +2972,10 @@ async function runImport() {
             result = { recipe, how: 'ai', notes: ['Read from a screenshot'] };
         }
         const recipe = result.recipe;
-        // Missing nutrition: estimated by the AI, and labelled as an estimate.
-        if ((!recipe.nutrition || !(recipe.nutrition.calories > 0)) && aiReady()) {
-            showImportStatus('Estimating the nutrition…');
-            const est = await estimateNutrition(recipe, askAI, { onPhone: settings.active_provider === 'local' }).catch(e => { nlog('import', `Nutrition estimate failed: ${e.message}`, null, 'warn'); return null; });
-            if (est) {
-                recipe.nutrition = est.nutrition;
-                recipe.nutrition_estimated = true;
-                if (!recipe.servings && est.servings) recipe.servings = est.servings;
-                result.notes.push('Nutrition estimated by the AI');
-            }
-        }
+        // Nutrition: calculated from the ingredients; the page's own numbers are kept when they agree.
+        if (!recipe.servings) { recipe.servings = 4; result.notes.push('The recipe doesn\'t say how many it serves; 4 is assumed'); }
+        NourishNutrition.settle(recipe);
+        result.notes.push(recipe.nutrition_basis === 'source' ? 'Nutrition from the recipe, checked against USDA data' : 'Nutrition calculated from the ingredients (USDA data)');
         nlog('import', `Found "${recipe.name}" in ${Math.round((Date.now() - started) / 100) / 10} s (${result.how === 'structured' ? 'recipe data on the page' : 'read by the AI'}): ${(recipe.ingredients || []).length} ingredients, ${(recipe.steps || []).length} steps`, result.notes);
         showImportStatus('');
         closeImportSheet();
@@ -2843,7 +3015,7 @@ function openRecipeEditor(recipe, { mode = 'import', notes = [], mealType = 'din
     const lines = (list) => (list || []).join('\n');
     const source = recipe.source_url ? h('a', { class: 'edit-source', href: recipe.source_url, target: '_blank', rel: 'noopener noreferrer' },
         icon('i-link'), `${recipe.source_name || NourishImport.hostOf(recipe.source_url)}${recipe.via_name ? ` · via ${recipe.via_name}` : ''}`) : null;
-    const estimated = !!recipe.nutrition_estimated;
+    const estimated = !!recipe.nutrition_estimated || !!recipe.nutrition_unmatched;
     setChildren($('recipeEditContent'),
         h('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
         h('div', { class: 'sheet-header' },
@@ -2863,10 +3035,10 @@ function openRecipeEditor(recipe, { mode = 'import', notes = [], mealType = 'din
                 h('textarea', { id: 'editIngredients', rows: String(Math.min(14, Math.max(5, (recipe.ingredients || []).length + 1))) }, lines(recipe.ingredients))),
             h('div', { class: 'input-group' }, h('label', { class: 'label', for: 'editSteps', text: 'Steps · one per line' }),
                 h('textarea', { id: 'editSteps', rows: String(Math.min(14, Math.max(5, (recipe.steps || []).length + 2))) }, lines(recipe.steps))),
-            h('div', { class: 'label edit-nutrition-title' }, 'Nutrition per serving', estimated ? h('span', { class: 'chip warn', id: 'editEstimated', text: 'Estimated' }) : null),
+            h('div', { class: 'label edit-nutrition-title' }, 'Nutrition per serving', estimated ? h('span', { class: 'chip warn', id: 'editEstimated', text: 'Approximate' }) : null),
             h('div', { class: 'edit-row four' },
                 num('editKcal', n.calories, 'kcal'), num('editProtein', n.protein_g, 'Protein g'), num('editCarbs', n.carbs_g, 'Carbs g'), num('editFat', n.fat_g, 'Fat g')),
-            estimated ? h('p', { class: 'recipe-note', text: 'The source had no nutrition, so the AI estimated it. Change it if you know better.' }) : null,
+            nutritionNotes(recipe).filter(t => !/^Portion|^Less oil|^Seasoning/.test(t)).map(t => h('p', { class: 'recipe-note', text: t })),
             h('div', { class: 'form-error', id: 'editError', role: 'alert', hidden: true }),
             mode === 'edit'
                 ? h('button', { type: 'button', class: 'btn btn-primary edit-save', onclick: saveEditedCookbookRecipe }, icon('i-check'), 'Save changes')
@@ -2897,7 +3069,8 @@ function editedRecipe() {
         name: val('editName'), servings: numOrNull('editServings'), time_minutes: numOrNull('editTime'),
         ingredients: split('editIngredients'), steps: split('editSteps'),
         nutrition: numOrNull('editKcal') != null ? { calories: numOrNull('editKcal'), protein_g: numOrNull('editProtein') || 0, carbs_g: numOrNull('editCarbs') || 0, fat_g: numOrNull('editFat') || 0 } : null,
-        nutrition_estimated: !!r.nutrition_estimated && !editing.nutritionEdited,
+        // Numbers typed in by hand are kept; otherwise they're worked out again from the ingredients.
+        nutrition_basis: editing.nutritionEdited ? 'source' : undefined,
         source_url: r.source_url, source_name: r.source_name, via_url: r.via_url, via_name: r.via_name,
     };
     if (recipe.name.length < 2) return fail('Give the recipe a name.');

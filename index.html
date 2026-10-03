@@ -187,11 +187,11 @@
             <div class="sheet-body">
                 <div class="input-group">
                     <label class="label" for="inputLikes">Foods you love</label>
-                    <input type="text" id="inputLikes" placeholder="e.g. chicken, pasta, avocado" autocomplete="off" enterkeyhint="next" />
+                    <input type="text" id="inputLikes" placeholder="Optional, e.g. chicken, pasta, Thai food" autocomplete="off" enterkeyhint="next" />
                 </div>
                 <div class="input-group">
                     <label class="label" for="inputHates">Foods you avoid</label>
-                    <input type="text" id="inputHates" placeholder="e.g. mushrooms, shellfish" autocomplete="off" enterkeyhint="done" />
+                    <input type="text" id="inputHates" placeholder="Optional, e.g. mushrooms, shellfish" autocomplete="off" enterkeyhint="done" />
                 </div>
                 <div class="input-group">
                     <div class="label">Goal</div>
@@ -201,16 +201,7 @@
                         <button type="button" class="segment-btn" data-goal="Gain">Gain</button>
                     </div>
                 </div>
-                <div class="input-group">
-                    <div class="label">Recipes from</div>
-                    <div class="source-grid">
-                        <button type="button" class="source-btn" data-source="aiChef"><svg><use href="#i-sparkle"/></svg><span>AI Chef</span></button>
-                        <button type="button" class="source-btn" data-source="web"><svg><use href="#i-globe"/></svg><span>Web search</span></button>
-                        <button type="button" class="source-btn" data-source="themealdb"><svg><use href="#i-book"/></svg><span>TheMealDB</span></button>
-                        <button type="button" class="source-btn" data-source="spoonacular"><svg><use href="#i-utensils"/></svg><span>Spoonacular</span></button>
-                    </div>
-                </div>
-                <p class="sheet-hint">Also uses your profile: calories, diet, allergies, cooking time and more.
+                <p class="sheet-hint">Nourish picks real recipes from trusted cooking sites and sizes them to your calories, diet and allergies. Both boxes are optional.
                     <button type="button" class="link-btn" id="editProfileBtn">Edit profile</button></p>
                 <button type="button" class="btn btn-primary" id="generateBtn">Generate Plan</button>
             </div>
@@ -264,6 +255,13 @@
 
     <script src="json-repair.js"></script>
     <script src="units.js"></script>
+    <script src="nutrition-data.js"></script>
+    <script src="nutrition.js"></script>
+    <script src="prefs.js"></script>
+    <script src="planner.js"></script>
+    <script src="sources.js"></script>
+    <script src="finder.js"></script>
+    <script src="library.js"></script>
     <script src="grocery.js"></script>
     <script src="recipes.js"></script>
     <script src="importer.js"></script>

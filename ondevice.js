@@ -150,6 +150,11 @@ async function localApi(path, { method = 'GET', body } = {}) {
     if (route === '/api/recipes/import') return localImport(body);
     if (route === '/api/web/fetch') return localFetchPage(body);
     if (route === '/api/update/check') return localUpdateCheck(params.prereleases === 'true');
+    // The recipe library folders on this phone (Files app → On My iPhone → Nourish on iPhone).
+    if (route === '/api/library') return nativeCall('library', { op: 'list' }, { timeoutMs: 30000 });
+    if (route === '/api/library/read') return nativeCall('library', { op: 'read', path: body.path }, { timeoutMs: 120000 });
+    if (route === '/api/library/open') return nativeCall('library', { op: 'open' });
+    if (route === '/api/library/add') return nativeCall('library', { op: 'add' }, { timeoutMs: 600000 });
     const err = new Error('That needs Nourish on your PC (Settings → Server & devices).');
     err.status = 501;
     throw err;
@@ -270,6 +275,7 @@ const PLAN_MEALS = ['breakfast', 'lunch', 'dinner'];
 const MEAL_SHARE = { breakfast: 0.25, lunch: 0.35, dinner: 0.4 };   // of the day's calories and protein
 const Grocery = typeof NourishGrocery !== 'undefined' ? NourishGrocery : require('./grocery.js');
 const Recipes = typeof NourishRecipes !== 'undefined' ? NourishRecipes : require('./recipes.js');
+const Planner = typeof NourishPlanner !== 'undefined' ? NourishPlanner : (() => { try { return require('./planner.js'); } catch (e) { return null; } })();
 
 // The ingredient lines in a day that are junk (see grocery.js), as [{ meal, item, reason }].
 function junkRows(day) {
@@ -383,6 +389,7 @@ function recipeRules(servings) {
         `- servings: ${servings}. Ingredient amounts are for all ${servings} serving${servings > 1 ? 's' : ''}. nutrition (calories, protein_g, carbs_g, fat_g) is for ONE serving, and calories must equal protein_g×4 + carbs_g×4 + fat_g×9.\n` +
         `- ingredients: every item specific, with its amount: "8 oz boneless lamb shoulder", "1 medium zucchini", "1 tsp ground cumin", "1/2 tsp salt", "1 cup low-sodium chicken broth". ` +
         `Name the exact cut of meat, which vegetables, each spice, the salt, the oil and any liquid. Never "vegetables", "meat" or "spices". Each ingredient once.\n` +
+        `- flavor: a savory dish has salt with an amount (not "to taste") and at least two real flavors (garlic, ginger, herbs, spices, citrus, vinegar, chili). Keep oil to what the dish needs.\n` +
         `- steps: ${L.minSteps + 1} to ${L.maxSteps} steps in order, from prep (cutting, measuring, preheating) to plating. Each step starts with a verb ("Dice…", "Heat…", "Simmer…") and is one or two full sentences with times and heat. ` +
         `Use every ingredient in the steps. The last step says how to serve it. No descriptions of the dish.\n` +
         `- time_minutes: the total time, prep included.\n- Use ${units}. Give each temperature once (e.g. "400°F"), not in two units.`;
@@ -464,7 +471,8 @@ function mealSystem(servings) {
 }
 function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
     const s = typeof settings !== 'undefined' ? settings : {};
-    const share = MEAL_SHARE[type] || 0.33;
+    const split = Planner && Planner.splitOf(s);   // the person's calorie split (Settings), 25/30/45 by default
+    const share = (split && split[PLAN_MEALS.indexOf(type)]) || MEAL_SHARE[type] || 0.33;
     const kcal = Math.round((Number(s.calorie_target) || 2000) * share / 10) * 10;
     const protein = Math.round((Number(s.protein_target) || 100) * share);
     return `${conversation ? conversation + '\n\n' : ''}${dish ? `Write the full recipe for "${dish}", the ${type}` : `Make the ${type}`} for Day ${d + 1}${typeof dayName === 'function' ? ` (${dayName(d)})` : ''}` +

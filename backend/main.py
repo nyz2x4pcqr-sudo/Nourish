@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 
+import library
 import store
 import updater
 import web_recipes
@@ -44,7 +45,7 @@ SPOONACULAR_URL = os.getenv("SPOONACULAR_URL", "https://api.spoonacular.com").rs
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", Path(__file__).resolve().parent.parent))
 # Only these files are served. Never mount the repo root as a static directory:
 # it would expose backend/.env and .git to anyone on the network.
-FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "styles.css", "font-fraunces.woff2", "font-figtree.woff2",
+FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "styles.css", "font-fraunces.woff2", "font-figtree.woff2",
                   "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"}
 
 @asynccontextmanager
@@ -93,6 +94,10 @@ class WebRecipeRequest(BaseModel):
 
 class ImportRequest(BaseModel):
     url: str
+
+
+class LibraryReadRequest(BaseModel):
+    path: str
 
 
 class FetchRequest(BaseModel):
@@ -403,6 +408,35 @@ async def web_fetch(req: FetchRequest):
         raise HTTPException(status_code=422, detail=str(e))
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Couldn't load that page ({type(e).__name__})")
+
+
+# --- the personal recipe library (folders next to the data file) ------------------------------------
+
+@app.get("/api/library")
+def library_list():
+    return library.list_files()
+
+
+@app.post("/api/library/read")
+def library_read(req: LibraryReadRequest):
+    try:
+        return library.read_file(req.path)
+    except library.LibraryError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Couldn't read that file ({type(e).__name__})")
+
+
+@app.post("/api/library/open")
+def library_open(request: Request):
+    # Only for someone sitting at the PC: a phone can't see the PC's screen.
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost", "testclient"):
+        return {"folder": str(library.root()), "opened": False}
+    try:
+        return dict(library.open_folder(), opened=True)
+    except OSError:
+        return {"folder": str(library.root()), "opened": False}
 
 
 # --- shared data (settings, plan, grocery list, chat, cookbook) --------------------------------------

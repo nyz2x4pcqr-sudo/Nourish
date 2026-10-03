@@ -21,14 +21,14 @@
     const DESSERT = /\b(cake|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
     const NOT_DESSERT = /\b(chia pudding|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry)\b/i;
     const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib)\b/i;
-    const NOT_A_MEAL = /\b(sauce|dressing|dip|marinade|seasoning|spice (mix|blend)|stock|broth|syrup|jam|butter|vinaigrette|gravy|salsa|pesto|chutney|pickle[sd]?|drink|cocktail|mocktail|lemonade|tea|coffee|latte|juice|bread|rolls|buns|crackers|croutons)$/i;
+    const NOT_A_MEAL = /\b(sauce|dressing|dip|marinade|seasoning|spice (mix|blend)|stock|broth|syrup|jam|butter|vinaigrette|gravy|salsa|pesto|chutney|pickle[sd]?|drink|cocktail|mocktail|lemonade|tea|coffee|latte|juice|bread|loaf|rolls|buns|crackers|croutons|bars|bites|energy balls|protein balls|trail mix|popcorn|chips)$/i;
     const SIDE = /\b(side|sides|side dish|appetizers?|starters?|snacks?)\b/i;
 
     function textOf(r) { return `${r.name || ''} ${(r.category || []).join ? (r.category || []).join(' ') : r.category || ''}`; }
 
     // Which meals a recipe can be: { breakfast, lunch, dinner, why }.
     function mealFit(r) {
-        const name = String(r.name || '');
+        const name = String(r.name || '').replace(/\([^)]*\)/g, ' ').replace(/[!?.]+/g, ' ').replace(/\s+/g, ' ').trim();
         const cat = String(Array.isArray(r.category) ? r.category.join(' ') : r.category || '').toLowerCase();
         const ings = (r.ingredients || []).join(' ').toLowerCase();
         const sweetHeavy = /\b(sugar|honey|maple|chocolate|syrup)\b/.test(ings) && !/\b(salt|garlic|onion|soy|pepper)\b/.test(ings);
@@ -182,6 +182,17 @@
         if (before - after > 0) r.trimmed = true;
         return before - after;
     }
+    // Cuts oil and sugar, then lowers the recipe's numbers by what the cut saved (worked out from the
+    // ingredients, so the source's own numbers stay the base).
+    function trimAndRecount(r, kcal) {
+        const before = N.calculate(r.ingredients, r.servings).nutrition;
+        trimRich(r, kcal);
+        if (!r.trimmed) return;
+        const after = N.calculate(r.ingredients, r.servings).nutrition;
+        const n = r.nutrition;
+        r.nutrition = { calories: Math.max(1, n.calories - (before.calories - after.calories)), protein_g: Math.max(0, n.protein_g - (before.protein_g - after.protein_g)),
+            carbs_g: Math.max(0, n.carbs_g - (before.carbs_g - after.carbs_g)), fat_g: Math.max(0, n.fat_g - (before.fat_g - after.fat_g)) };
+    }
     // The recipe made for `people`, each portion `factor` times one of the recipe's servings.
     function scaleRecipe(r, factor, people) {
         const out = JSON.parse(JSON.stringify(r));
@@ -191,10 +202,12 @@
         out.servings = people;
         if (Math.abs(factor - 1) > 0.05 || from !== people) out.scaled = { from_servings: from, portion: Math.round(factor * 100) / 100 };
         delete out._lines; delete out._fit;
-        const c = N.calculate(out.ingredients, people);
-        out.nutrition = c.nutrition;
-        out.nutrition_basis = 'calculated';
-        out.nutrition_unmatched = c.unmatched.length ? c.unmatched.slice(0, 12) : undefined;
+        // Per person = one serving of the recipe (as settled) × the portion. Worked out from the
+        // settled numbers, not the rounded amounts, so an amount that can't be scaled ("a handful")
+        // never leaves the calories unchanged.
+        const n = r.nutrition || N.calculate(r.ingredients, from).nutrition;
+        const round = v => Math.round((Number(v) || 0) * factor);
+        out.nutrition = { calories: round(n.calories), protein_g: round(n.protein_g), carbs_g: round(n.carbs_g), fat_g: round(n.fat_g) };
         return out;
     }
 
@@ -280,10 +293,7 @@
                 if (!chosen) { missing.push({ day: d, meal: m, kcal: Math.round(targets.kcal * split[i]) }); return; }
                 const r = JSON.parse(JSON.stringify(chosen.r));
                 const kcal = targets.kcal * split[i];
-                if (kcal / r.nutrition.calories < 0.85) {
-                    trimRich(r, r.nutrition.calories - kcal / 0.85);
-                    r.nutrition = N.calculate(r.ingredients, r.servings).nutrition;
-                }
+                if (kcal / r.nutrition.calories < 0.85) trimAndRecount(r, r.nutrition.calories - kcal / 0.85);
                 day[m] = scaleRecipe(r, Math.max(0.5, Math.min(2, kcal / r.nutrition.calories)), people);
                 used.add(normName(r.name));
                 const c = cuisineOf(r);
@@ -297,17 +307,40 @@
     }
     // Rounding amounts moves calories a little: nudge portions until the day is within 5%.
     function fineTune(day, kcal, people) {
-        for (let pass = 0; pass < 3; pass++) {
+        for (let pass = 0; pass < 4; pass++) {
             const t = dayTotals(day).kcal;
-            const meals = MEALS.filter(m => day[m]);
+            const meals = MEALS.filter(m => day[m] && day[m].nutrition && day[m].nutrition.calories > 0);
             if (!t || meals.length < 3 || Math.abs(t - kcal) / kcal <= 0.035) return;
-            const big = meals.sort((a, b) => day[b].nutrition.calories - day[a].nutrition.calories)[0];
+            // The biggest meal that can still move in the needed direction (portions stay 0.5×–2×).
+            const portion = r => (r.scaled ? r.scaled.portion : 1);
+            const up = kcal > t;
+            const big = meals.filter(m => (up ? portion(day[m]) < 1.95 : portion(day[m]) > 0.55))
+                .sort((a, b) => day[b].nutrition.calories - day[a].nutrition.calories)[0];
+            if (!big) return;
             const r = day[big];
-            const want = r.nutrition.calories + (kcal - t);
-            const f = want / r.nutrition.calories;
-            const base = Object.assign({}, r, { servings: people });
-            day[big] = Object.assign(scaleRecipe(base, f, people), { scaled: r.scaled ? Object.assign({}, r.scaled, { portion: Math.round(r.scaled.portion * f * 100) / 100 }) : { from_servings: people, portion: Math.round(f * 100) / 100 } });
+            const f = Math.max(0.5 / portion(r), Math.min(2 / portion(r), (r.nutrition.calories + (kcal - t)) / r.nutrition.calories));
+            const base = Object.assign({}, r, { servings: people });   // amounts already for `people`; numbers per person
+            day[big] = Object.assign(scaleRecipe(base, f, people), { scaled: r.scaled ? Object.assign({}, r.scaled, { portion: Math.round(portion(r) * f * 100) / 100 }) : { from_servings: people, portion: Math.round(f * 100) / 100 } });
         }
+    }
+    // Sizes the portions of a day that was made another way (by the AI, or edited) so it lands on the
+    // calorie target with the chosen split: oil and sugar are cut before portions, never seasoning.
+    function fitDay(day, settings, people) {
+        const targets = targetsOf(settings || {});
+        const split = splitOf(settings);
+        const out = Object.assign({}, day);
+        MEALS.forEach((m, i) => {
+            const r = out[m];
+            if (!r || !r.nutrition || !(r.nutrition.calories > 0) || !(r.ingredients || []).length) return;
+            const kcal = targets.kcal * split[i];
+            let copy = JSON.parse(JSON.stringify(r));
+            if (kcal / copy.nutrition.calories < 0.85) trimAndRecount(copy, copy.nutrition.calories - kcal / 0.85);
+            const f = kcal / copy.nutrition.calories;
+            if (Math.abs(f - 1) <= 0.05 && !copy.trimmed) return;
+            out[m] = scaleRecipe(copy, Math.max(0.5, Math.min(2, f)), people || Number(copy.servings) || 1);
+        });
+        fineTune(out, targets.kcal, people || 1);
+        return out;
     }
     function dayTotals(day) {
         const t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
@@ -327,6 +360,7 @@
     const PLAIN_WORDS = new Set(('with and over under topped stuffed glazed loaded sticky crunchy cheesy marinated pulled charred blackened sweet savory savoury summer winter autumn ' +
         'spring classic style veggie veggies vegetable vegetables breakfast lunch dinner berry berries style pot pan one easy quick healthy simple light lighter best perfect ' +
         'family weeknight minute minutes hour slow cooker instant pressure air fryer oven stovetop grill grilled sauteed steamed smashed whipped mashed fried stir style warm cold ' +
+        'grandma grandmas granny nana nanas nonna nonnas mama mamas mom moms mum mums papa dad dads auntie aunt uncle family famous ' +
         'little mini big bites bake bakes plate platter board boats cups rolls sliders burgers patties meatballs nuggets tenders strips wings thighs breast fillets').split(/\s+/));
     // Fixes obvious misspellings in an AI-written dish name ("Chiken Tikka Masla" → "Chicken Tikka Masala").
     function fixName(name) {
@@ -345,7 +379,7 @@
         }).join('');
     }
 
-    const api = { mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
+    const api = { fitDay, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

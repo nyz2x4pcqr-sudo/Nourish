@@ -85,7 +85,7 @@ class ApiTest(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("<title>", r.text)
-        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js"):
+        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 200, f)
         for f in (".env", "README.md", "main.py", "nourish.log", "..%2Fbackend%2F.env"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 404, f)
@@ -507,6 +507,32 @@ class StateTest(unittest.TestCase):
             main.httpx.AsyncClient = _RealAsyncClient
         self.assertEqual(r.status_code, 200)
         self.assertEqual(up.requests[-1].headers["x-api-key"], SECRET)
+
+
+class LibraryTests(unittest.TestCase):
+    """The recipe library folders next to the data file."""
+
+    def setUp(self):
+        self.client = TestClient(main.app)
+
+    def test_folders_are_created_listed_and_read(self):
+        r = self.client.get("/api/library")
+        self.assertEqual(r.status_code, 200)
+        folder = Path(r.json()["folder"])
+        self.assertTrue((folder / "Recipe Books").is_dir())
+        self.assertTrue((folder / "My Recipes").is_dir())
+        (folder / "My Recipes" / "soup.md").write_text("# Soup\n## Ingredients\n- 1 onion\n", encoding="utf-8")
+        (folder / "My Recipes" / "notes.docx").write_text("x", encoding="utf-8")
+        files = self.client.get("/api/library").json()["files"]
+        self.assertEqual([f["path"] for f in files], ["My Recipes/soup.md"])
+        got = self.client.post("/api/library/read", json={"path": "My Recipes/soup.md"}).json()
+        self.assertEqual(got["kind"], "text")
+        self.assertIn("1 onion", got["text"])
+
+    def test_nothing_outside_the_library_can_be_read(self):
+        self.client.get("/api/library")
+        for bad in ["../nourish-data.json", "/etc/passwd", "My Recipes/../../nourish-data.json"]:
+            self.assertEqual(self.client.post("/api/library/read", json={"path": bad}).status_code, 404, bad)
 
 
 if __name__ == "__main__":

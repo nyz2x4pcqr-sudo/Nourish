@@ -61,7 +61,7 @@
         if (!r || !r.name) return null;
         const list = v => (Array.isArray(v) ? v : []).map(x => String(x || '').trim()).filter(Boolean);
         const out = {
-            name: PL.fixName(decode(r.name)).slice(0, 120),
+            name: decode(r.name).slice(0, 120),   // a real recipe's own name; only AI-written names are spell-checked
             servings: Number(r.servings) >= 1 && Number(r.servings) <= 24 ? Math.round(Number(r.servings)) : 4,
             ingredients: list(r.ingredients).slice(0, 40),
             steps: list(r.steps).slice(0, 30),
@@ -72,6 +72,7 @@
             source_name: r.source_name || (source && source.name) || undefined,
             source_id: (source && source.id) || r.source_id || undefined,
             healthy: !!(source && source.healthy) || undefined,
+            library_path: r.library_path || undefined,
         };
         if (out.ingredients.length < 3 || !out.steps.length) return null;
         return out;
@@ -248,7 +249,9 @@
             count(ctx, (source && source.id) || 'other', 'recipes');
             return true;
         };
-        const have = meal => found.filter(r => r._fit[meal]).length;
+        // Tested recipes from the sites (and the person's own) are what we want most; TheMealDB's
+        // big batch doesn't count towards "enough", so the sites are still read.
+        const have = meal => found.filter(r => r._fit[meal] && r.source_id !== 'themealdb').length;
 
         // 1. The person's own recipe library and recipes already read on earlier plans (instant).
         if (o.library && enabled('library')) {
@@ -275,7 +278,7 @@
         const spoonKey = o.settings && o.settings.spoonacular_api_key;
         if (o.api && enabled('spoonacular') && (spoonKey || o.spoonacularKeySaved)) {
             ['breakfast', 'lunch', 'dinner'].forEach(meal => apiJobs.push((async () => {
-                const data = await o.api('/api/recipes/spoonacular', { query: queriesFor(meal, o)[0], number: 10, exclude: o.avoid || '', intolerances: (o.settings && o.settings.allergies) || undefined });
+                const data = await o.api('/api/recipes/spoonacular', { query: queriesFor(meal, o)[0], number: 10, exclude: o.avoid || '', diet: o.spoonacularDiet, intolerances: (o.settings && o.settings.allergies) || undefined });
                 ((data && data.results) || []).forEach(r => add(fromSpoonacular(r), S.byId('spoonacular')));
             })().catch(e => { siteFailed(ctx, 'spoonacular', e.message); })));
         }
@@ -377,6 +380,7 @@
             const i = priority.indexOf(r.source_id);
             if (i >= 0) p -= (priority.length - i) * 0.05;
             if (r.nutrition_basis === 'source') p -= 0.1;
+            if (r.source_id === 'themealdb') p += 0.3;   // no nutrition of its own, and less tested
             return p;
         };
         const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [] });

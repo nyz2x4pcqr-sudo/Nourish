@@ -1270,3 +1270,10 @@ a.settings-button { display: flex; text-decoration: none; }
 }
 [data-working="local"] .tab-bar, [data-working="local"] .job-bar { background: var(--surface-raised); }
 [data-working="local"] .empty-art, [data-working="local"] .cooking-fresh-item { animation: none; }
+
+/* "What is this?" notes under settings groups */
+.settings-help { display: inline; }
+.settings-help summary { display: inline; cursor: pointer; color: var(--accent); font-weight: 600; list-style: none; }
+.settings-help summary::-webkit-details-marker { display: none; }
+.settings-help[open] summary { display: block; margin-bottom: var(--s-1); }
+.settings-help[open] > span { display: block; color: var(--text-2); }
