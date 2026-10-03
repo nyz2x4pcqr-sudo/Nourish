@@ -44,6 +44,13 @@
         return String(s || '').replace(/<[^>]+>/g, '').replace(/&#(\d+);/g, (m, n) => String.fromCharCode(+n)).replace(/&#x([0-9a-f]+);/gi, (m, n) => String.fromCharCode(parseInt(n, 16)))
             .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;|&apos;/g, "'").replace(/&nbsp;/g, ' ').trim();
     }
+    // The dish's words from the last part of an address: /food/recipes/scrambled_eggs_31700 → "scrambled eggs".
+    function dishWords(url) {
+        try {
+            const last = decodeURIComponent(new URL(url).pathname).replace(/\/+$/, '').split('/').pop();
+            return last.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\b\d+\b/g, ' ').replace(/\brecipe\b/g, ' ').replace(/\s+/g, ' ').trim();
+        } catch (e) { return ''; }
+    }
     function slugWords(url) { try { return decodeURIComponent(new URL(url).pathname).toLowerCase().replace(/[^a-z]+/g, ' ').trim(); } catch (e) { return ''; } }
     function shuffle(list, seed) {
         const a = list.slice();
@@ -169,6 +176,7 @@
             listings: {},   // filled from the cache in findRecipes
             memo: {},
             skip: new Set(),   // sites that failed during this search: not asked again this time
+            siteErrors: {},   // errors per site in this search (a few are allowed before it is left alone)
             log: o.log || (() => {}),
             trace: o.trace || (() => {}),
             exclude: P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' }),
@@ -298,7 +306,7 @@
             if (seen.has(url)) continue;
             seen.add(url);
             const title = decode(m[2]).replace(/\s+/g, ' ').trim().slice(0, 120);
-            out.push({ url, title: title && title.length > 3 ? title : slugWords(url) });
+            out.push({ url, title: title && title.length > 3 ? title : dishWords(url) });
         }
         return out;
     }
@@ -378,12 +386,29 @@
     async function searchCategory(ctx, site, q, meal, page = 1) {
         const list = ((site.categories || {})[meal] || []).concat((site.categories || {}).any || []);
         if (!list.length) return [];
-        const pick = list[((ctx.seed || 0) + page - 1) % list.length];
-        const url = (/^https?:/.test(pick) ? pick : `https://${site.domain}${pick}`).replace('{page}', String(page));
-        const res = await getListing(ctx, url, true);
-        const links = linksFromHtml(res.body, site, res.url || url);
-        ctx.trace(`${site.id}: ${meal} page ${url}: ${links.length}`);
-        return matching(links, q);
+        // A page that isn't there (404) is remembered for a month and the next one is tried: one
+        // moved page doesn't stop the site.
+        const start = ((ctx.seed || 0) + page - 1) % list.length;
+        let lastError = null;
+        for (let k = 0; k < list.length; k++) {
+            const pick = list[(start + k) % list.length];
+            const url = (/^https?:/.test(pick) ? pick : `https://${site.domain}${pick}`).replace('{page}', String(page));
+            const dead = ctx.categories[`dead|${url}`];
+            if (dead && dead.at > ctx.now() - 30 * DAY) continue;
+            let res;
+            try { res = await getListing(ctx, url, true); } catch (e) {
+                if (e.blocked || !/HTTP (404|410)/.test(e.message)) throw e;
+                ctx.categories[`dead|${url}`] = { at: ctx.now(), id: 0 };
+                ctx.trace(`${site.id}: ${meal} page ${url}: not there (${e.message}), trying another`);
+                lastError = e;
+                continue;
+            }
+            const links = linksFromHtml(res.body, site, res.url || url);
+            ctx.trace(`${site.id}: ${meal} page ${url}: ${links.length}`);
+            return matching(links, q);
+        }
+        if (lastError) throw lastError;
+        return [];
     }
     // The site's public feed (RSS or Atom), read at most once a day.
     async function searchFeed(ctx, site, q) {
@@ -425,6 +450,7 @@
             // Recipe parts first, newest-looking last parts first (they're the recently added recipes).
             maps.sort((a, b) => (/recipe/i.test(b) ? 1 : 0) - (/recipe/i.test(a) ? 1 : 0));
             st = { at: ctx.now(), maps: maps.slice(0, 60), next: 0, origin: new URL(res.url || site.sitemap).origin, paths: [...new Set((st.paths || []).concat(paths(found)))] };
+            if (!maps.length && !st.paths.length) ctx.trace(`${site.id}: sitemap has no recipe addresses; it lists e.g. ${found.slice(0, 3).join(' ')}`);
             changed = true;
         }
         if (st.next < st.maps.length && (st.paths || []).length < 4000) {
@@ -445,7 +471,8 @@
         const words = String(q).toLowerCase().split(/\s+/).filter(Boolean);
         let hits = urls.filter(u => words.every(w => slugWords(u).indexOf(w.replace(/s$/, '')) >= 0));
         if (!hits.length) hits = urls.filter(u => slugWords(u).indexOf(mainWord(q).replace(/s$/, '')) >= 0);
-        return hits.slice((page - 1) * 10, page * 10).map(url => ({ url, title: slugWords(url) }));
+        ctx.trace(`${site.id}: sitemap "${q}" (${meal || 'any'}): ${hits.length}`);
+        return hits.slice((page - 1) * 10, page * 10).map(url => ({ url, title: dishWords(url) }));
     }
 
     // Tries the site's ways of finding recipes in order until one finds something.
@@ -502,7 +529,7 @@
         const host = domainOf(link.url);
         if (site.domain && !(host === site.domain || host.endsWith('.' + site.domain))) return false;
         if (ROUNDUP.test(link.url) || NOT_RECIPE_TITLE.test(link.title || '')) return false;
-        const t = link.title || slugWords(link.url);
+        const t = link.title || dishWords(link.url);
         if (ctx.exclude({ name: t, ingredients: [] })) return false;
         // Drinks, desserts, sauces and condiments are turned away before their pages are read.
         if (notAMeal({ name: t })) return false;
@@ -720,8 +747,9 @@
                             searchCache[key] = { at: ctx.now(), links: list };
                         } catch (e) {
                             ctx.trace(`${t.site.id}: "${t.q}" failed: ${e.message}${e.blocked ? ' (the site refuses the app: left alone for a while)' : ''}`);
-                            siteFailed(ctx, t.site.id, e.message, e.blocked);
-                            ctx.skip.add(t.site.id);
+                            // A refusal stops the site; other errors only after a few in one run.
+                            ctx.siteErrors[t.site.id] = (ctx.siteErrors[t.site.id] || 0) + 1;
+                            if (e.blocked || ctx.siteErrors[t.site.id] >= 3) { siteFailed(ctx, t.site.id, e.message, e.blocked); ctx.skip.add(t.site.id); }
                             break;
                         }
                     }

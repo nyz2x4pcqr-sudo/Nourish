@@ -77,3 +77,26 @@ test('an empty title search falls back: the whole text, then the main word', asy
         assert.ok(res.pools.breakfast.some(x => x.name === 'Egg Breakfast Tacos'));
     } finally { r.done(); }
 });
+
+test('a category page that has moved (404) doesn\'t stop the site: the next page is used and the dead one remembered', async () => {
+    const s = site({ id: 'moved', find: ['category'], categories: { dinner: ['/recipes/gone/', '/recipes/dinner/'], lunch: ['/recipes/also-gone/'] }, recipePath: '^/recipe/' });
+    const r = run(s, [[/\/recipes\/dinner\//, '<a href="/recipe/lemon-chicken-skillet/">Lemon Chicken Skillet</a><a href="/recipe/garlic-beef-stir-fry/">Garlic Beef Stir Fry</a>'],
+        [/\/recipe\/lemon/, recipePage('Lemon Chicken Skillet')], [/\/recipe\/garlic/, recipePage('Garlic Beef Stir Fry')]]);
+    try {
+        const res = await r.go();
+        assert.ok(res.pools.dinner.some(x => x.name === 'Lemon Chicken Skillet'), JSON.stringify(res.stats));
+        assert.ok(!res.stats.failed.includes('moved'));
+        // The missing page was asked for once, not on every search.
+        assert.equal(r.calls.filter(u => /\/recipes\/gone\//.test(u)).length, 1);
+    } finally { r.done(); }
+});
+
+test('sitemap recipes are named by their dish, not the whole address ("food recipes …" is not a list page)', async () => {
+    const s = site({ id: 'bbcish', find: ['sitemap'], sitemap: 'https://example-recipes.com/food/sitemap.xml', recipePath: '^/food/recipes/[a-z0-9_]+$' });
+    const urls = ['chicken_and_rice_bowl_31700', 'lemon_chicken_traybake_12'].map(n => `<url><loc>https://example-recipes.com/food/recipes/${n}</loc></url>`).join('');
+    const r = run(s, [[/sitemap\.xml/, `<urlset>${urls}</urlset>`], [/chicken_and_rice/, recipePage('Chicken and Rice Bowl')], [/lemon_chicken/, recipePage('Lemon Chicken Traybake')]]);
+    try {
+        const res = await r.go();
+        assert.ok(res.pools.dinner.some(x => x.name === 'Lemon Chicken Traybake' || x.name === 'Chicken and Rice Bowl'), JSON.stringify(res.stats));
+    } finally { r.done(); }
+});

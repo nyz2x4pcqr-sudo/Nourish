@@ -36,7 +36,7 @@ const RECIPES = [
     R('Mushroom Barley Soup', ['1 cup barley', '8 oz mushrooms', '1 carrot', '1 onion', '6 cups vegetable broth', '1 tsp thyme', '1 tsp salt']),
 ];
 // Five of the sites in use (sources.js); wellplated plays the one that refuses.
-const SITES = ['skinnytaste', 'thehealthymaven', 'spendwithpennies', 'wellplated', 'recipetineats'];
+const SITES = ['skinnytaste', 'thehealthymaven', 'cafedelites', 'wellplated', 'recipetineats'];
 const slug = s => s.toLowerCase().replace(/[^a-z]+/g, '-');
 const PAGES = {};
 // Real recipe pages say what meal they are (recipeCategory); every recipe is on two sites (dedupe).
