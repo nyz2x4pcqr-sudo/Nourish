@@ -219,7 +219,15 @@ v = json.loads(r["value"])
 print("\n".join(v["log"]))
 assert len(v["days"]) == 7, ("days", len(v["days"]))
 saved = json.load(open("saved-days.json"))
-assert [d["breakfast"]["name"] for d in v["days"][:len(saved)]] == [d["breakfast"]["name"] for d in saved], "saved days changed"
+# Saved days are kept, except a meal swapped because it repeated an earlier one (no repeats, since 0.1.9;
+# the tiny test model often writes the same dish again).
+swapped = [l for l in v["log"] if "is already in the plan; replaced by" in l]
+for d_new, d_old in zip(v["days"], saved):
+    for t in ("breakfast", "lunch", "dinner"):
+        if d_new[t]["name"] != d_old[t]["name"]:
+            assert any(d_old[t]["name"] in l for l in swapped), ("saved day changed without a repeat", d_old[t]["name"], d_new[t]["name"])
+names = [d[t]["name"].strip().lower() for d in v["days"] for t in ("breakfast", "lunch", "dinner")]
+assert len(names) == len(set(names)), ("a meal is repeated in the finished plan", sorted(n for n in set(names) if names.count(n) > 1))
 assert any("Found a plan stopped at day" in l for l in v["log"]), "no resume in the log"
 junk = ("ingredients", "steps", "name", "nutrition", "description")
 for i, day in enumerate(v["days"]):
