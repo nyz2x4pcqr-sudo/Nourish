@@ -127,6 +127,7 @@ const SETTINGS_DEFAULTS = {
 });
 SETTINGS_DEFAULTS.sched_weekend = 'off';
 SETTINGS_DEFAULTS.sched_asked = '';   // 'yes' once the quick questions were answered or skipped
+SETTINGS_DEFAULTS.allow_leftovers = 'off';   // 'on': a dinner can come back as the next day's lunch
 const settings = Object.assign({}, SETTINGS_DEFAULTS);
 let prefs = { goal: 'Maintain', source: 'aiChef', likes: '', hates: '' };
 let daysData = [];
@@ -1512,6 +1513,7 @@ const SETTINGS_RENDERERS = {
                 help('How long you have to make and eat each meal. Plans only use recipes that fit.',
                     'The time includes about 5 minutes to eat (10 at dinner), so "20 min" means recipes ready in 15 minutes. "I don\'t cook this meal" gives grab-and-go or no-cook ideas only. Without changes, breakfast is quick (15 min), lunch is light (25 min) and dinner can take as long as it takes.')),
             ...settingsGroup('', [settingsToggle('sched_weekend', 'Different times at the weekend', { onchange: () => renderSettings() })]),
+            ...settingsGroup('', [settingsToggle('allow_leftovers', 'Allow leftovers', { hint: 'Cook once, eat twice: a dinner can come back as the next day\'s lunch. Otherwise no meal is ever repeated.' })]),
             ...(weekend ? settingsGroup('Saturday and Sunday', meals.map(m => row(m, 'sched_we_', 'As weekdays'))) : []),
             h('details', { class: 'settings-advanced' + (days.some(d => meals.some(m => settings[`sched_d${d}_${m}`])) ? ' has-values' : '') , open: days.some(d => meals.some(m => settings[`sched_d${d}_${m}`])) },
                 h('summary', { class: 'settings-group-label', text: 'Advanced: day by day' }),
@@ -3151,12 +3153,25 @@ function normalizePlan(data, strict = true) {
 function applyPlan(raw, { navigate = true } = {}) {
     reportCaps = true;
     try { daysData = normalizePlan(raw); } finally { reportCaps = false; }
+    const planNames = () => daysData.flatMap(d => MEAL_TYPES.map(x => d && d[x] && d[x].name).filter(Boolean));
     // Breakfast is breakfast, for plans the AI wrote in one go too: a meal that breaks its slot's
     // rules (or the person's schedule) is replaced by a simple built-in one that fits.
+    // Never the same meal twice in a plan (a leftover lunch, when allowed, is the exception).
+    const seen = NourishPlanner.dishList();
+    daysData.forEach((d, i) => MEAL_TYPES.forEach(t => {
+        const meal = d && d[t];
+        if (!meal || meal.leftover) return;
+        if (seen.has(meal.name)) {
+            const other = builtinFor(t, i, planNames());
+            nlog('plan', `${dayName(i)} ${t}: "${meal.name}" is already in the plan${other ? `; replaced by "${other.name}"` : ''}`, null, 'warn');
+            if (other) d[t] = normalizeMeal(other);
+        }
+        seen.add(d[t].name);
+    }));
     daysData.forEach((d, i) => MEAL_TYPES.forEach(t => {
         const misfit = d && d[t] ? slotCheck(d[t], t, i) : '';
         if (!misfit) return;
-        const quick = quickMealFor(t, i, MEAL_TYPES.map(x => d[x] && d[x].name).filter(Boolean));
+        const quick = builtinFor(t, i, planNames());
         nlog('plan', `${dayName(i)} ${t}: "${d[t].name}" ${misfit}${quick ? `; replaced by "${quick.name}"` : ''}`, null, 'warn');
         if (quick) d[t] = normalizeMeal(quick);
     }));
@@ -3169,6 +3184,7 @@ function applyPlan(raw, { navigate = true } = {}) {
             if (d.snacks) d.snacks = d.snacks.map(normalizeMeal).filter(Boolean);
         });
     }
+    rememberPlan(planNames());
     selectedDay = todayIndex();
     grocery.checked = [];
     changed('plan');
@@ -3227,6 +3243,38 @@ function tasteScorer() {
     return r => NourishTaste.score(prof, r, { explore: true, seed });
 }
 // Recipes they loved or saved, offered again as often as they like favourites back.
+// A built-in recipe for a slot that fits its rules and isn't one of `taken` (the plan's dishes),
+// closest to the slot's share of the day; the quick meals when the built-in set has nothing.
+function builtinFor(type, d, taken) {
+    const used = NourishPlanner.dishList(taken || []);
+    const kcal = (Number(settings.calorie_target) || 2000) * (NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(type)] || 0.33);
+    const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
+    const list = typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(type) : [];
+    const ok = list.filter(r => !used.has(r.name) && !exclude(r) && !slotCheck(r, type, d))
+        .sort((a, b) => Math.abs(Math.log(kcal / a.nutrition.calories)) - Math.abs(Math.log(kcal / b.nutrition.calories)));
+    const pick = ok.length ? ok[Math.floor(Math.random() * Math.min(5, ok.length))] : null;
+    return pick ? JSON.parse(JSON.stringify(pick)) : quickMealFor(type, d, taken);
+}
+
+// === NO REPEATS ===
+// Every plan's dishes are remembered for 14 days, so the next plans bring new ones (favourites
+// excepted: recipes saved to the Cookbook or rated "loved it" can come back).
+const PLAN_HISTORY_KEY = 'nourish_plan_history';
+const PLAN_MEMORY_DAYS = 14;
+function rememberPlan(names) {
+    const since = Date.now() - PLAN_MEMORY_DAYS * 864e5;
+    const list = (loadJSON(PLAN_HISTORY_KEY, []) || []).filter(e => e && e.at > since);
+    list.push({ at: Date.now(), names: names.slice(0, 40) });
+    store(PLAN_HISTORY_KEY, list.slice(-20));
+}
+function recentPlanDishes() {
+    const since = Date.now() - PLAN_MEMORY_DAYS * 864e5;
+    const favs = NourishPlanner.dishList(cookbook.recipes.map(e => e.recipe && e.recipe.name).filter(Boolean)
+        .concat(taste.events.filter(e => e.type === 'rate' && (e.rating === 'up' || (e.tags || []).includes('loved'))).map(e => e.name)));
+    const names = (loadJSON(PLAN_HISTORY_KEY, []) || []).filter(e => e && e.at > since).flatMap(e => e.names || []);
+    return [...new Set(names)].filter(n => !favs.has(n));
+}
+
 function favoriteRecipes() {
     const prof = tasteProfile();
     if (!prof.on || prof.repeats === 'rarely') return null;
@@ -3456,6 +3504,7 @@ function finderOptions(likes, hates) {
         weekday: d => (dayBase() + d) % 7,
         taste: tasteScorer(),
         favorites: favoriteRecipes(),
+        already: recentPlanDishes(),
         cache: { get: k => loadJSON(k, null), set: (k, v) => store(k, v) },
         log: m => nlog('plan', m),
     };
@@ -3494,17 +3543,36 @@ async function runSmartPlan(likes, hates) {
     }
 }
 
-// The meals no source matched: written by the AI when one is set up; otherwise the closest recipe
-// found is used again on another day (better than an empty slot), and the person is told.
+// The meals no source matched. Never a repeat: first any recipe found that isn't in the plan yet
+// (or in recent plans), then the built-in recipes, then the AI as the last resort, then a recipe
+// from an older plan. A slot stays empty before a meal is used twice.
 async function fillMissingMeals(plan) {
     const onPhone = settings.active_provider === 'local';
     const canWrite = aiReady() && !(onPhone && !settings.local_model);
-    let reused = 0;
+    const inPlan = () => NourishPlanner.dishList(plan.days.flatMap(d => MEAL_TYPES.map(t => d[t] && !d[t].leftover && d[t].name).filter(Boolean)));
+    const recent = NourishPlanner.dishList(recentPlanDishes());
+    const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
+    // The closest fit on calories from a list, skipping what's in the plan and what doesn't fit the slot.
+    const closest = (list, slot, skip) => {
+        const used = inPlan();
+        return list.filter(r => r && !used.has(r.name) && !(skip && skip.has(r.name)) && !exclude(r) && !slotCheck(r, slot.meal, slot.day))
+            .sort((a, b) => Math.abs(Math.log(slot.kcal / a.nutrition.calories)) - Math.abs(Math.log(slot.kcal / b.nutrition.calories)))[0] || null;
+    };
+    let empty = 0;
     for (const slot of plan.missing) {
         if (localPlanCancelled) break;
         const day = plan.days[slot.day];
         let meal = null;
-        if (canWrite) {
+        let how = '';
+        const pool = plan.pools[slot.meal] || [];
+        // 1. A recipe that was found (web, your files, the built-in set) but not picked yet.
+        meal = closest(pool, slot, recent);
+        if (meal) how = 'a found recipe not used yet';
+        // 2. The built-in recipes (all of them, whatever the pool held).
+        if (!meal && typeof NourishBuiltins !== 'undefined') { meal = closest(NourishBuiltins.forMeal(slot.meal), slot, recent); if (meal) how = 'a built-in recipe'; }
+        if (meal) meal = JSON.parse(JSON.stringify(meal));
+        // 3. The AI, as the last resort.
+        if (!meal && canWrite) {
             const others = plan.days.flatMap(d => MEAL_TYPES.map(t => d[t] && d[t].name).filter(Boolean));
             const sameDay = MEAL_TYPES.map(t => day[t] && day[t].name).filter(Boolean);
             showJobBar('busy', `Writing ${dayName(slot.day)} ${slot.meal} (no recipe matched)…`);
@@ -3518,30 +3586,35 @@ async function fillMissingMeals(plan) {
                     earlier: others, id: `fill-${slot.day}-${slot.meal}`, label: `${dayName(slot.day)} ${slot.meal}`, limits: slotLimitsFor(slot.meal, slot.day) }, run, { isCancelled: () => localPlanCancelled });
                 if (r && r.meal) {
                     meal = normalizeMeal(r.meal);
-                    const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
                     if (meal && exclude(meal)) { nlog('plan', `The AI's ${slot.meal} "${meal.name}" has ${exclude(meal)}, which is avoided; not used`, null, 'warn'); meal = null; }
                     if (meal && !NourishPlanner.flavorCheck(meal).ok) { NourishPlanner.reseason(meal); NourishNutrition.settle(meal); }
-                    const misfit = slotCheck(meal, slot.meal, slot.day);
+                    const misfit = meal ? slotCheck(meal, slot.meal, slot.day) : '';
                     if (misfit) { nlog('plan', `The AI's ${slot.meal} "${meal.name}" ${misfit}; not used`, null, 'warn'); meal = null; }
+                    if (meal && inPlan().has(meal.name)) { nlog('plan', `The AI's ${slot.meal} "${meal.name}" is already in the plan; not used`, null, 'warn'); meal = null; }
+                    if (meal) how = 'written by the AI';
                 }
             } catch (e) {
                 nlog('plan', `The AI couldn't write ${dayName(slot.day)} ${slot.meal}: ${e.message}`, null, 'warn');
             }
         }
+        // 4. A dish from a plan in the last two weeks (still never one already in this plan).
         if (!meal) {
-            // The best recipe for this slot from the whole pool, even if it's already in the week.
-            const pool = (plan.pools[slot.meal] || []).filter(r => !MEAL_TYPES.some(t => day[t] && NourishPlanner.normName(day[t].name) === NourishPlanner.normName(r.name)) && !slotCheck(r, slot.meal, slot.day));
-            const best = pool.sort((a, b) => Math.abs(a.nutrition.calories - slot.kcal) - Math.abs(b.nutrition.calories - slot.kcal))[0];
-            if (best) { meal = JSON.parse(JSON.stringify(best)); reused++; }
+            meal = closest(pool.concat(typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(slot.meal) : []), slot, null);
+            if (meal) { meal = JSON.parse(JSON.stringify(meal)); how = 'a recipe from a recent plan'; }
         }
         if (!meal) {
-            // Nothing found or written fits this slot's rules: a simple built-in meal that does.
-            meal = quickMealFor(slot.meal, slot.day, MEAL_TYPES.map(t => day[t] && day[t].name).filter(Boolean));
-            if (meal) { meal = normalizeMeal(meal); nlog('plan', `${dayName(slot.day)} ${slot.meal}: a quick built-in meal (${meal.name})`); }
+            meal = quickMealFor(slot.meal, slot.day, inPlan().names());
+            if (meal) how = 'a quick built-in meal';
         }
-        if (meal) day[slot.meal] = meal;
+        if (meal) {
+            day[slot.meal] = normalizeMeal(meal) || meal;
+            nlog('plan', `${dayName(slot.day)} ${slot.meal}: ${how} (${meal.name})`);
+        } else {
+            empty++;
+            nlog('plan', `${dayName(slot.day)} ${slot.meal}: nothing new fits; left empty rather than repeat a meal`, null, 'warn');
+        }
     }
-    if (reused) showToast(canWrite ? `${reused} meal${reused > 1 ? 's' : ''} repeat from earlier in the week.` : `${reused} meal${reused > 1 ? 's' : ''} repeat. Download an AI model in Settings for more variety.`, false);
+    if (empty) showToast(`${empty} meal${empty > 1 ? 's were' : ' was'} left empty: nothing new fitted, and meals are never repeated. Try again on Wi-Fi, or loosen My schedule.`, false);
 }
 
 function chatPlanMessages() {
@@ -3578,13 +3651,14 @@ async function swapFromSources(dayIndex, mealType) {
     try {
         const o = Object.assign(finderOptions(prefs.likes, prefs.hates), { days: 2, limits: { searches: 6, pages: 8, seconds: 25 } });
         const { pools } = await NourishFinder.findRecipes(o);
-        const inWeek = new Set(daysData.flatMap(d => MEAL_TYPES.map(t => d && d[t] && NourishPlanner.normName(d[t].name)).filter(Boolean)));
+        const inWeek = NourishPlanner.dishList(daysData.flatMap(d => MEAL_TYPES.map(t => d && d[t] && d[t].name).filter(Boolean)));
         const others = MEAL_TYPES.filter(t => t !== mealType).map(t => day[t]).filter(Boolean);
         const taken = new Set(others.map(NourishPlanner.mainProtein).concat(others.map(NourishPlanner.mainVeg)).filter(Boolean));
         const share = NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(mealType)] * (Number(settings.calorie_target) || 2000);
         const scorer = tasteScorer();
-        const fits = (pools[mealType] || []).filter(r => !inWeek.has(NourishPlanner.normName(r.name)) && !taken.has(NourishPlanner.mainProtein(r)) && !taken.has(NourishPlanner.mainVeg(r)) && !slotCheck(r, mealType, dayIndex))
-            .map(r => ({ r, d: Math.abs(Math.log(share / r.nutrition.calories)) - (scorer ? scorer(r) * 0.3 : 0) }))
+        const recent = NourishPlanner.dishList(recentPlanDishes());
+        const fits = (pools[mealType] || []).filter(r => !inWeek.has(r.name) && !taken.has(NourishPlanner.mainProtein(r)) && !taken.has(NourishPlanner.mainVeg(r)) && !slotCheck(r, mealType, dayIndex))
+            .map(r => ({ r, d: Math.abs(Math.log(share / r.nutrition.calories)) - (scorer ? scorer(r) * 0.3 : 0) + (recent.has(r.name) ? 0.3 : 0) }))
             .filter(x => x.d < Math.log(2)).sort((a, b) => a.d - b.d).slice(0, 4);
         if (fits.length) picked = fits[Math.floor(Math.random() * fits.length)].r;
     } catch (e) {

@@ -560,7 +560,7 @@ async function generatePlanOnDevice(messages, hooks, state, run) {
             // Breakfast is breakfast: a meal that still breaks the slot's rules after the retries
             // never reaches the plan; a simple built-in one that fits takes its place.
             const misfit = slotCheck(r.meal, type, d);
-            const quick = misfit ? quickMealFor(type, d, todays) : null;
+            const quick = misfit ? quickMealFor(type, d, usedNames(todays)) : null;
             if (quick) logPlan(`Day ${d + 1} ${type}: "${r.meal.name}" ${misfit}; used "${quick.name}" instead`, null, 'warn');
             day[type] = quick || r.meal;
             stat.attempts += r.attempts;

@@ -15,6 +15,7 @@
     const S = root.NourishSources || req('./sources.js');
     const P = root.NourishPrefs || req('./prefs.js');
     const PL = root.NourishPlanner || req('./planner.js');
+    const B = root.NourishBuiltins || req('./builtins.js');
     const N = root.NourishNutrition || req('./nutrition.js');
 
     const LIMITS = { parallel: 4, searches: 24, pages: 42, seconds: 90, cachedRecipes: 400 };
@@ -67,6 +68,9 @@
             steps: list(r.steps).slice(0, 30),
             time_minutes: Number(r.time_minutes) > 0 ? Math.round(Number(r.time_minutes)) : null,
             active_minutes: Number(r.active_minutes) > 0 ? Math.round(Number(r.active_minutes)) : undefined,
+            wait_minutes: Number(r.wait_minutes) > 0 ? Math.round(Number(r.wait_minutes)) : undefined,
+            cuisine: r.cuisine ? String(Array.isArray(r.cuisine) ? r.cuisine[0] : r.cuisine).toLowerCase().slice(0, 30) : undefined,
+            builtin: r.builtin || undefined,
             nutrition: r.nutrition && Number(r.nutrition.calories) > 0 ? r.nutrition : null,
             category: Array.isArray(r.category) ? r.category.join(', ') : String(r.category || ''),
             source_url: r.source_url || r.url || undefined,
@@ -97,7 +101,7 @@
             N.settle(r);
             if (!PL.flavorCheck(r).ok) { ctx.stats.bland++; return null; }
         }
-        r.sameAs = [PL.normName(r.name)];
+        r.sameAs = [PL.dishKey(r.name)];
         return r;
     }
 
@@ -242,23 +246,29 @@
         const limits = Object.assign({}, LIMITS, o.limits || {});
         const enabled = o.enabled || (() => true);
         const found = [];
-        const names = new Set();
+        // The same dish from two sites (or with a slightly different name) counts once.
+        const names = PL.dishList();
         const add = (raw, source) => {
             const r = vet(tidy(raw, source), ctx);
-            if (!r || names.has(r.sameAs[0])) return false;
-            names.add(r.sameAs[0]);
+            if (!r || names.has(r.name)) return false;
+            names.add(r.name);
             found.push(r);
             count(ctx, (source && source.id) || 'other', 'recipes');
             return true;
         };
         // Tested recipes from the sites (and the person's own) are what we want most; TheMealDB's
         // big batch doesn't count towards "enough", so the sites are still read.
-        const have = meal => found.filter(r => r._fit[meal] && r.source_id !== 'themealdb').length;
+        // Nourish's own recipes are always there, so they don't count either: the web is still searched.
+        const have = meal => found.filter(r => r._fit[meal] && r.source_id !== 'themealdb' && r.source_id !== 'builtin').length;
 
         // 1. The person's own recipe library and recipes already read on earlier plans (instant).
         if (o.library && enabled('library')) {
             // On equal terms with every other source (no head start): the books mainly teach (pairingScore).
             try { (await o.library()).forEach(r => add(Object.assign({}, r), { id: 'library', name: r.source_name || 'Your recipe library' })); } catch (e) { ctx.log('Library: ' + e.message); }
+        }
+        // Nourish's own recipes (builtins.js), on equal terms with every other source.
+        if (B && enabled('builtin')) {
+            ['breakfast', 'lunch', 'dinner'].forEach(m => B.forMeal(m).forEach(r => add(JSON.parse(JSON.stringify(r)), S.byId('builtin'))));
         }
         // Favourites from the Cookbook (taste.js decides how often they come back): on equal terms.
         if (o.favorites && o.favorites.recipes) {

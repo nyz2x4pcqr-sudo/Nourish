@@ -20,7 +20,7 @@
     const BREAKFAST = /\b(breakfast|brunch|oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|crepes?|french toast|omelet+e?s?|frittatas?|scrambled?|scramble|eggs? benedict|shakshuka|smoothie|parfait|yogh?urt bowl|chia (seed )?pudding|muffins?|scones?|breakfast burrito|avocado toast|toast|bagels?|hash browns?|huevos|congee|egg (muffin|cup|bite)s?|egg bake|breakfast bowl|overnight|acai|quiche|dutch baby|cr[eê]pe)\b/i;
     const ONLY_BREAKFAST = /\b(oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|french toast|smoothie|parfait|chia (seed )?pudding|muffins?|scones?|overnight|acai|cereal)\b/i;
     const DESSERT = /\b(cake|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
-    const NOT_DESSERT = /\b(chia pudding|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry)\b/i;
+    const NOT_DESSERT = /\b(chia pudding|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry|rice cakes?|crab cakes?|fish cakes?|salmon cakes?|tuna cakes?|potato cakes?|pancakes?)\b/i;
     const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib)\b/i;
     // Fine for dinner, too much for a quick lunch.
     const HEAVY_LUNCH = /\b(baked (pasta|ziti|penne|rigatoni|macaroni|mac|spaghetti|gnocchi)|pasta bake|mac and cheese bake|stuffed shells|manicotti|cannelloni|pot roast|roast (chicken|turkey|lamb|pork|beef|duck)|whole (chicken|fish|turkey)|beef wellington|pie|gratin|moussaka|pastitsio|osso buco|cassoulet|coq au vin|bourguignon|slow cooker|crock ?pot|braised)\b/i;
@@ -36,7 +36,9 @@
         const ings = (r.ingredients || []).join(' ').toLowerCase();
         const sweetHeavy = /\b(sugar|honey|maple|chocolate|syrup)\b/.test(ings) && !/\b(salt|garlic|onion|soy|pepper)\b/.test(ings);
         if ((DESSERT.test(name) && !NOT_DESSERT.test(name)) || /dessert|baking|treat/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'a dessert' };
-        if (NOT_A_MEAL.test(name.trim()) || /\b(sauce|drink|beverage|condiment|dressing)\b/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'not a meal' };
+        // "Salmon Tacos with Mango Salsa" is tacos, not salsa: only the dish itself counts, not what comes with it.
+        const dish = name.replace(/\s+(with|on|over|served with|and a side of)\s+.*$/i, '').trim();
+        if (NOT_A_MEAL.test(dish) || /\b(sauce|drink|beverage|condiment|dressing)\b/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'not a meal' };
         const brk = BREAKFAST.test(name) || /breakfast|brunch/.test(cat);
         // A recipe the site files under breakfast only stays at breakfast.
         const brkOnlyCat = /breakfast|brunch/.test(cat) && !/lunch|dinner|main|entr[eé]e|supper/.test(cat);
@@ -148,10 +150,17 @@
         }
         return base;
     }
-    // Why a recipe doesn't fit a slot ('' when it does), in plain words.
+    // Why a recipe can't go in a slot ('' when it can), in plain words. Only real problems: the wrong
+    // kind of dish, cooking on a no-cook meal, or well over the time there is (a few minutes over the
+    // default is fine; a time the person chose in My schedule is kept to within 2 minutes). One step
+    // or ingredient too many is never a reason on its own: slotPenalty() counts those against it.
+    function timeAllowed(L) {
+        if (!isFinite(L.minutes)) return Infinity;
+        return L.choice ? L.minutes + 2 : Math.round(L.minutes * 1.25) + 3;
+    }
     function slotProblem(r, meal, limits) {
         const L = limits || slotLimits({}, meal);
-        const p = recipeProfile(r);
+        const p = profileOf(r);
         if (!p.fits[meal]) {
             const fit = mealFit(r);
             if (meal === 'breakfast') return fit.why === 'a dinner dish' || DINNER_ONLY.test(r.name || '') ? `"${r.name}" is a dinner dish, not breakfast` : `"${r.name}" isn't a breakfast food`;
@@ -162,11 +171,27 @@
             const cooking = p.techniques.filter(t => !['whisk', 'toast', 'microwave', 'blend', 'marinate'].includes(t));
             if (cooking.length || /\b(cook|heat|stove|skillet|preheat)\b/i.test((r.steps || []).join(' '))) return `needs cooking (${cooking[0] || 'heat'}), and this meal is no-cook`;
         }
-        if (p.minutes > L.minutes) return `takes about ${p.minutes} min${p.timeEstimated ? ' (estimated)' : ''}; ${meal} has ${L.minutes} min`;
-        if (p.steps > L.steps) return `${p.steps} steps is too many for ${meal} (at most ${L.steps})`;
-        if (p.ingredients > L.ingredients) return `${p.ingredients} ingredients is too many for ${meal} (at most ${L.ingredients})`;
-        if (p.difficulty > L.difficulty) return `too much work for ${meal} (difficulty ${p.difficulty} of 10${p.hard ? ', advanced technique' : ''})`;
+        if (p.minutes > timeAllowed(L)) return `takes about ${p.minutes} min${p.timeEstimated ? ' (estimated)' : ''}; ${meal} has ${L.minutes} min`;
         return '';
+    }
+    // How far a recipe is over the slot's soft limits (a little over on time, steps, ingredients or
+    // effort): 0 when it's within them; added to its cost so simpler recipes win.
+    function slotPenalty(r, meal, limits) {
+        const L = limits || slotLimits({}, meal);
+        const p = profileOf(r);
+        let cost = 0;
+        if (isFinite(L.minutes) && p.minutes > L.minutes) cost += (p.minutes - L.minutes) / Math.max(5, L.minutes) * 2;
+        cost += Math.max(0, p.steps - L.steps) * 0.15 + Math.max(0, p.ingredients - L.ingredients) * 0.12 + Math.max(0, p.difficulty - L.difficulty) * 0.3;
+        return cost;
+    }
+    // A recipe's profile, worked out once (until its steps, ingredients or times change).
+    const profiles = new WeakMap();
+    function profileOf(r) {
+        const c = profiles.get(r);
+        if (c && c.steps === r.steps && c.ings === r.ingredients && c.t === r.time_minutes && c.a === r.active_minutes && c.n === r.name) return c.p;
+        const p = recipeProfile(r);
+        profiles.set(r, { steps: r.steps, ings: r.ingredients, t: r.time_minutes, a: r.active_minutes, n: r.name, p });
+        return p;
     }
 
     // === MAIN PROTEIN, MAIN VEGETABLE, CUISINE ===
@@ -212,11 +237,14 @@
     }
 
     // === FLAVOR ===
-    const SALTY = /\b(salt|soy sauce|tamari|fish sauce|miso|coconut aminos|bouillon|stock cube|anchov|capers|olives|parmesan|feta)\b/i;
+    const SALTY = /\b(salt|soy sauce|tamari|fish sauce|miso|coconut aminos|bouillon|stock cube|anchov|capers|olives|parmesan|feta|halloumi|smoked salmon|bacon|ham|prosciutto|chorizo)\b/i;
     const FLAVOR = /\b(garlic|ginger|onion|shallot|scallion|chili|chilli|jalape|cayenne|paprika|cumin|coriander|turmeric|garam masala|curry|oregano|basil|thyme|rosemary|parsley|cilantro|dill|mint|chives|sage|tarragon|bay lea|lemon|lime|orange zest|vinegar|mustard|soy sauce|fish sauce|miso|gochujang|harissa|sriracha|hot sauce|salsa|pesto|za'?atar|sumac|five spice|cinnamon|nutmeg|smoked|black pepper|pepper flakes|herbs?|spices?|seasoning|zest|worcestershire|tahini|sesame oil)\b/gi;
     const TO_TASTE = /\b(salt|kosher salt|sea salt)\b[^,]*\b(to taste|as needed|for seasoning)\b|^salt( and (black )?pepper)?$|^(kosher |sea )?salt and (freshly )?(ground )?(black )?pepper( to taste)?$/i;
+    // Sweet breakfasts (smoothies, oats, pancakes, French toast…) don't need salt and spices.
+    const SWEET_BREAKFAST = /\b(smoothie|oats|oatmeal|porridge|muesli|bircher|granola|parfait|chia pudding|pancakes?|waffles?|french toast|crepes?|yogh?urt bowl|acai|smoothie bowl)\b/i;
     function isSavory(r) {
         const fit = r._fit || mealFit(r);
+        if (fit.breakfast && SWEET_BREAKFAST.test(r.name || '') && !/\b(savou?ry|egg|eggs|cheddar|feta|parmesan|bacon|masala|soy)\b/i.test(r.name || '')) return false;
         const ings = (r.ingredients || []).join(' ').toLowerCase();
         return (fit.lunch || fit.dinner || !!mainProtein(r)) && !(fit.breakfast && /\b(oat|yogurt|berries|banana|honey|maple|granola|chia)\b/.test(ings) && !/\b(egg|cheese|bacon|sausage|spinach|tomato)\b/.test(ings));
     }
@@ -454,14 +482,20 @@
     // Picks recipes for each day and sizes the portions. pools: { breakfast: [recipes], … } (already
     // checked: allowed, seasoned, nutrition settled). Returns { days: [{ breakfast, lunch, dinner }],
     // missing: [{ day, meal, kcal }], report: [{ day, kcal, protein, carbs, fat }] }.
+    // already: dishes from recent plans (the last 14 days, favourites left out): avoided, and only
+    // used when a slot has nothing else. Nothing is ever used twice in one plan (sameDish), except a
+    // dinner eaten again as the next day's lunch when Settings → "Allow leftovers" is on.
     function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [], exclude, weekday, taste, favorites }) {
         // Favourites (recipes they loved) come back, but at most `cap` times a week.
-        const favNames = new Set(((favorites && favorites.recipes) || []).map(r => normName(r.name)));
+        const favList = dishList(((favorites && favorites.recipes) || []).map(r => r.name));
+        const isFav = r => favList.names().length > 0 && favList.has(r.name);
         let favUsed = 0;
+        const leftovers = settings.allow_leftovers === 'on';
         const targets = targetsOf(settings);
         const split = splitOf(settings);
         const on = m => split[MEALS.indexOf(m)] > 0;
-        const used = new Set(already.map(n => normName(n)));
+        const used = dishList();                 // this plan: never twice
+        const recent = dishList(already);        // recent plans: avoided
         const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {} };
         const rejected = {};   // why recipes didn't fit a slot (for the log)
         // The real calories of a recipe at each realistic portion (amounts rounded as written), so
@@ -494,11 +528,20 @@
                 // Breakfast is breakfast: anything too slow, too much work or the wrong kind of dish
                 // for this slot (with this day's schedule) is out before it can be picked.
                 const limits = slotLimits(settings, m, weekday ? weekday(d) : null);
-                top[m] = (pools[m] || []).filter(r => !used.has(normName(r.name)) && !(r.sameAs && r.sameAs.some(x => used.has(x))))
-                    .filter(r => !favNames.has(normName(r.name)) || favUsed < ((favorites && favorites.cap) || 0))
+                const fits = (pools[m] || []).filter(r => !used.has(r.name))
+                    .filter(r => !isFav(r) || favUsed < ((favorites && favorites.cap) || 0))
                     .filter(r => { const why = slotProblem(r, m, limits); if (why) rejected[`${m}: ${r.name}`] = why; return !why; })
-                    .map(r => ({ r, cost: slotCost(r, kcal, ctx) })).filter(x => isFinite(x.cost))
-                    .sort((a, b) => a.cost - b.cost).slice(0, 8);
+                    .map(r => ({ r, cost: slotCost(r, kcal, ctx) + slotPenalty(r, m, limits) })).filter(x => isFinite(x.cost));
+                // Recent plans' dishes only when nothing new fits (favourites are always welcome).
+                const fresh = fits.filter(x => isFav(x.r) || !recent.has(x.r.name));
+                top[m] = (fresh.length ? fresh : fits.map(x => ({ r: x.r, cost: x.cost + 1 }))).sort((a, b) => a.cost - b.cost).slice(0, 8);
+                // Cook once, eat twice: yesterday's dinner as today's lunch (Settings → Allow leftovers).
+                const prev = out[d - 1] && out[d - 1].dinner;
+                if (m === 'lunch' && leftovers && prev && !prev.leftover && !(exclude && exclude(prev))) {
+                    const base = (pools.dinner || []).find(r => r.name === prev.name) || prev;
+                    const cost = slotCost(base, kcal, ctx);
+                    if (isFinite(cost)) top[m].unshift({ r: Object.assign(JSON.parse(JSON.stringify(base)), { leftover: true }), cost: cost - 0.6 });
+                }
             });
             // The best combination: different main proteins and vegetables, closest to the day's macros.
             let best = null;
@@ -506,7 +549,7 @@
             opts('breakfast').forEach(b => opts('lunch').forEach(l => opts('dinner').forEach(dn => {
                 const pick = [b, l, dn];
                 const rs = pick.filter(Boolean).map(x => x.r);
-                if (new Set(rs.map(r => normName(r.name))).size < rs.length) return;
+                if (rs.some((r, i) => rs.some((o, j) => j < i && sameDish(o.name, r.name)))) return;
                 const prots = rs.map(mainProtein).filter(Boolean);
                 if (new Set(prots).size < prots.length) return;
                 const vegs = rs.map(mainVeg).filter(Boolean);
@@ -537,8 +580,8 @@
                 const kcal = targets.kcal * split[i];
                 if (kcal / r.nutrition.calories < 0.85) trimAndRecount(r, r.nutrition.calories - kcal / 0.85);
                 items.push({ key: m, r, want: kcal });
-                used.add(normName(r.name));
-                if (favNames.has(normName(r.name))) favUsed++;
+                if (!r.leftover) used.add(r.name);
+                if (isFav(r)) favUsed++;
                 const c = cuisineOf(r);
                 ctx.cuisineCount[c] = (ctx.cuisineCount[c] || 0) + 1;
             });
@@ -676,13 +719,54 @@
     }
     // The best quick meal for a slot that fits its limits, isn't avoided and isn't already in the day.
     function quickMeal(meal, limits, { exclude, taken = [], d = 0 } = {}) {
-        const names = new Set(taken.map(normName));
+        const names = dishList(taken);
         const ok = (QUICK_MEALS[meal] || []).map(q => quickRecipe(q, meal))
-            .filter(r => r.nutrition.calories > 0 && !(exclude && exclude(r)) && !names.has(normName(r.name)) && !slotProblem(r, meal, limits));
+            .filter(r => r.nutrition.calories > 0 && !(exclude && exclude(r)) && !names.has(r.name) && !slotProblem(r, meal, limits));
         return ok.length ? ok[d % ok.length] : null;
     }
 
     function normName(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\b(the|best|easy|healthy|quick|recipe|my|simple|homemade)\b/g, '').replace(/\s+/g, ' ').trim(); }
+
+    // === THE SAME DISH ===
+    // Never the same meal twice: "Gochujang Chicken Bowls" (one site), "Easy Gochujang Chicken Rice
+    // Bowl" (another) and "Chicken Gochujang Bowl" are one dish. A dish's words, without filler
+    // ("easy", "best", "30-minute", "sheet pan", "recipe") and plurals, in any order; two names are
+    // the same dish when they share at least three quarters of their words.
+    const DISH_FILLER = new Set(('the a an and with of in on for or to my our your best easy easiest healthy healthier quick quickest simple homemade recipe recipes ultimate perfect ' +
+        'favorite favourite classic super really amazing delicious skinny lighter light minute minutes min mins hour one pot pan sheet instant air fryer slow cooker crockpot crock ' +
+        'style version copycat weeknight family meal prep make ahead leftover leftovers lunch dinner breakfast day').split(/\s+/));
+    const dishCache = new Map();
+    function dishWords(name) {
+        const key = String(name || '');
+        if (dishCache.has(key)) return dishCache.get(key);
+        const words = key.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+            .filter(w => w && !/^\d+$/.test(w) && !DISH_FILLER.has(w))
+            .map(w => (w.length > 3 && /ies$/.test(w) ? w.slice(0, -3) + 'y' : w.length > 3 && /(ches|shes|oes)$/.test(w) ? w.slice(0, -2) : w.length > 3 && /[^s]s$/.test(w) ? w.slice(0, -1) : w));
+        const out = [...new Set(words)];
+        if (dishCache.size > 5000) dishCache.clear();
+        dishCache.set(key, out);
+        return out;
+    }
+    function dishKey(name) { return dishWords(name).slice().sort().join(' '); }
+    function sameDish(a, b) {
+        const x = dishWords(a), y = dishWords(b);
+        if (!x.length || !y.length) return normName(a) === normName(b);
+        const ys = new Set(y);
+        const both = x.filter(w => ys.has(w)).length;
+        return both / (x.length + y.length - both) >= 0.75;
+    }
+    // A list of dishes to check new ones against (the plan so far, recent plans).
+    function dishList(names) {
+        const list = [];
+        const keys = new Set();
+        const api = {
+            add(name) { if (!name) return api; list.push(name); keys.add(dishKey(name)); return api; },
+            has(name) { return !!name && (keys.has(dishKey(name)) || list.some(n => sameDish(n, name))); },
+            names: () => list.slice(),
+        };
+        (names || []).forEach(n => api.add(n));
+        return api;
+    }
 
     // === DISH NAMES ===
     const DISH_WORDS = ('shakshuka shashlik sashimi teriyaki bulgogi bibimbap tikka masala korma biryani tagine paella risotto gnocchi frittata quesadilla enchilada fajita burrito taco ' +
@@ -714,7 +798,7 @@
         }).join('');
     }
 
-    const api = { sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
+    const api = { sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);
