@@ -234,6 +234,22 @@ assert v["days"] == 7, v["days"]
 print("Background-time lines:", sum("background" in l.lower() for l in v["log"]))
 PY
 
+echo "== 6d. The default Generate (real recipes first, the phone's AI fills gaps): time for 7 days (not a pass/fail check: it needs the live recipe sites)"
+probe "localStorage.removeItem('nourish_plan_progress'); const t0 = Date.now();
+  const finished = await Promise.race([runSmartPlan('', '').then(() => true), new Promise(r => setTimeout(() => r(false), 840000))]);
+  if (!finished) { localPlanCancelled = true; }
+  const lines = activityLog.filter(l => l.area === 'plan').slice(-8).map(l => l.msg);
+  return JSON.stringify({ finished, seconds: Math.round((Date.now() - t0) / 1000), days: daysData.map(d => ({ kcal: Math.round(NourishPlanner.dayTotals(d).kcal),
+    meals: MEAL_TYPES.map(t => d[t] ? d[t].name + ' (' + (d[t].source_name || (d[t].library_path ? 'library' : 'AI')) + ')' : '-') })), log: lines });" 900
+python3 - "$PROBE" <<'PY' || echo "(timing step skipped: $?)"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"])
+print("\n".join(v["log"]))
+for i, d in enumerate(v["days"]): print(f"Day {i + 1}: {d['kcal']} kcal |", " | ".join(d["meals"]))
+print(f"AUTOMATIC 7-DAY PLAN ON THE SIMULATOR: {v['seconds']} s" + ("" if v["finished"] else " (stopped at the 14-minute limit)"))
+PY
+
 echo "== 7. Screen headers stay below the status bar on all five tabs"
 probe "const out = [];
   const probeEl = document.createElement('div'); probeEl.style.cssText = 'position:fixed;top:0;height:var(--safe-top)'; document.body.appendChild(probeEl);
