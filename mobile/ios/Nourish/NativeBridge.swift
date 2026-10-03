@@ -128,6 +128,21 @@ final class NativeBridge: NSObject {
             log("Read \(result["lines"] ?? 0) lines of text from a \(result["width"] ?? 0)×\(result["height"] ?? 0) picture in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
             return result
         case "barcode": return try TextReader.barcode(base64: a["image"] as? String ?? "")
+        case "appIcon":
+            // Settings → Appearance → App icon. "default" is the main icon; the others are the
+            // AppIcon-<Name> sets in Assets.xcassets.
+            let name = a["name"] as? String ?? "default"
+            let icon: String? = name == "default" ? nil : "AppIcon-" + name.prefix(1).uppercased() + name.dropFirst()
+            let done = DispatchSemaphore(value: 0)
+            var failure: Error?
+            DispatchQueue.main.async {
+                guard UIApplication.shared.supportsAlternateIcons else { failure = BridgeError(message: "This iPhone can't change app icons."); done.signal(); return }
+                if UIApplication.shared.alternateIconName == icon { done.signal(); return }
+                UIApplication.shared.setAlternateIconName(icon) { error in failure = error; done.signal() }
+            }
+            _ = done.wait(timeout: .now() + 20)
+            if let failure = failure { throw failure }
+            return ["icon": name]
         case "library":
             switch a["op"] as? String ?? "" {
             case "list": return RecipeLibrary.list()

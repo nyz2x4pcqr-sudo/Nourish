@@ -145,8 +145,33 @@ final class NativeBridge {
             case "keepAwake": keepAwake(a.optBoolean("on")); return new JSONObject();
             case "setMode": host.setMode(a.optString("mode")); return new JSONObject();
             case "library": return library(a);
+            case "appIcon": return appIcon(a.optString("name", "default"));
             default: throw new IllegalArgumentException("Unknown command: " + cmd);
         }
+    }
+
+    // ---------------------------------------------------------------------------------- app icon
+
+    /** Enables the launcher entry with the chosen icon and disables the others (AndroidManifest.xml). */
+    private JSONObject appIcon(String name) throws Exception {
+        String[] names = { "default", "midnight", "forest", "plum", "paper", "oled" };
+        boolean known = false;
+        for (String n : names) known |= n.equals(name);
+        if (!known) throw new IllegalArgumentException("Unknown app icon: " + name);
+        android.content.pm.PackageManager pm = context.getPackageManager();
+        // Turn the new one on first, so there is never a moment without an icon.
+        for (int pass = 0; pass < 2; pass++) {
+            for (String n : names) {
+                boolean on = n.equals(name);
+                if ((pass == 0) != on) continue;
+                android.content.ComponentName c = new android.content.ComponentName(context, "io.github.nourish.Icon" + Character.toUpperCase(n.charAt(0)) + n.substring(1));
+                pm.setComponentEnabledSetting(c, on ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        android.content.pm.PackageManager.DONT_KILL_APP);
+            }
+        }
+        JSONObject o = new JSONObject();
+        o.put("icon", name);
+        return o;
     }
 
     // ---------------------------------------------------------------------------------- recipe library

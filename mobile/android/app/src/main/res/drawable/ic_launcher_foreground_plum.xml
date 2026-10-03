@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Nourish mark: a saffron bowl with a sage sprout (art/icon.svg), inside the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="12.4" android:translateY="11.5" android:scaleX="1.3" android:scaleY="1.3">
+        <path android:pathData="M32,33.5V22" android:strokeColor="#9FD08C" android:strokeWidth="2.4" android:strokeLineCap="round" />
+        <path android:pathData="M31.6,25.5C25.4,25.6 21,21.4 20.2,15.2C26.6,15 31,18.9 31.6,25.5Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="20" android:startY="26" android:endX="32" android:endY="15"
+                    android:startColor="#7DB876" android:endColor="#C4E8A9" />
+            </aapt:attr>
+        </path>
+        <path android:pathData="M32.4,22.4C33,16.6 37.2,12.6 43.4,12.4C42.8,18.4 38.6,22.3 32.4,22.4Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="32" android:startY="23" android:endX="44" android:endY="12"
+                    android:startColor="#7DB876" android:endColor="#C4E8A9" />
+            </aapt:attr>
+        </path>
+        <path android:pathData="M12,33.5H52C52,44.8 43,53 32,53S12,44.8 12,33.5Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="32" android:startY="33.5" android:endX="32" android:endY="53"
+                    android:startColor="#D7C8FF" android:endColor="#7A58C9" />
+            </aapt:attr>
+        </path>
+        <path android:pathData="M12,31.2h40a2,2 0,0 1,2 2v0a2,2 0,0 1,-2 2h-40a2,2 0,0 1,-2 -2v0a2,2 0,0 1,2 -2z" android:fillColor="#EFE8FF" />
+    </group>
+</vector>

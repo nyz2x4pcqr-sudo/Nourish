@@ -47,9 +47,17 @@ const SECRET_FIELDS = ['claude_api_key', 'openai_api_key', 'spoonacular_api_key'
 // Every setting, with its default. Kept as strings. Saved on this device and on the PC.
 const SETTINGS_DEFAULTS = {
     // appearance
-    theme: 'dark',
-    accent: 'orange',
-    text_size: 'default',
+    theme: 'ember',            // theme.js THEMES id, or 'auto' (older: dark / light / system)
+    accent: 'orange',          // theme.js ACCENTS id, or 'custom'
+    text_size: 'default',      // small, default, large, xl
+    bg: '',                    // one of the theme's curated backgrounds ('' = its standard one)
+    custom_bg: '',             // Advanced: any background colour
+    custom_accent: '',         // Advanced: any accent colour (accent: 'custom')
+    font_pair: 'editorial',    // theme.js FONTS
+    bold_text: 'off',
+    icon_style: 'outline',     // theme.js ICON_STYLES
+    app_icon: 'default',       // theme.js APP_ICONS (phone apps)
+    today_stats: 'protein_g,carbs_g,fat_g',   // which bars Today shows
     start_tab: 'today',
     week_start: 'monday',
     units: '',   // 'imperial' or 'metric'; empty: from the phone's region
@@ -517,16 +525,26 @@ function updateSyncStatus() {
 }
 
 // === APPEARANCE ===
+// The look (theme.js works out every colour from the theme, background and accent, keeping text
+// readable), font pairing, text size, bold text and icon style.
+let lookNotes = [];
 function applyAppearance() {
     const root = document.documentElement;
-    root.setAttribute('data-theme', ['dark', 'light', 'system'].includes(settings.theme) ? settings.theme : 'dark');
+    const T = NourishTheme;
+    const look = T.resolve(settings, !!(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches));
+    lookNotes = look.notes;
+    Object.entries(look.vars).forEach(([k, v]) => root.style.setProperty(k, v));
+    root.setAttribute('data-theme', look.mode);
     root.setAttribute('data-accent', ACCENTS[settings.accent] ? settings.accent : 'orange');
-    root.setAttribute('data-text', ['small', 'default', 'large'].includes(settings.text_size) ? settings.text_size : 'default');
+    root.setAttribute('data-text', T.TEXT_SIZES[settings.text_size] ? settings.text_size : 'default');
+    root.setAttribute('data-font', T.FONTS[settings.font_pair] ? settings.font_pair : 'editorial');
+    root.setAttribute('data-bold', on('bold_text') ? 'on' : 'off');
+    root.setAttribute('data-icons', T.ICON_STYLES[settings.icon_style] ? settings.icon_style : 'outline');
     if (on('reduce_motion')) root.setAttribute('data-motion', 'reduced');
     else root.removeAttribute('data-motion');
-    const light = settings.theme === 'light' || (settings.theme === 'system' && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches);
+    const light = look.mode === 'light';
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', light ? '#F5EFE6' : '#0C0B0A');
+    if (meta) meta.setAttribute('content', look.bg);
     // Inside the phone apps, match the phone's status bar (clock, battery) to the theme.
     try {
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nourishTheme) {
@@ -539,7 +557,7 @@ function applyAppearance() {
 // "Auto" follows the phone's own light/dark setting, including when it changes.
 if (window.matchMedia) {
     const scheme = matchMedia('(prefers-color-scheme: light)');
-    const follow = () => { if (settings.theme === 'system') applyAppearance(); };
+    const follow = () => { if (NourishTheme.themeId(settings.theme) === 'auto') applyAppearance(); };
     if (scheme.addEventListener) scheme.addEventListener('change', follow);
     else if (scheme.addListener) scheme.addListener(follow);
 }
@@ -999,7 +1017,8 @@ function setSetting(key, value, { quiet = false } = {}) {
     settings[key] = String(value);
     changed('settings');
     if (!quiet) showToast('Saved ✓', false);
-    if (['theme', 'accent', 'text_size', 'reduce_motion'].includes(key)) applyAppearance();
+    if (APPEARANCE_KEYS.includes(key)) { applyAppearance(); if (settingsPage === 'appearance') refreshLookPreview(); }
+    if (key === 'today_stats') updateTodayScreen();
     if (['calorie_target', 'protein_target', 'week_start', 'show_nutrition', 'name'].includes(key)) { updateTodayScreen(); updatePlanScreen(); }
     if (key === 'grocery_hide_checked') updateGroceryScreen();
     if (key === 'units') refreshUnits();
@@ -1111,6 +1130,64 @@ function mealSlotToggle(meal) {
     }, h('span', { class: 'settings-label', text: MEAL_LABELS[meal] }), h('span', { class: 'switch', 'aria-checked': String(isOn()), 'aria-hidden': 'true' }));
 }
 
+// === APPEARANCE ===
+const APPEARANCE_KEYS = ['theme', 'bg', 'custom_bg', 'accent', 'custom_accent', 'font_pair', 'text_size', 'bold_text', 'icon_style', 'reduce_motion'];
+let lookSnapshot = null;   // the look when Appearance was opened, for "Undo"
+
+// A small live picture of the app in the current look, at the top of Appearance.
+function lookPreview() {
+    return h('div', { class: 'look-preview', id: 'lookPreview', 'aria-hidden': 'true' },
+        h('div', { class: 'look-preview-head' },
+            h('div', {}, h('div', { class: 'eyebrow', text: 'Preview' }), h('div', { class: 'look-preview-title', text: 'Good morning' })),
+            h('span', { class: 'look-preview-btn' }, icon('i-sparkle'))),
+        h('div', { class: 'look-preview-body' },
+            h('div', { class: 'look-preview-ring' }, h('span', { class: 'num', text: '1,250' }), h('small', { text: 'of 1,800 kcal' })),
+            h('div', { class: 'look-preview-macros' }, [['Protein', 'protein', 72], ['Carbs', 'carbs', 55], ['Fat', 'fat', 40]].map(([l, c, w]) =>
+                h('div', {}, h('div', { class: 'look-preview-macro' }, h('span', { text: l }), h('span', { class: 'num', text: `${Math.round(w * 1.4)} g` })),
+                    h('div', { class: 'macro-track' }, h('div', { class: `macro-fill macro-${c}`, style: `width:${w}%` })))))),
+        h('div', { class: 'look-preview-meal' },
+            h('span', { class: 'meal-art art-lunch' }, icon('i-sun')),
+            h('span', {}, h('span', { class: 'meal-type', text: 'Lunch' }), h('span', { class: 'meal-name', text: 'Lemon Chickpea Salad' }),
+                h('span', { class: 'chip' }, icon('i-flame'), h('span', { class: 'num', text: '450 kcal' })))),
+        h('div', { class: 'look-preview-actions' }, h('span', { class: 'btn btn-primary' }, icon('i-plus'), 'Add food'), h('span', { class: 'btn btn-secondary' }, icon('i-swap'), 'Swap')));
+}
+function refreshLookPreview() { const el = $('lookPreview'); if (el) el.replaceWith(lookPreview()); }
+
+function statToggle(key, label) {
+    const list = () => String(settings.today_stats || '').split(',').filter(Boolean);
+    const isOn = () => list().includes(key);
+    return h('button', {
+        type: 'button', class: 'settings-row settings-nav switch-row', role: 'switch', 'aria-checked': String(isOn()),
+        onclick: e => {
+            const next = isOn() ? list().filter(k => k !== key) : list().concat([key]);
+            setSetting('today_stats', ['protein_g', 'carbs_g', 'fat_g'].filter(k => next.includes(k)).join(','), { quiet: true });
+            e.currentTarget.setAttribute('aria-checked', String(isOn()));
+            e.currentTarget.querySelector('.switch').setAttribute('aria-checked', String(isOn()));
+        },
+    }, h('span', { class: 'settings-label', text: label }), h('span', { class: 'switch', 'aria-checked': String(isOn()), 'aria-hidden': 'true' }));
+}
+
+// A colour picker row (Advanced): picking a colour previews it at once; "Clear" goes back to the preset.
+function colorRow(label, key, value, hint) {
+    const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : '#000000';
+    return h('label', { class: 'settings-row color-row' },
+        h('span', { class: 'settings-label' }, label, h('span', { class: 'settings-hint', text: settings[key] ? 'Custom' : hint })),
+        settings[key] ? h('button', { type: 'button', class: 'link-btn', onclick: e => { e.preventDefault(); setSetting(key, '', { quiet: true }); if (key === 'custom_accent' && settings.accent === 'custom') setSetting('accent', 'orange', { quiet: true }); renderSettings(); } }, 'Clear') : null,
+        h('input', { type: 'color', value: hex, 'aria-label': label,
+            oninput: e => { settings[key] = e.target.value; if (key === 'custom_accent') settings.accent = 'custom'; applyAppearance(); refreshLookPreview(); },
+            onchange: e => { setSetting(key, e.target.value, { quiet: true }); if (key === 'custom_accent') setSetting('accent', 'custom', { quiet: true }); renderSettings(); } }));
+}
+
+// The home screen icon (phone apps only: iOS alternate icons, Android launcher aliases).
+async function setAppIcon(id, { quiet = false } = {}) {
+    setSetting('app_icon', id, { quiet: true });
+    if (isLocalMode() && nativeAvailable()) {
+        try { await nativeCall('appIcon', { name: id }); if (!quiet) showToast('App icon changed', false); }
+        catch (e) { if (!quiet) showToast(`Couldn't change the app icon: ${e.message}`); }
+    }
+    if (settingsPage === 'appearance') renderSettings();
+}
+
 function settingsButton(text, onclick, cls = '') {
     return h('button', { type: 'button', class: `settings-row settings-button ${cls}`, onclick }, text);
 }
@@ -1169,7 +1246,10 @@ const SETTINGS_GROUP_TITLES = ['', '', 'Advanced', ''];
 function settingsSummary(page) {
     const s = settings;
     switch (page) {
-        case 'appearance': return `${{ dark: 'Dark', light: 'Light', system: 'Auto' }[s.theme] || 'Dark'} · ${ACCENT_NAMES[s.accent] || 'Saffron'}`;
+        case 'appearance': {
+            const id = NourishTheme.themeId(s.theme);
+            return `${id === 'auto' ? 'Auto' : NourishTheme.THEMES[id].name} · ${s.accent === 'custom' ? 'Custom' : (NourishTheme.ACCENTS[s.accent] || NourishTheme.ACCENTS.orange).name}`;
+        }
         case 'ai': return s.active_provider === 'local'
             ? `This phone · ${s.local_model ? s.local_model.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '') : 'no model yet'}`
             : `${PROVIDERS[s.active_provider].replace(' (local)', '')} · ${s[`${s.active_provider}_model`] || 'auto'}`;
@@ -1192,6 +1272,7 @@ function settingsSummary(page) {
 }
 
 function openSettingsPage(page) {
+    if (page !== 'appearance') lookSnapshot = null;
     settingsPage = page;
     if (page === 'sources') indexLibrary();
     renderSettings();
@@ -1257,34 +1338,110 @@ function renderSettings() {
 
 const SETTINGS_RENDERERS = {
     appearance() {
+        const T = NourishTheme;
+        if (!lookSnapshot) lookSnapshot = Object.fromEntries(APPEARANCE_KEYS.map(k => [k, settings[k]]));
+        const themeId = T.themeId(settings.theme);
+        const shown = themeId === 'auto' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'paper' : 'ember') : themeId;
+        const pick = (key, value) => { setSetting(key, value, { quiet: true }); renderSettings(); };
+        const tile = (id, t) => {
+            const look = id === 'auto' ? null : T.resolve(Object.assign({}, settings, { theme: id, bg: '', custom_bg: '' }), false).vars;
+            const selected = themeId === id;
+            return h('button', { type: 'button', role: 'radio', 'aria-checked': String(selected), class: 'theme-tile' + (selected ? ' selected' : ''), onclick: () => { setSetting('custom_bg', '', { quiet: true }); setSetting('bg', '', { quiet: true }); pick('theme', id); } },
+                id === 'auto'
+                    ? h('span', { class: 'theme-tile-art auto' }, h('i', { style: 'background:#0C0B0A' }), h('i', { style: 'background:#F5EFE6' }))
+                    : h('span', { class: 'theme-tile-art', style: `background:${look['--bg']}` },
+                        h('i', { class: 'card', style: `background:${look['--surface-2']};border-color:${look['--border-strong']}` }),
+                        h('i', { class: 'line', style: `background:${look['--text']}` }),
+                        h('i', { class: 'line short', style: `background:${look['--text-3']}` }),
+                        h('i', { class: 'dot', style: `background:${look['--accent']}` })),
+                h('span', { class: 'theme-tile-name', text: id === 'auto' ? 'Auto' : t.name }),
+                h('span', { class: 'theme-tile-note', text: id === 'auto' ? 'Follows your phone' : t.note }));
+        };
+        const t = T.THEMES[shown];
+        const bgs = t.bgs.length > 1 && !settings.custom_bg ? h('div', { class: 'settings-row settings-row-stack' },
+            h('span', { class: 'settings-label', text: 'Background' }),
+            h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': 'Background' }, t.bgs.map((c, i) => {
+                const sel = (settings.bg || t.bgs[0]) === c;
+                return h('button', { type: 'button', role: 'radio', class: 'swatch bg-swatch' + (sel ? ' selected' : ''), 'aria-checked': String(sel), 'aria-label': T.BG_NAMES[i], title: T.BG_NAMES[i],
+                    style: `background:${c};color:${c}`, onclick: () => pick('bg', i ? c : '') });
+            }))) : null;
+        const accentName = settings.accent === 'custom' ? 'Custom' : (T.ACCENTS[settings.accent] || T.ACCENTS.orange).name;
+        const fontRow = id => {
+            const f = T.FONTS[id];
+            const sel = (T.FONTS[settings.font_pair] ? settings.font_pair : 'editorial') === id;
+            return h('button', { type: 'button', role: 'radio', 'aria-checked': String(sel), class: 'settings-row settings-nav font-row' + (sel ? ' selected' : ''), onclick: () => pick('font_pair', id) },
+                h('span', { class: 'font-sample', style: `font-family:"${f.heading}"` }, 'Aa'),
+                h('span', { class: 'settings-label' }, f.name, h('span', { class: 'settings-hint', text: `${f.note} · ${f.heading === f.body ? f.heading : f.heading + ' + ' + f.body}` })),
+                h('span', { class: 'font-digits', style: `font-family:"${f.body}";font-variant-numeric:lining-nums tabular-nums`, text: '1,250' }),
+                sel ? icon('i-check', 'font-check') : null);
+        };
+        const iconSample = ['i-home', 'i-calendar', 'i-heart', 'i-cart'];
+        const changedLook = APPEARANCE_KEYS.some(k => lookSnapshot[k] !== settings[k]);
+        const native = isLocalMode() && nativeAvailable();
         return [
-            ...settingsGroup('Look', [
-                settingsChoice('Theme', settings.theme, { dark: 'Dark', light: 'Light', system: 'Auto' }, v => setSetting('theme', v, { quiet: true })),
-                h('div', { class: 'settings-row settings-row-stack' },
-                    h('span', { class: 'settings-row-top' }, h('span', { class: 'settings-label', text: 'Accent colour' }),
-                        h('span', { class: 'settings-value', id: 'accentName', text: ACCENT_NAMES[settings.accent] || 'Saffron' })),
-                    h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': 'Accent colour' }, Object.entries(ACCENTS).map(([name, color]) =>
-                        h('button', {
-                            type: 'button', role: 'radio', class: 'swatch' + (settings.accent === name ? ' selected' : ''),
-                            'aria-checked': String(settings.accent === name), 'aria-label': ACCENT_NAMES[name], title: ACCENT_NAMES[name],
-                            style: `background:${color};color:${color}`,
-                            onclick: e => {
-                                e.currentTarget.parentNode.querySelectorAll('.swatch').forEach(b => { b.classList.remove('selected'); b.setAttribute('aria-checked', 'false'); });
-                                e.currentTarget.classList.add('selected');
-                                e.currentTarget.setAttribute('aria-checked', 'true');
-                                setSetting('accent', name, { quiet: true });
-                                $('accentName').textContent = ACCENT_NAMES[name];
-                            },
-                        })))),
-                settingsChoice('Text size', settings.text_size, { small: 'Small', default: 'Default', large: 'Large' }, v => setSetting('text_size', v, { quiet: true })),
+            lookPreview(),
+            changedLook ? h('div', { class: 'look-bar' },
+                h('span', { text: 'Your changes are showing everywhere.' }),
+                h('button', { type: 'button', class: 'link-btn', onclick: () => { Object.entries(lookSnapshot).forEach(([k, v]) => setSetting(k, v, { quiet: true })); renderSettings(); showToast('Changes undone', false); } }, 'Undo')) : null,
+            ...settingsGroup('Theme', [
+                h('div', { class: 'theme-tiles', role: 'radiogroup', 'aria-label': 'Theme' }, ['auto'].concat(Object.keys(T.THEMES)).map(id => tile(id, T.THEMES[id]))),
+                bgs,
             ]),
+            ...settingsGroup('Accent colour', [
+                h('div', { class: 'settings-row settings-row-stack' },
+                    h('span', { class: 'settings-row-top' }, h('span', { class: 'settings-label', text: 'Accent' }), h('span', { class: 'settings-value', text: accentName })),
+                    h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': 'Accent colour' }, Object.entries(T.ACCENTS).map(([name, a]) =>
+                        h('button', {
+                            type: 'button', role: 'radio', class: 'swatch' + (settings.accent === name ? ' selected' : ''), 'aria-checked': String(settings.accent === name), 'aria-label': a.name, title: a.name,
+                            style: `background:${a.accent};color:${a.accent}`, onclick: () => pick('accent', name),
+                        })))),
+            ]),
+            ...settingsGroup('Font', Object.keys(T.FONTS).map(fontRow), 'Numbers always use even, same-width digits so they line up, whichever font you pick.'),
+            ...settingsGroup('Text', [
+                settingsChoice('Text size', T.TEXT_SIZES[settings.text_size] ? settings.text_size : 'default', T.TEXT_SIZES, v => pick('text_size', v)),
+                settingsToggle('bold_text', 'Bold text', { hint: 'Heavier text, easier to read', onchange: () => renderSettings() }),
+            ]),
+            ...settingsGroup('Icons', [
+                h('div', { class: 'icon-styles', role: 'radiogroup', 'aria-label': 'Icon style' }, Object.entries(T.ICON_STYLES).map(([id, name]) => {
+                    const sel = (T.ICON_STYLES[settings.icon_style] ? settings.icon_style : 'outline') === id;
+                    return h('button', { type: 'button', role: 'radio', 'aria-checked': String(sel), class: 'icon-style' + (sel ? ' selected' : ''), 'data-icons': id, onclick: () => pick('icon_style', id) },
+                        h('span', { class: 'icon-style-row' }, iconSample.map(n => icon(n))), h('span', { text: name }));
+                })),
+            ]),
+            ...settingsGroup('App icon', [
+                h('div', { class: 'app-icons', role: 'radiogroup', 'aria-label': 'App icon' }, Object.entries(T.APP_ICONS).map(([id, ic]) => {
+                    const sel = (settings.app_icon || 'default') === id;
+                    return h('button', { type: 'button', role: 'radio', 'aria-checked': String(sel), class: 'app-icon-tile' + (sel ? ' selected' : ''), disabled: !native,
+                        onclick: () => setAppIcon(id) },
+                        h('img', { src: `app-icon-${id}.png`, alt: '', width: 56, height: 56 }), h('span', { text: ic.name }));
+                })),
+            ], native ? 'Changes the Nourish icon on your home screen. Your phone may show a short notice when it changes.'
+                : 'The home screen icon can be changed in the iPhone and Android apps. Browsers and the PC app can’t change their icon.'),
+            ...settingsGroup('Today screen', [
+                ...[['protein_g', 'Protein'], ['carbs_g', 'Carbs'], ['fat_g', 'Fat']].map(([key, label]) => statToggle(key, label)),
+                settingsToggle('show_nutrition', 'Show nutrition', { hint: 'Calories and macros on meals' }),
+            ], 'Choose which bars show next to the calorie ring.'),
             ...settingsGroup('Layout', [
                 settingsRow('Open on', settingsSelect('start_tab', { today: 'Today', plan: 'Plan', chat: 'Chat', grocery: 'Grocery' })),
-                settingsRow('Plan starts on', settingsSelect('week_start', { monday: 'Monday', sunday: 'Sunday', today: 'Today' })),
+                settingsRow('Week starts on', settingsSelect('week_start', { monday: 'Monday', sunday: 'Sunday', today: 'Today' })),
                 settingsChoice('Units', unitSystem(), { imperial: 'Imperial (cups, °F)', metric: 'Metric (ml, °C)' }, v => setSetting('units', v, { quiet: true })),
-                settingsToggle('show_nutrition', 'Show nutrition', { hint: 'Calories and macros on meals' }),
+                h('button', { type: 'button', class: 'settings-row settings-nav', onclick: () => openSettingsPage('profile') },
+                    h('span', { class: 'settings-label' }, 'Meals each day', h('span', { class: 'settings-hint', text: 'Which meals and how many snacks: in Your profile' })), icon('i-chevron', 'chev')),
                 settingsToggle('reduce_motion', 'Reduce motion', { hint: 'Fewer animations' }),
-            ], 'These settings sync to every device connected to your PC.'),
+            ]),
+            ...settingsGroup('Advanced', [
+                colorRow('Background colour', 'custom_bg', settings.custom_bg || (document.documentElement.style.getPropertyValue('--bg') || '#0C0B0A').trim(), 'Any colour; text adjusts to stay readable'),
+                colorRow('Accent colour', 'custom_accent', settings.custom_accent || ((T.ACCENTS[settings.accent] || T.ACCENTS.orange).accent), 'Any colour for buttons and highlights'),
+                lookNotes.length ? h('div', { class: 'settings-row look-note', role: 'note', text: lookNotes.join(' ') }) : null,
+            ], help('Pick any colour you like.', 'Nourish works out matching cards, borders and text from your colour, and checks the contrast (the WCAG accessibility formula). If a colour would make text hard to read, it adjusts it slightly and tells you here.')),
+            ...settingsGroup('', [settingsButton('Reset appearance to default', () => {
+                if (!confirm('Go back to the original look (Ember theme, Saffron accent, Editorial font, default text and icons)?')) return;
+                Object.entries(NourishTheme.DEFAULTS).forEach(([k, v]) => setSetting(k, v, { quiet: true }));
+                setSetting('today_stats', SETTINGS_DEFAULTS.today_stats, { quiet: true });
+                setAppIcon('default', { quiet: true });
+                renderSettings();
+                showToast('Back to the original look', false);
+            }, 'danger')]),
         ];
     },
     ai() {
