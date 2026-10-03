@@ -268,7 +268,9 @@ probe "localStorage.removeItem('nourish_plan_progress'); const t0 = Date.now();
   if (!finished) { localPlanCancelled = true; }
   const lines = activityLog.filter(l => l.area === 'plan').slice(-8).map(l => l.msg);
   return JSON.stringify({ finished, seconds: Math.round((Date.now() - t0) / 1000), days: daysData.map(d => ({ kcal: Math.round(NourishPlanner.dayTotals(d).kcal),
-    meals: MEAL_TYPES.map(t => d[t] ? d[t].name + ' (' + (d[t].source_name || (d[t].library_path ? 'library' : 'AI')) + ')' : '-') })), log: lines });" 560
+    meals: MEAL_TYPES.map(t => d[t] ? d[t].name + ' (' + (d[t].builtin ? 'Nourish recipe' : d[t].source_name || (d[t].library_path ? 'library' : 'AI')) + ')' : '-') })), log: lines,
+    share: (() => { const all = daysData.flatMap(d => MEAL_TYPES.map(t => d[t]).filter(Boolean)); return { meals: all.length, builtin: all.filter(m => m.builtin).length, web: all.filter(m => !m.builtin && /^https?:/.test(m.source_url || '')).length }; })(),
+    library: libraryStats() });" 560
 python3 - "$PROBE" <<'PY' || echo "(timing step skipped: $?)"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
@@ -276,6 +278,21 @@ v = json.loads(r["value"])
 print("\n".join(v["log"]))
 for i, d in enumerate(v["days"]): print(f"Day {i + 1}: {d['kcal']} kcal |", " | ".join(d["meals"]))
 print(f"AUTOMATIC 7-DAY PLAN ON THE SIMULATOR: {v['seconds']} s" + ("" if v["finished"] else " (stopped at the 8-minute limit; see the 'Found ... recipes in ... s' line for the search time)"))
+sh = v["share"]; print(f"SHARE OF THE PLAN: {sh['web']} of {sh['meals']} meals from recipe websites, {sh['builtin']} Nourish recipes, {sh['meals'] - sh['web'] - sh['builtin']} other (library/AI)")
+lib = v["library"]; print(f"WEB LIBRARY AFTER ONE PLAN: {lib['total']} recipes (breakfast {lib['perMeal']['breakfast']}, lunch {lib['perMeal']['lunch']}, dinner {lib['perMeal']['dinner']})")
+PY
+
+echo "== 6d2. The web library grows: three 'Refresh recipes now' rounds (not pass/fail: needs the live sites)"
+probe "const out = [];
+  for (let i = 0; i < 3; i++) { await refreshRecipeLibrary({ manual: true }); const s = libraryStats(); out.push({ total: s.total, perMeal: s.perMeal, sources: Object.keys(s.perSource).length }); }
+  out.push({ perSource: libraryStats().perSource });
+  return JSON.stringify(out);" 420
+python3 - "$PROBE" <<'PY' || echo "(library growth step skipped)"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+rows = json.loads(r["value"])
+for i, row in enumerate(rows[:-1]): print(f"After refresh {i + 1}: {row['total']} web recipes (breakfast {row['perMeal']['breakfast']}, lunch {row['perMeal']['lunch']}, dinner {row['perMeal']['dinner']}) from {row['sources']} sites")
+print("Per site:", ", ".join(f"{k} {v}" for k, v in sorted(rows[-1]["perSource"].items(), key=lambda x: -x[1])))
 PY
 
 echo "== 6e. Every recipe site, tried from inside the iPhone app (its own way of fetching pages): not pass/fail, sites change"
