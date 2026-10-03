@@ -22,6 +22,8 @@
     const DESSERT = /\b(cake|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
     const NOT_DESSERT = /\b(chia pudding|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry)\b/i;
     const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib)\b/i;
+    // Fine for dinner, too much for a quick lunch.
+    const HEAVY_LUNCH = /\b(baked (pasta|ziti|penne|rigatoni|macaroni|mac|spaghetti|gnocchi)|pasta bake|mac and cheese bake|stuffed shells|manicotti|cannelloni|pot roast|roast (chicken|turkey|lamb|pork|beef|duck)|whole (chicken|fish|turkey)|beef wellington|pie|gratin|moussaka|pastitsio|osso buco|cassoulet|coq au vin|bourguignon|slow cooker|crock ?pot|braised)\b/i;
     const NOT_A_MEAL = /\b(sauce|dressing|dip|marinade|seasoning|spice (mix|blend)|stock|broth|syrup|jam|butter|vinaigrette|gravy|salsa|pesto|chutney|pickle[sd]?|drink|cocktail|mocktail|lemonade|tea|coffee|latte|juice|bread|loaf|rolls|buns|crackers|croutons|bars|bites|energy balls|protein balls|trail mix|popcorn|chips)$/i;
     const SIDE = /\b(side|sides|side dish|appetizers?|starters?|snacks?)\b/i;
 
@@ -44,10 +46,127 @@
         const hasProtein = !!mainProtein(r);
         return {
             breakfast: brk && !heavy,
-            lunch: !onlyBrk && !side && !sweetHeavy && (hasProtein || /salad|soup|bowl|wrap|sandwich|pasta|noodle|grain|lentil|bean|chickpea/i.test(name)),
+            lunch: !onlyBrk && !side && !sweetHeavy && !heavy && !HEAVY_LUNCH.test(name) && (hasProtein || /salad|soup|bowl|wrap|sandwich|pita|quesadilla|hummus|pasta|noodle|grain|lentil|bean|chickpea/i.test(name) || /\blunch\b/.test(cat)),
             dinner: !onlyBrk && !side && !sweetHeavy && hasProtein,
             why: heavy && brk ? 'a dinner dish' : '',
         };
+    }
+
+    // === WHAT A RECIPE ASKS OF THE COOK: time, effort, meal type ===
+    // Every recipe gets: its meal type, its total time (active time: an overnight soak or a long
+    // marinade done ahead doesn't count) and a difficulty score from 1 (pour and eat) to 10, from
+    // its steps, ingredients and techniques. Recipes that don't fit a slot are rejected in code.
+    const STAPLES = /^(salt|kosher salt|sea salt|black pepper|pepper|ground black pepper|water|ice|cooking spray|oil|olive oil|vegetable oil|canola oil|salt and pepper)$/i;
+    const TECHNIQUES = [
+        ['bake', /\b(bake|baked|baking|oven)\b/i, 20], ['roast', /\broast(ed|ing)?\b/i, 30], ['braise', /\b(braise[ds]?|braising)\b/i, 90],
+        ['slow cook', /\b(slow cook(er)?|crock ?pot|low and slow)\b/i, 240], ['deep-fry', /\bdeep[- ]?fr(y|ied|ying)\b/i, 20], ['fry', /\b(fry|fried|frying|pan-fry)\b/i, 8],
+        ['sear', /\bsear(ed|ing)?\b/i, 6], ['sauté', /\bsaut[eé](e?d|ing)?\b/i, 6], ['simmer', /\bsimmer(ed|ing)?\b/i, 15], ['boil', /\b(boil|boiled|boiling)\b/i, 10],
+        ['grill', /\b(grill|grilled|grilling|broil)\b/i, 12], ['steam', /\bsteam(ed|ing)?\b/i, 8], ['poach', /\bpoach(ed|ing)?\b/i, 8], ['blend', /\b(blend|blender|puree|purée)\b/i, 2],
+        ['knead', /\b(knead|dough|proof|rise until)\b/i, 60], ['smoke', /\bsmok(e|ed|ing|er)\b(?! paprika| salmon)/i, 120], ['marinate', /\bmarinat(e|ed|ing)\b/i, 0],
+        ['stir-fry', /\bstir[- ]?fr(y|ied)\b/i, 10], ['toast', /\btoast(ed|er|ing)?\b/i, 3], ['microwave', /\bmicrowave\b/i, 2], ['whisk', /\bwhisk\b/i, 1],
+    ];
+    const HARD = /\b(deep[- ]?fr|knead|dough|proof|laminat|temper(ed|ing)? (the )?chocolate|caramel|sous vide|butterfl(y|ied)|debone|truss|flamb|souffl|reduce by half|candy thermometer|pressure cook|pipe the)\b/i;
+    const HEAT = /\b(bake|baked|baking|oven|roast|fry|fried|frying|sear|saut[eé]|simmer|boil|grill|broil|steam|poach|cook|heat|stove|skillet|pan|microwave|preheat)\b/i;
+    const PASSIVE = /\b(overnight|refrigerate|chill|soak|marinate|rest|set|freeze|cool)\b/i;
+    function countIngredients(r) {
+        return (r.ingredients || []).filter(l => {
+            const name = String(l).toLowerCase().replace(/\([^)]*\)/g, '').replace(/^[\d\s/.½¼¾⅓⅔-]+(cups?|tbsp|tsp|tablespoons?|teaspoons?|g|ml|oz|lb|pinch|dash)?\s*(of\s+)?/, '').replace(/,.*$/, '').trim();
+            return name && !STAPLES.test(name) && !/\bto taste\b|for serving|for garnish|optional/.test(String(l).toLowerCase());
+        }).length;
+    }
+    // Minutes the steps spell out ("bake for 25 minutes", "simmer 1 hour"), passive waiting left out.
+    function stepMinutes(steps) {
+        let active = 0, passive = 0;
+        (steps || []).forEach(st => String(st).split(/(?<=[.;])\s+/).forEach(sentence => {
+            const m = sentence.match(/(\d+(?:\.\d+)?)\s*(?:-|to|–)?\s*(\d+(?:\.\d+)?)?\s*(hours?|hrs?|minutes?|mins?)\b/i);
+            if (!m) return;
+            const n = Number(m[2] || m[1]) * (/^h/i.test(m[3]) ? 60 : 1);
+            if (PASSIVE.test(sentence) && !HEAT.test(sentence)) passive += n; else active += n;
+        }));
+        return { active, passive };
+    }
+    function recipeProfile(r) {
+        const steps = (r.steps || []).map(String);
+        const text = `${r.name || ''} ${steps.join(' ')}`;
+        const techniques = TECHNIQUES.filter(([, re]) => re.test(text)).map(([name, , min]) => ({ name, min }));
+        const ingredients = countIngredients(r);
+        const fromSteps = stepMinutes(steps);
+        const prep = Math.round(ingredients * 1.5 + steps.length);
+        // The longest technique sets a floor ("roast" can't take 5 minutes), the steps' own times add up.
+        const floor = techniques.reduce((m, t) => Math.max(m, t.min), 0);
+        const estimate = Math.max(prep + fromSteps.active, prep + floor);
+        const given = Number(r.active_minutes) > 0 ? Number(r.active_minutes) : Number(r.time_minutes) > 0 ? Number(r.time_minutes) : null;
+        // A recipe's own total that includes an overnight wait is replaced by the active time.
+        let minutes = given != null ? given : estimate;
+        if (given != null && fromSteps.passive >= 60 && given >= fromSteps.passive) minutes = Math.max(5, given - fromSteps.passive);
+        const hard = HARD.test(text);
+        const heat = HEAT.test(text) && !/^(no[- ]cook|overnight)/i.test(r.name || '');
+        const score = 1 + Math.max(0, steps.length - 3) * 0.45 + Math.max(0, ingredients - 5) * 0.3
+            + techniques.filter(t => !['whisk', 'toast', 'microwave', 'blend', 'marinate'].includes(t.name)).length * 0.6 + (hard ? 2 : 0) + (minutes > 60 ? 1 : 0);
+        const fit = mealFit(r);
+        return {
+            mealType: fit.breakfast && !fit.dinner ? 'breakfast' : fit.dinner && !fit.lunch ? 'dinner' : fit.lunch ? 'lunch' : fit.breakfast ? 'breakfast' : fit.dinner ? 'dinner' : 'none',
+            fits: { breakfast: fit.breakfast, lunch: fit.lunch, dinner: fit.dinner },
+            minutes: Math.round(minutes), timeEstimated: given == null, steps: steps.length, ingredients,
+            techniques: techniques.map(t => t.name), hard, cooked: heat,
+            difficulty: Math.round(Math.min(10, score) * 10) / 10,
+        };
+    }
+
+    // The defaults for each slot (Part of "breakfast is breakfast"): quick and simple in the
+    // morning, quick and light at lunch, anything goes at dinner. My schedule (settings) overrides
+    // the minutes; "I don't cook this meal" allows only no-cook food.
+    const SLOT_DEFAULTS = {
+        breakfast: { minutes: 15, ingredients: 8, steps: 6, difficulty: 4.5 },
+        lunch: { minutes: 25, ingredients: 11, steps: 7, difficulty: 5.5 },
+        dinner: { minutes: Infinity, ingredients: 22, steps: 16, difficulty: 10 },
+    };
+    // Settings → My schedule: the time someone has to make AND eat each meal ("5", "10", "20", "30",
+    // "45", "60", "norush", "nocook"; '' = the default), for every day, for the weekend, or per day.
+    // The cooking limit is that time less a few minutes to eat.
+    const EAT_MINUTES = { breakfast: 5, lunch: 5, dinner: 10 };
+    function scheduleChoice(settings, meal, weekday) {
+        const s = settings || {};
+        const perDay = weekday != null ? s[`sched_d${weekday}_${meal}`] : '';
+        if (perDay) return String(perDay);
+        if (weekday != null && weekday >= 5 && s.sched_weekend === 'on' && s[`sched_we_${meal}`]) return String(s[`sched_we_${meal}`]);
+        return String(s[`sched_${meal}`] || '');
+    }
+    function slotLimits(settings, meal, weekday) {
+        const base = Object.assign({}, SLOT_DEFAULTS[meal] || SLOT_DEFAULTS.dinner, { noCook: false, choice: '' });
+        const c = scheduleChoice(settings, meal, weekday);
+        base.choice = c;
+        if (c === 'nocook') return Object.assign(base, { minutes: 10, noCook: true, steps: Math.min(base.steps, 5), difficulty: Math.min(base.difficulty, 3) });
+        if (c === 'norush') return Object.assign(base, { minutes: Infinity, ingredients: SLOT_DEFAULTS.dinner.ingredients, steps: SLOT_DEFAULTS.dinner.steps, difficulty: meal === 'dinner' ? 10 : 7 });
+        const total = Number(c);
+        if (total > 0) {
+            const cook = Math.max(3, total - (EAT_MINUTES[meal] || 5));
+            base.minutes = cook;
+            if (cook <= 5) Object.assign(base, { noCook: true, steps: Math.min(base.steps, 4), difficulty: Math.min(base.difficulty, 2.5), ingredients: Math.min(base.ingredients, 6) });
+            else if (cook <= 15) Object.assign(base, { steps: Math.min(base.steps, 6), difficulty: Math.min(base.difficulty, 4.5) });
+            else if (cook >= 40 && meal !== 'dinner') Object.assign(base, { difficulty: 7, steps: 10, ingredients: 15 });
+        }
+        return base;
+    }
+    // Why a recipe doesn't fit a slot ('' when it does), in plain words.
+    function slotProblem(r, meal, limits) {
+        const L = limits || slotLimits({}, meal);
+        const p = recipeProfile(r);
+        if (!p.fits[meal]) {
+            const fit = mealFit(r);
+            if (meal === 'breakfast') return fit.why === 'a dinner dish' || DINNER_ONLY.test(r.name || '') ? `"${r.name}" is a dinner dish, not breakfast` : `"${r.name}" isn't a breakfast food`;
+            if (meal === 'lunch') return DINNER_ONLY.test(r.name || '') || HEAVY_LUNCH.test(r.name || '') ? `"${r.name}" is too heavy for lunch (a dinner dish)` : `"${r.name}" isn't a lunch`;
+            return fit.why ? `"${r.name}" is ${fit.why}` : `"${r.name}" isn't a ${meal}`;
+        }
+        if (L.noCook && p.cooked && !/^(toast|microwave)$/.test(p.techniques.join(''))) {
+            const cooking = p.techniques.filter(t => !['whisk', 'toast', 'microwave', 'blend', 'marinate'].includes(t));
+            if (cooking.length || /\b(cook|heat|stove|skillet|preheat)\b/i.test((r.steps || []).join(' '))) return `needs cooking (${cooking[0] || 'heat'}), and this meal is no-cook`;
+        }
+        if (p.minutes > L.minutes) return `takes about ${p.minutes} min${p.timeEstimated ? ' (estimated)' : ''}; ${meal} has ${L.minutes} min`;
+        if (p.steps > L.steps) return `${p.steps} steps is too many for ${meal} (at most ${L.steps})`;
+        if (p.ingredients > L.ingredients) return `${p.ingredients} ingredients is too many for ${meal} (at most ${L.ingredients})`;
+        if (p.difficulty > L.difficulty) return `too much work for ${meal} (difficulty ${p.difficulty} of 10${p.hard ? ', advanced technique' : ''})`;
+        return '';
     }
 
     // === MAIN PROTEIN, MAIN VEGETABLE, CUISINE ===
@@ -268,12 +387,13 @@
     // Picks recipes for each day and sizes the portions. pools: { breakfast: [recipes], … } (already
     // checked: allowed, seasoned, nutrition settled). Returns { days: [{ breakfast, lunch, dinner }],
     // missing: [{ day, meal, kcal }], report: [{ day, kcal, protein, carbs, fat }] }.
-    function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [], exclude }) {
+    function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [], exclude, weekday, taste }) {
         const targets = targetsOf(settings);
         const split = splitOf(settings);
         const on = m => split[MEALS.indexOf(m)] > 0;
         const used = new Set(already.map(n => normName(n)));
-        const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, cuisineCount: {} };
+        const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {} };
+        const rejected = {};   // why recipes didn't fit a slot (for the log)
         const out = [];
         const missing = [];
         const report = [];
@@ -282,7 +402,11 @@
             MEALS.forEach((m, i) => {
                 const kcal = targets.kcal * split[i];
                 if (!on(m)) { top[m] = []; return; }
+                // Breakfast is breakfast: anything too slow, too much work or the wrong kind of dish
+                // for this slot (with this day's schedule) is out before it can be picked.
+                const limits = slotLimits(settings, m, weekday ? weekday(d) : null);
                 top[m] = (pools[m] || []).filter(r => !used.has(normName(r.name)) && !(r.sameAs && r.sameAs.some(x => used.has(x))))
+                    .filter(r => { const why = slotProblem(r, m, limits); if (why) rejected[`${m}: ${r.name}`] = why; return !why; })
                     .map(r => ({ r, cost: slotCost(r, kcal, ctx) })).filter(x => isFinite(x.cost))
                     .sort((a, b) => a.cost - b.cost).slice(0, 8);
             });
@@ -327,7 +451,7 @@
             out.push(day);
             report.push(dayTotals(day));
         }
-        return { days: out, missing, report, targets, split };
+        return { days: out, missing, report, targets, split, rejected };
     }
     // Rounding amounts moves calories a little: nudge portions until the day is within 5%.
     // need: how many main meals a complete day has (days with a gap aren't nudged).
@@ -429,6 +553,45 @@
         day.snacks = snacks;
         return day;
     }
+    // === QUICK MEALS ===
+    // Simple, reliable meals for when nothing found or written fits a slot's rules (a busy morning,
+    // a no-cook lunch). Worked out from their ingredients like everything else.
+    const QUICK_MEALS = {
+        breakfast: [
+            ['Greek Yogurt Bowl with Berries and Granola', ['1 cup greek yogurt', '1/2 cup berries', '1/4 cup granola', '1 tsp honey'], ['Spoon the yogurt into a bowl.', 'Top with the berries, granola and honey and serve.'], 3],
+            ['Peanut Butter Banana Toast', ['2 slices whole wheat bread', '2 tbsp peanut butter', '1 banana', '1 pinch cinnamon'], ['Toast the bread.', 'Spread with the peanut butter, top with the sliced banana and cinnamon, and serve.'], 5],
+            ['Overnight Oats with Apple', ['1/2 cup rolled oats', '1/2 cup milk', '1/4 cup greek yogurt', '1/2 apple', '1 tsp maple syrup', '1 pinch cinnamon'], ['The night before, stir the oats, milk, yogurt, syrup and cinnamon together in a jar and refrigerate.', 'In the morning, top with the chopped apple and serve.'], 5],
+            ['Scrambled Eggs on Toast', ['2 large eggs', '1 slice whole wheat bread', '1 tsp butter', '1/8 tsp salt', '1 pinch black pepper', '1 tbsp chopped chives'], ['Toast the bread.', 'Whisk the eggs with the salt and pepper.', 'Melt the butter in a small pan over low heat, add the eggs and stir gently for 2 minutes until just set.', 'Serve on the toast with the chives.'], 8],
+            ['Cottage Cheese with Pineapple and Almonds', ['1 cup cottage cheese', '1/2 cup pineapple', '1 tbsp sliced almonds'], ['Spoon the cottage cheese into a bowl.', 'Top with the pineapple and almonds and serve.'], 3],
+            ['Banana Berry Smoothie', ['1 banana', '1 cup frozen berries', '1 cup milk', '1/2 cup greek yogurt', '1 tbsp peanut butter'], ['Blend everything until smooth, about 1 minute.', 'Pour into a glass and serve.'], 4],
+        ],
+        lunch: [
+            ['Tuna Salad Wrap', ['1 can tuna', '1 tbsp mayonnaise', '1 tsp lemon juice', '1/8 tsp salt', '1 pinch black pepper', '1 flour tortilla', '1 cup lettuce', '1/2 tomato'], ['Mix the tuna, mayonnaise, lemon juice, salt and pepper.', 'Lay the tortilla flat, add the lettuce, sliced tomato and tuna.', 'Roll it up tightly, cut in half and serve.'], 8],
+            ['Hummus and Veggie Pita', ['1 whole wheat pita', '1/4 cup hummus', '1/2 cucumber', '1/2 bell pepper', '1/4 cup feta', '1 tsp lemon juice', '1/2 tsp dried oregano'], ['Slice the cucumber and pepper.', 'Spread the hummus inside the pita.', 'Fill with the vegetables and feta, sprinkle with oregano and lemon juice, and serve.'], 7],
+            ['Chickpea Feta Salad', ['1 can chickpeas', '1 cup cherry tomatoes', '1/2 cucumber', '1/4 cup feta', '1 tbsp olive oil', '1 tbsp lemon juice', '1/4 tsp salt', '1/2 tsp dried oregano'], ['Rinse and drain the chickpeas.', 'Halve the tomatoes and dice the cucumber.', 'Toss everything with the oil, lemon juice, salt and oregano, and serve.'], 10],
+            ['Turkey and Cheese Sandwich', ['2 slices whole wheat bread', '3 oz sliced turkey', '1 slice cheddar', '1 tsp mustard', '1 cup lettuce', '1/2 tomato', '1 pinch black pepper'], ['Spread the mustard on the bread.', 'Layer the turkey, cheese, lettuce, sliced tomato and pepper.', 'Close the sandwich, cut in half and serve.'], 5],
+            ['Black Bean Quesadilla', ['1 flour tortilla', '1/2 cup black beans', '1/3 cup shredded cheddar', '2 tbsp salsa', '1/4 tsp ground cumin', '1/8 tsp salt'], ['Mash the beans with the cumin and salt.', 'Spread on half the tortilla, add the cheese and fold it over.', 'Cook in a dry pan over medium heat for 3 minutes a side until golden.', 'Cut into wedges and serve with the salsa.'], 12],
+            ['Chicken Caesar Salad', ['4 oz cooked chicken breast', '2 cups romaine lettuce', '2 tbsp caesar dressing', '2 tbsp grated parmesan', '1/4 cup croutons', '1 pinch black pepper'], ['Slice the chicken.', 'Toss the lettuce with the dressing.', 'Top with the chicken, parmesan, croutons and pepper, and serve.'], 6],
+        ],
+        dinner: [
+            ['Garlic Lemon Salmon with Rice and Greens', ['6 oz salmon fillet', '1/2 cup rice', '2 cups spinach', '1 tbsp olive oil', '2 cloves garlic', '1/2 lemon', '1/4 tsp salt', '1 pinch black pepper'], ['Cook the rice following the packet, about 15 minutes.', 'Season the salmon with the salt and pepper.', 'Heat the oil in a pan over medium-high heat and cook the salmon for 4 minutes a side.', 'Add the garlic and spinach to the pan for 1 minute until wilted.', 'Serve the salmon on the rice with the spinach and a squeeze of lemon.'], 25],
+            ['Chicken Stir-Fry with Vegetables', ['6 oz chicken breast', '2 cups mixed stir-fry vegetables', '1 tbsp low-sodium soy sauce', '1 tsp grated fresh ginger', '1 clove garlic', '1 tbsp vegetable oil', '1/2 cup rice'], ['Cook the rice following the packet.', 'Slice the chicken into strips.', 'Heat the oil in a pan over high heat and stir-fry the chicken for 5 minutes.', 'Add the vegetables, garlic and ginger and stir-fry for 4 minutes, then add the soy sauce.', 'Serve over the rice.'], 25],
+        ],
+    };
+    function quickRecipe([name, ingredients, steps, minutes], meal) {
+        const r = { name, servings: 1, time_minutes: minutes, ingredients: ingredients.slice(), steps: steps.slice(), quick: true, category: meal ? [meal] : [] };
+        r.nutrition = N.calculate(r.ingredients, 1).nutrition;
+        r.nutrition_basis = 'calculated';
+        return r;
+    }
+    // The best quick meal for a slot that fits its limits, isn't avoided and isn't already in the day.
+    function quickMeal(meal, limits, { exclude, taken = [], d = 0 } = {}) {
+        const names = new Set(taken.map(normName));
+        const ok = (QUICK_MEALS[meal] || []).map(q => quickRecipe(q, meal))
+            .filter(r => r.nutrition.calories > 0 && !(exclude && exclude(r)) && !names.has(normName(r.name)) && !slotProblem(r, meal, limits));
+        return ok.length ? ok[d % ok.length] : null;
+    }
+
     function normName(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\b(the|best|easy|healthy|quick|recipe|my|simple|homemade)\b/g, '').replace(/\s+/g, ' ').trim(); }
 
     // === DISH NAMES ===
@@ -461,7 +624,7 @@
         }).join('');
     }
 
-    const api = { fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
+    const api = { quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -354,9 +354,12 @@ function tidyMeal(meal) {
 
 // Everything wrong with one AI-made meal: the recipe checks (recipes.js), repeated ingredients, a
 // line or step that hit the format's length limit (so it was cut off), and a repeat of an earlier dish.
-function allProblems(meal, type, earlier, limited) {
+function allProblems(meal, type, earlier, limited, limits) {
     if (!usableMeal(meal)) return ['the answer was incomplete (cut off?)'];
     const out = (completeMeal(meal) ? [] : ['the answer was incomplete (cut off?)']).concat(mealProblems(meal), Recipes.recipeProblems(meal, { type }));
+    // Breakfast is breakfast: the slot's rules (and the person's schedule) are checked in code too.
+    const slot = Planner && Planner.slotProblem && PLAN_MEALS.indexOf(type) >= 0 ? Planner.slotProblem(meal, type, limits || slotLimitsFor(type, null)) : '';
+    if (slot) out.push(slot);
     if (limited) {
         (meal.steps || []).forEach((s, i) => { if (String(s).length >= L.stepChars) out.push(`step ${i + 1} hit the length limit (cut off?)`); });
         meal.ingredients.forEach(s => { if (String(s).length >= L.itemChars) out.push(`"${s}" hit the length limit (cut off?)`); });
@@ -424,7 +427,7 @@ async function makeMeal(job, run, h) {
             dropJunk({ [job.type]: meal });
             tidyMeal(meal);
         }
-        const problems = allProblems(meal, job.type, job.earlier, !!job.grammar);
+        const problems = allProblems(meal, job.type, job.earlier, !!job.grammar, job.limits);
         if (firstProblems == null) firstProblems = problems;
         const score = mealScore(meal, problems);
         if (!best || score < best.score) best = { meal, problems, score };
@@ -470,6 +473,32 @@ function mealFormat(servings) {
 function mealSystem(servings) {
     return 'You are a chef writing recipes for a meal plan. Reply with ONLY raw JSON in this format, no markdown: ' + mealFormat(servings) + '\n' + recipeRules(servings) + (typeof profileText === 'function' ? '\n\nThe person:\n' + profileText() : '');
 }
+// The rules for a meal slot on a plan day (planner.js slotLimits with the person's schedule).
+function slotLimitsFor(type, d) {
+    const s = typeof settings !== 'undefined' ? settings : {};
+    const weekday = d != null && typeof dayBase === 'function' ? (dayBase() + d) % 7 : null;
+    return Planner && Planner.slotLimits ? Planner.slotLimits(s, type, weekday) : null;
+}
+// Why a meal can't go in this slot on this day ('' when it can).
+function slotCheck(meal, type, d) {
+    return meal && Planner && Planner.slotProblem && PLAN_MEALS.indexOf(type) >= 0 ? Planner.slotProblem(meal, type, slotLimitsFor(type, d)) : '';
+}
+// A simple built-in meal that fits the slot (planner.js QUICK_MEALS), for when the AI's meal doesn't.
+function quickMealFor(type, d, taken) {
+    if (!Planner || !Planner.quickMeal) return null;
+    let exclude = null;
+    try { exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }); } catch (e) { /* tests */ }
+    const r = Planner.quickMeal(type, slotLimitsFor(type, d), { exclude, taken: taken || [], d });
+    return r ? JSON.parse(JSON.stringify(r)) : null;
+}
+// The slot's limits in words for the AI (they're also checked in code: allProblems).
+function slotRulesText(type, d) {
+    const L = slotLimitsFor(type, d);
+    if (!L) return '';
+    const what = { breakfast: 'a real breakfast food', lunch: 'a light, quick lunch that is easy to pack or eat fast (no roasts or baked pasta)', dinner: 'the main cooked meal of the day' }[type] || '';
+    const time = L.noCook ? 'No cooking at all (no stove or oven): grab-and-go or no-cook food' : isFinite(L.minutes) ? `Ready in ${L.minutes} minutes or less` : '';
+    return ` It must be ${what}.${time ? ` ${time}, at most ${L.ingredients} ingredients and ${L.steps} steps.` : ''}`;
+}
 function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
     const s = typeof settings !== 'undefined' ? settings : {};
     const split = Planner && Planner.splitOf(s);   // the person's calorie split (Settings), 25/30/45 by default
@@ -477,7 +506,7 @@ function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
     const kcal = Math.round((Number(s.calorie_target) || 2000) * share / 10) * 10;
     const protein = Math.round((Number(s.protein_target) || 100) * share);
     return `${conversation ? conversation + '\n\n' : ''}${dish ? `Write the full recipe for "${dish}", the ${type}` : `Make the ${type}`} for Day ${d + 1}${typeof dayName === 'function' ? ` (${dayName(d)})` : ''}` +
-        `${cuisine && !dish ? `. Cuisine: ${cuisine}` : ''}. Aim for about ${kcal} kcal and ${protein} g protein per serving.` +
+        `${cuisine && !dish ? `. Cuisine: ${cuisine}` : ''}. Aim for about ${kcal} kcal and ${protein} g protein per serving.${slotRulesText(type, d)}` +
         `${recent && recent.length ? ` Make it different from: ${recent.join(', ')}.` : ''}${extra ? ' ' + extra : ''}${guidanceFor({ type, d, cuisine, dish })} Return only the JSON for this one recipe.`;
 }
 // What the app adds to every meal request (app.js mealGuidance): time limits for the slot, what the
@@ -524,11 +553,16 @@ async function generatePlanOnDevice(messages, hooks, state, run) {
             const todays = PLAN_MEALS.map(t => day[t] && day[t].name).filter(Boolean);
             const ask = mealAsk({ type, d, cuisine, recent: usedNames(todays).slice(-4), conversation });
             stat.promptChars = Math.max(stat.promptChars, system.length + ask.length);
-            const r = await makeMeal({ type, system, ask, grammar, earlier: usedNames(todays), id: `${d}-${type}`, label: `Day ${d + 1} ${type}` }, run,
+            const r = await makeMeal({ type, system, ask, grammar, earlier: usedNames(todays), id: `${d}-${type}`, label: `Day ${d + 1} ${type}`, limits: slotLimitsFor(type, d) }, run,
                 { onAttempt: a => h.onMeal(d, type, a), isCancelled: h.isCancelled });
             if (!r) break;   // cancelled
             if (!r.meal) throw new Error(`The AI couldn't write Day ${d + 1} ${type} (${r.problems.slice(0, 2).join('; ')}). Try again, or try another model.`);
-            day[type] = r.meal;
+            // Breakfast is breakfast: a meal that still breaks the slot's rules after the retries
+            // never reaches the plan; a simple built-in one that fits takes its place.
+            const misfit = slotCheck(r.meal, type, d);
+            const quick = misfit ? quickMealFor(type, d, todays) : null;
+            if (quick) logPlan(`Day ${d + 1} ${type}: "${r.meal.name}" ${misfit}; used "${quick.name}" instead`, null, 'warn');
+            day[type] = quick || r.meal;
             stat.attempts += r.attempts;
             stat.firstTryProblems += r.firstProblems.length;
             if (r.attempts > 1) stat.remade++;
@@ -1404,5 +1438,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
+    module.exports = { slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }

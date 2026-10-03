@@ -66,6 +66,7 @@
             ingredients: list(r.ingredients).slice(0, 40),
             steps: list(r.steps).slice(0, 30),
             time_minutes: Number(r.time_minutes) > 0 ? Math.round(Number(r.time_minutes)) : null,
+            active_minutes: Number(r.active_minutes) > 0 ? Math.round(Number(r.active_minutes)) : undefined,
             nutrition: r.nutrition && Number(r.nutrition.calories) > 0 ? r.nutrition : null,
             category: Array.isArray(r.category) ? r.category.join(', ') : String(r.category || ''),
             source_url: r.source_url || r.url || undefined,
@@ -392,7 +393,7 @@
         const { pools, stats } = await findRecipes(o);
         const sourcePenalty = r => sourceCost(r, o);
         const exclude = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
-        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude });
+        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste });
         plan.days.forEach(d => PL.MEALS.forEach(m => { if (d[m]) { delete d[m]._fit; delete d[m].sameAs; delete d[m].preferred; } }));
         return Object.assign(plan, { stats, pools });
     }

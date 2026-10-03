@@ -113,11 +113,15 @@
         const steps = recipeSteps(recipe.recipeInstructions);
         if (!ingredients.length && !steps.length) return null;
         const total = isoMinutes(recipe.totalTime) || ((isoMinutes(recipe.prepTime) || 0) + (isoMinutes(recipe.cookTime) || 0)) || null;
+        // Hands-on time (prep + cook), when it's less than the total: an overnight chill doesn't make
+        // overnight oats a slow breakfast.
+        const active = (isoMinutes(recipe.prepTime) || 0) + (isoMinutes(recipe.cookTime) || 0);
         const n = recipe.nutrition && typeof recipe.nutrition === 'object' ? recipe.nutrition : {};
         const nutrition = { calories: firstNumber(n.calories), protein_g: firstNumber(n.proteinContent), carbs_g: firstNumber(n.carbohydrateContent), fat_g: firstNumber(n.fatContent) };
         const servings = firstNumber(recipe.recipeYield);
         return {
             name: cleanText(recipe.name).slice(0, 150), time_minutes: total,
+            active_minutes: active > 0 && total && active < total ? active : undefined,
             servings: servings >= 1 && servings <= 100 ? Math.round(servings) : null,
             nutrition: Object.keys(nutrition).some(k => nutrition[k] != null) ? nutrition : null,
             ingredients: ingredients.slice(0, 60), steps: steps.slice(0, 40),

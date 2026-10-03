@@ -1899,8 +1899,12 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
     const units = unitSystem();
     const ingredients = NourishGrocery.dedupeIngredients(meal.ingredients || []).map(line => NourishUnits.formatIngredient(NourishUnits.clampIngredient(line).line, units));
     const n = meal.nutrition;
-    const chips = [h('span', { class: 'chip' }, icon('i-clock'), formatMinutes(meal.time_minutes))];
+    const profile = (meal.ingredients || []).length ? NourishPlanner.recipeProfile(meal) : null;
+    const chips = [h('span', { class: 'chip' }, icon('i-clock'), meal.time_minutes ? formatMinutes(meal.time_minutes) : profile ? `about ${formatMinutes(profile.minutes)}` : formatMinutes(meal.time_minutes))];
     if (meal.servings) chips.push(h('span', { class: 'chip' }, icon('i-user'), `Serves ${meal.servings}`));
+    // How much work it is (steps, ingredients, techniques), so a busy morning isn't a surprise.
+    if (profile) chips.push(h('span', { class: 'chip', title: `Difficulty ${profile.difficulty} of 10: ${profile.steps} steps, ${profile.ingredients} ingredients${profile.techniques.length ? ', ' + profile.techniques.join(', ') : ''}` },
+        icon('i-utensils'), profile.difficulty <= 3 ? 'Easy' : profile.difficulty <= 6 ? 'Medium' : 'Involved'));
     if (on('show_nutrition') && !n) chips.push(h('span', { class: 'chip accent' }, icon('i-flame'), '— kcal'));
     // Ticked ingredients and the step you're on stay while this recipe is open (also after the heart is tapped).
     const progressKey = `${meal.name}|${dayIndex}|${mealType}|${cookbookId}`;
@@ -2792,6 +2796,8 @@ function normalizeMeal(m) {
         scaled: m.scaled && Number(m.scaled.portion) > 0 ? { from_servings: toNumber(m.scaled.from_servings), portion: toNumber(m.scaled.portion) } : undefined,
         reseasoned: Array.isArray(m.reseasoned) && m.reseasoned.length ? m.reseasoned.map(String).slice(0, 6) : undefined,
         trimmed: m.trimmed ? true : undefined,
+        active_minutes: toNumber(m.active_minutes) > 0 ? toNumber(m.active_minutes) : undefined,
+        quick: m.quick ? true : undefined,
         library_path: m.library_path ? String(m.library_path).slice(0, 300) : undefined,
     }, safeSource(m));
     // Nutrition is never taken on trust: it's calculated from the ingredients (USDA data, nutrition.js),
@@ -2836,6 +2842,15 @@ function normalizePlan(data, strict = true) {
 function applyPlan(raw, { navigate = true } = {}) {
     reportCaps = true;
     try { daysData = normalizePlan(raw); } finally { reportCaps = false; }
+    // Breakfast is breakfast, for plans the AI wrote in one go too: a meal that breaks its slot's
+    // rules (or the person's schedule) is replaced by a simple built-in one that fits.
+    daysData.forEach((d, i) => MEAL_TYPES.forEach(t => {
+        const misfit = d && d[t] ? slotCheck(d[t], t, i) : '';
+        if (!misfit) return;
+        const quick = quickMealFor(t, i, MEAL_TYPES.map(x => d[x] && d[x].name).filter(Boolean));
+        nlog('plan', `${dayName(i)} ${t}: "${d[t].name}" ${misfit}${quick ? `; replaced by "${quick.name}"` : ''}`, null, 'warn');
+        if (quick) d[t] = normalizeMeal(quick);
+    }));
     // Snacks (Profile → Meals each day): plans the AI wrote get them here too.
     if (NourishPlanner.snacksOf(settings)) {
         const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
@@ -3094,6 +3109,7 @@ function finderOptions(likes, hates) {
         api: (path, body) => api(path, { method: 'POST', timeoutMs: 45000, body }),
         library: () => libraryRecipes(),
         pairingScore: r => NourishLibrary.pairingScore(libraryIndex(), r),
+        weekday: d => (dayBase() + d) % 7,
         cache: { get: k => loadJSON(k, null), set: (k, v) => store(k, v) },
         log: m => nlog('plan', m),
     };
@@ -3153,12 +3169,14 @@ async function fillMissingMeals(plan) {
             const run = onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled: () => localPlanCancelled }) : aiRunner();
             try {
                 const r = await makeMeal({ type: slot.meal, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null,
-                    earlier: others, id: `fill-${slot.day}-${slot.meal}`, label: `${dayName(slot.day)} ${slot.meal}` }, run, { isCancelled: () => localPlanCancelled });
+                    earlier: others, id: `fill-${slot.day}-${slot.meal}`, label: `${dayName(slot.day)} ${slot.meal}`, limits: slotLimitsFor(slot.meal, slot.day) }, run, { isCancelled: () => localPlanCancelled });
                 if (r && r.meal) {
                     meal = normalizeMeal(r.meal);
                     const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
                     if (meal && exclude(meal)) { nlog('plan', `The AI's ${slot.meal} "${meal.name}" has ${exclude(meal)}, which is avoided; not used`, null, 'warn'); meal = null; }
                     if (meal && !NourishPlanner.flavorCheck(meal).ok) { NourishPlanner.reseason(meal); NourishNutrition.settle(meal); }
+                    const misfit = slotCheck(meal, slot.meal, slot.day);
+                    if (misfit) { nlog('plan', `The AI's ${slot.meal} "${meal.name}" ${misfit}; not used`, null, 'warn'); meal = null; }
                 }
             } catch (e) {
                 nlog('plan', `The AI couldn't write ${dayName(slot.day)} ${slot.meal}: ${e.message}`, null, 'warn');
@@ -3166,9 +3184,14 @@ async function fillMissingMeals(plan) {
         }
         if (!meal) {
             // The best recipe for this slot from the whole pool, even if it's already in the week.
-            const pool = (plan.pools[slot.meal] || []).filter(r => !MEAL_TYPES.some(t => day[t] && NourishPlanner.normName(day[t].name) === NourishPlanner.normName(r.name)));
+            const pool = (plan.pools[slot.meal] || []).filter(r => !MEAL_TYPES.some(t => day[t] && NourishPlanner.normName(day[t].name) === NourishPlanner.normName(r.name)) && !slotCheck(r, slot.meal, slot.day));
             const best = pool.sort((a, b) => Math.abs(a.nutrition.calories - slot.kcal) - Math.abs(b.nutrition.calories - slot.kcal))[0];
             if (best) { meal = JSON.parse(JSON.stringify(best)); reused++; }
+        }
+        if (!meal) {
+            // Nothing found or written fits this slot's rules: a simple built-in meal that does.
+            meal = quickMealFor(slot.meal, slot.day, MEAL_TYPES.map(t => day[t] && day[t].name).filter(Boolean));
+            if (meal) { meal = normalizeMeal(meal); nlog('plan', `${dayName(slot.day)} ${slot.meal}: a quick built-in meal (${meal.name})`); }
         }
         if (meal) day[slot.meal] = meal;
     }
@@ -3211,7 +3234,7 @@ async function swapFromSources(dayIndex, mealType) {
         const others = MEAL_TYPES.filter(t => t !== mealType).map(t => day[t]).filter(Boolean);
         const taken = new Set(others.map(NourishPlanner.mainProtein).concat(others.map(NourishPlanner.mainVeg)).filter(Boolean));
         const share = NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(mealType)] * (Number(settings.calorie_target) || 2000);
-        const fits = (pools[mealType] || []).filter(r => !inWeek.has(NourishPlanner.normName(r.name)) && !taken.has(NourishPlanner.mainProtein(r)) && !taken.has(NourishPlanner.mainVeg(r)))
+        const fits = (pools[mealType] || []).filter(r => !inWeek.has(NourishPlanner.normName(r.name)) && !taken.has(NourishPlanner.mainProtein(r)) && !taken.has(NourishPlanner.mainVeg(r)) && !slotCheck(r, mealType, dayIndex))
             .map(r => ({ r, d: Math.abs(Math.log(share / r.nutrition.calories)) }))
             .filter(x => x.d < Math.log(2)).sort((a, b) => a.d - b.d).slice(0, 4);
         if (fits.length) picked = fits[Math.floor(Math.random() * fits.length)].r;
@@ -3255,7 +3278,7 @@ async function makeMealFor(dayIndex, mealType, mode, onAttempt) {
     const run = onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled }) : aiRunner();
     return makeMeal({ type: mealType, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null,
         earlier: retry ? others : others.concat(current ? [current.name] : []), id: `${mode}-${dayIndex}-${mealType}`,
-        label: `${dayName(dayIndex)} ${mealType}` }, run, { onAttempt, isCancelled });
+        label: `${dayName(dayIndex)} ${mealType}`, limits: slotLimitsFor(mealType, dayIndex) }, run, { onAttempt, isCancelled });
 }
 
 // The Swap and Try again buttons on a recipe.
@@ -3273,6 +3296,8 @@ async function remakeMeal(dayIndex, mealType, mode) {
         const r = await makeMealFor(dayIndex, mealType, mode, a => showJobBar('busy', `${verb} ${label}${a ? ` · try ${a + 1} of 3` : ''}…`));
         if (!r) { showJobBar(null); showToast('Cancelled', false); return; }
         if (!r.meal) throw new Error(r.problems.slice(0, 2).join('; ') || 'no usable answer');
+        const misfit = slotCheck(r.meal, mealType, dayIndex);
+        if (misfit) throw new Error(`the AI's ${MEAL_LABELS[mealType].toLowerCase()} didn't fit (${misfit}). Try again`);
         reportCaps = true;
         try { daysData[dayIndex][mealType] = normalizeMeal(r.meal); } finally { reportCaps = false; }
         changed('plan');
@@ -3297,7 +3322,10 @@ async function checkChangedMeals(changes) {
     for (const c of changes) {
         const meal = daysData[c.day - 1] && daysData[c.day - 1][c.meal];
         if (!meal || localPlanCancelled) continue;
-        const problems = allProblems(meal, c.meal, [], false);
+        // A dish the person asked the chef for by name is theirs to choose, even if it breaks the
+        // slot's usual rules (lamb for breakfast on a Sunday): only the recipe itself is checked.
+        const misfit = slotCheck(meal, c.meal, c.day - 1);
+        const problems = allProblems(meal, c.meal, [], false).filter(p => p !== misfit);
         if (!problems.length) continue;
         nlog('plan', `Day ${c.day} ${c.meal} "${meal.name}" from the chat has ${problems.length} problem(s); writing it out again`, problems, 'warn');
         const r = await makeMealFor(c.day - 1, c.meal, 'retry', a => showJobBar('busy', `Checking ${dayName(c.day - 1)} ${c.meal} · try ${a + 1} of 3…`));
