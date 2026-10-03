@@ -175,7 +175,8 @@
             excludeHard: P.excluder({ avoid: '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' }),
             adaptable: [],   // recipes with one disliked side ingredient and no ready swap (the AI may suggest one)
             out: false,
-            timeUp() { return this.out || now() - stats.started > (o.limits && o.limits.seconds || LIMITS.seconds) * 1000; },
+            cap: null,   // seconds, set lower when the library already has enough
+            timeUp() { return this.out || now() - stats.started > Math.min(this.cap || Infinity, (o.limits && o.limits.seconds) || LIMITS.seconds) * 1000; },
         };
     }
     function siteOk(ctx, id) { const f = ctx.failures[id]; return !(f && f.until > ctx.now()); }
@@ -606,6 +607,9 @@
             if (add(JSON.parse(JSON.stringify(c.r)), site || { id: c.r.source_id || 'other', name: c.r.source_name })) ctx.stats.fromCache++;
         });
         ctx.stats.library = Object.keys(recipeCache).length;
+        // Plans don't wait on slow sites: with a library that already has a day's worth of good web
+        // recipes for every meal, live searching gets a few seconds; the background refresh grows it.
+        if (!o.grow && MEALS.every(m => !want(m) || have(m) >= days)) ctx.cap = 8;
 
         // 2a. The recipe APIs (one request each). TheMealDB is searched for every meal, a few each.
         const apiJobs = [];
@@ -737,8 +741,11 @@
         };
         if (!o.offline) await Promise.all(apiJobs.concat(Array.from({ length: limits.parallel }, worker)));
 
-        // 3. Nourish's own recipes, on equal terms with every other source.
-        if (B && enabled('builtin')) {
+        // 3. Nourish's own recipes: a backup by default (Settings → Advanced → Nourish recipes): the
+        // planner only picks them when no web or library recipe fits; "mix" puts them on equal
+        // terms; "off" leaves them out.
+        const builtinMode = (o.settings && o.settings.builtin_mode) || 'backup';
+        if (B && enabled('builtin') && builtinMode !== 'off') {
             MEALS.forEach(m => B.forMeal(m).forEach(r => add(JSON.parse(JSON.stringify(r)), S.byId('builtin'))));
         }
 
@@ -803,7 +810,7 @@
         const { pools, stats, adaptable } = await findRecipes(o);
         const sourcePenalty = r => sourceCost(r, o);
         const exclude = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
-        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste, favorites: o.favorites });
+        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal, builtin_mode: 'backup' }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste, favorites: o.favorites });
         plan.days.forEach(d => PL.MEALS.forEach(m => { if (d[m]) { delete d[m]._fit; delete d[m].sameAs; delete d[m].preferred; } }));
         return Object.assign(plan, { stats, pools, adaptable });
     }

@@ -127,7 +127,8 @@ const SETTINGS_DEFAULTS = {
 });
 SETTINGS_DEFAULTS.sched_weekend = 'off';
 SETTINGS_DEFAULTS.sched_asked = '';   // 'yes' once the quick questions were answered or skipped
-SETTINGS_DEFAULTS.allow_leftovers = 'off';   // 'on': a dinner can come back as the next day's lunch
+SETTINGS_DEFAULTS.allow_leftovers = 'off';
+SETTINGS_DEFAULTS.builtin_mode = 'backup';     // Nourish's own recipes: 'backup' (only when no web recipe fits), 'mix' (equal terms), 'off'   // 'on': a dinner can come back as the next day's lunch
 const settings = Object.assign({}, SETTINGS_DEFAULTS);
 let prefs = { goal: 'Maintain', source: 'aiChef', likes: '', hates: '' };
 let daysData = [];
@@ -1720,6 +1721,16 @@ const SETTINGS_RENDERERS = {
         ];
     },
     advanced() {
+        const lib = libraryStats();
+        const bySource = Object.entries(lib.perSource).sort((x, y) => y[1] - x[1]);
+        const refreshed = Number(load(LIBRARY_REFRESH_KEY, 0));
+        const libraryRows = [
+            infoRow('Web recipes saved', `${lib.total.toLocaleString()} (breakfast ${lib.perMeal.breakfast}, lunch ${lib.perMeal.lunch}, dinner ${lib.perMeal.dinner})`),
+            infoRow('Last refreshed', refreshed ? new Date(refreshed).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'not yet'),
+            ...bySource.slice(0, 30).map(([name, n]) => infoRow(name, `${n} recipe${n === 1 ? '' : 's'}`)),
+            settingsButton(libraryRefreshing ? 'Refreshing recipes…' : 'Refresh recipes now', () => refreshRecipeLibrary({ manual: true }), 'settings-button-primary'),
+            settingsRow('Nourish recipes', settingsSelect('builtin_mode', { backup: 'Backup only', mix: 'Mix in', off: 'Off' })),
+        ];
         const off = new Set(String(settings.sources_off || '').split(',').filter(Boolean));
         const toggle = id => {
             if (off.has(id)) off.delete(id); else off.add(id);
@@ -1732,6 +1743,9 @@ const SETTINGS_RENDERERS = {
             h('span', { class: 'switch', 'aria-checked': String(!off.has(src.id)), 'aria-hidden': 'true' }));
         const names = Object.fromEntries(NourishSources.all().map(x => [x.id, x.name]));
         return [
+            ...settingsGroup('Your recipe library', libraryRows,
+                help('Every web recipe Nourish reads is kept on this device, so plans start from a big, tested pool and work offline. It grows by itself while the app is open on Wi-Fi.',
+                    '"Nourish recipes" are the app\'s own recipes. "Backup only" (the default) uses them only when no web recipe fits a meal, or when you\'re offline. "Mix in" treats them like any other source. "Off" never uses them.')),
             ...settingsGroup('Where recipes come from', [
                 settingsRow('New plans', settingsSelect('plan_source', { auto: 'Real recipes first', ai: 'AI writes every meal' }, { onchange: () => renderSettings() })),
             ], help('"Real recipes first" uses tested recipes from cooking sites and only asks the AI when nothing fits. "AI writes every meal" is the older way: slower, especially on a phone.',
@@ -2121,6 +2135,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
     if (time.makeAhead) chips.push(h('span', { class: 'chip accent', text: 'Make ahead' }));
     if (portionLabel(meal)) chips.push(h('span', { class: 'chip', title: 'Your portion, sized to fit your day. The amounts and calories below are for this portion.' }, icon('i-user'), portionLabel(meal)));
     if (meal.leftover) chips.push(h('span', { class: 'chip', text: 'Leftovers' }));
+    if (meal.builtin) chips.push(h('span', { class: 'chip', title: "Written for Nourish, not from a recipe site", text: 'Nourish recipe' }));
     if (meal.rating && meal.rating.value) chips.push(h('span', { class: 'chip', title: `Rated ${meal.rating.value} of 5 on ${meal.source_name || 'its site'}` }, `★ ${meal.rating.value}${meal.rating.count ? ` (${meal.rating.count.toLocaleString()})` : ''}`));
     if (meal.servings && !portionLabel(meal)) chips.push(h('span', { class: 'chip' }, icon('i-user'), `Serves ${meal.servings}`));
     // How much work it is (steps, ingredients, techniques), so a busy morning isn't a surprise.
@@ -2195,7 +2210,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
         meal.source_url ? h('a', { class: 'btn btn-secondary recipe-source', href: meal.source_url, target: '_blank', rel: 'noopener noreferrer' },
             icon('i-link'), `Recipe from ${meal.source_name || 'the web'}${meal.via_name ? ` · via ${meal.via_name}` : ''}`)
             : meal.library_path ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), `From your recipe library: ${meal.library_path}`)
-            : meal.builtin ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), "One of Nourish's own recipes (works offline)")
+            : meal.builtin ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), "Nourish recipe: written for this app, not from a recipe site (works offline)")
             : h('div', { style: 'height:20px' }),
     );
     content.scrollTop = 0;
@@ -2626,6 +2641,7 @@ function mealCard(type, meal, dayIndex, status) {
                 h('span', { class: 'chip' }, icon('i-clock'), mealTime(meal).text),
                 on('show_nutrition') ? h('span', { class: 'chip' }, icon('i-flame'), `${formatCalories(meal.nutrition && meal.nutrition.calories)} kcal`) : null,
                 portionLabel(meal) ? h('span', { class: 'chip', text: portionLabel(meal) }) : null,
+                meal.builtin ? h('span', { class: 'chip', text: 'Nourish recipe' }) : null,
                 meal.leftover ? h('span', { class: 'chip', text: 'Leftovers' }) : null,
                 status === 'eaten' ? h('span', { class: 'chip ok' }, icon('i-check'), 'Eaten') : status === 'skipped' ? h('span', { class: 'chip', text: 'Skipped' }) : null,
                 meal.incomplete ? h('span', { class: 'chip warn', text: 'May be incomplete' }) : null)),
@@ -3314,6 +3330,7 @@ function builtinFor(type, d, taken) {
     const recent = NourishPlanner.dishList(recentPlanDishes());
     const kcal = (Number(settings.calorie_target) || 2000) * (NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(type)] || 0.33);
     const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
+    if (settings.builtin_mode === 'off') return null;
     const list = typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(type) : [];
     const ok = list.filter(r => !used.has(r.name) && !exclude(r) && !slotCheck(r, type, d))
         .sort((a, b) => (recent.has(a.name) ? 1 : 0) - (recent.has(b.name) ? 1 : 0) || Math.abs(Math.log(kcal / a.nutrition.calories)) - Math.abs(Math.log(kcal / b.nutrition.calories)));
@@ -3580,9 +3597,13 @@ function finderOptions(likes, hates) {
     };
 }
 
-// The recipe library grows quietly while the app is open: at most twice a day, on Wi-Fi only
-// (never on mobile data), and never while a plan is being made.
+// The recipe library grows quietly while the app is open: small batches every few hours, on Wi-Fi
+// only (never on mobile data), never while a plan is being made, towards several hundred web recipes
+// per meal from many sites. Each run continues where the last one stopped (finder.js "grow").
+// Why it used to read 0 pages: it asked the same first page of the same searches as the plans,
+// whose recipes were all in the library already, so there was nothing new to read.
 const LIBRARY_REFRESH_KEY = 'nourish_library_refreshed';
+let libraryRefreshing = false;
 async function onWifi() {
     if (isLocalMode() && nativeAvailable()) {
         try { const n = await nativeCall('network', {}, { timeoutMs: 5000 }); return !!(n && n.known && n.online && n.wifi && !n.expensive && !n.constrained); } catch (e) { return false; }
@@ -3590,20 +3611,49 @@ async function onWifi() {
     const c = navigator.connection;
     return !(c && (c.saveData || c.type === 'cellular'));
 }
-async function refreshRecipeLibrary() {
+// What the library holds: web recipes per meal and per site.
+function libraryStats() {
+    const cache = loadJSON(NourishFinder.CACHE.recipes, {}) || {};
+    const out = { total: 0, perMeal: { breakfast: 0, lunch: 0, dinner: 0 }, perSource: {} };
+    Object.values(cache).forEach(c => {
+        const r = c && c.r;
+        if (!r) return;
+        out.total++;
+        const fit = NourishPlanner.mealFit(r);
+        MEAL_TYPES.forEach(m => { if (fit[m]) out.perMeal[m]++; });
+        const name = r.source_name || 'Other';
+        out.perSource[name] = (out.perSource[name] || 0) + 1;
+    });
+    return out;
+}
+async function refreshRecipeLibrary({ manual = false } = {}) {
+    if (libraryRefreshing) return;
     try {
-        if (planJob || document.hidden || settings.plan_source === 'ai') return;
-        if (Number(load(LIBRARY_REFRESH_KEY, 0)) > Date.now() - 12 * 3600e3) return;
-        if (!(await onWifi())) { nlog('sources', 'Recipe library: not refreshed (not on Wi-Fi)', null, 'debug'); return; }
+        if (planJob || settings.plan_source === 'ai') { if (manual) showToast('Wait for the plan to finish first'); return; }
+        if (!manual && (document.hidden || Number(load(LIBRARY_REFRESH_KEY, 0)) > Date.now() - 3 * 3600e3)) return;
+        if (!manual && !(await onWifi())) { nlog('sources', 'Recipe library: not refreshed (not on Wi-Fi)', null, 'debug'); return; }
+        libraryRefreshing = true;
+        if (manual) { showJobBar('busy', 'Finding new recipes for your library…'); if (settingsPage === 'advanced') renderSettings(); }
         store(LIBRARY_REFRESH_KEY, String(Date.now()));
-        const o = Object.assign(finderOptions(prefs.likes, prefs.hates), { limits: { seconds: 60, searches: 24, pages: 40, parallel: 2 } });
+        const before = libraryStats().total;
+        const o = Object.assign(finderOptions(prefs.likes, prefs.hates), { grow: true, already: [],
+            limits: manual ? { seconds: 90, searches: 40, pages: 60, parallel: 3 } : { seconds: 45, searches: 16, pages: 24, parallel: 2 } });
         o.enabled = (orig => id => id !== 'library' && id !== 'builtin' && orig(id))(o.enabled);
         const { stats } = await NourishFinder.findRecipes(o);
-        nlog('sources', `Recipe library refreshed in the background: ${stats.pages} pages read, the library now has ${stats.library} recipes`, { perMeal: stats.perMeal, turnedAway: stats.why, leftAlone: stats.blocked });
+        const now = libraryStats();
+        nlog('sources', `Recipe library ${manual ? 'refreshed' : 'refreshed in the background'}: ${stats.searches} searches, ${stats.pages} pages read, ${now.total - before} new recipes; the library now has ${now.total} (breakfast ${now.perMeal.breakfast}, lunch ${now.perMeal.lunch}, dinner ${now.perMeal.dinner})`,
+            { perSource: stats.perSource, turnedAway: stats.why, leftAlone: stats.blocked, failed: stats.failed });
+        if (manual) showToast(now.total > before ? `${now.total - before} new recipe${now.total - before === 1 ? '' : 's'} saved (${now.total} in your library)` : 'No new recipes this time. Try again later.', false);
     } catch (e) {
         nlog('sources', `Recipe library refresh failed: ${e.message}`, null, 'warn');
+        if (manual) showToast(`Couldn't refresh: ${e.message}`);
+    } finally {
+        libraryRefreshing = false;
+        if (manual) { showJobBar(null); if (settingsPage === 'advanced') renderSettings(); }
     }
 }
+// Checks every half hour while the app is open (it only refreshes every 3 hours, on Wi-Fi).
+setInterval(() => { refreshRecipeLibrary(); }, 30 * 60e3);
 
 async function runSmartPlan(likes, hates) {
     const started = Date.now();
@@ -3623,7 +3673,7 @@ async function runSmartPlan(likes, hates) {
         const planSettings = Object.assign({}, settings, { goal: prefs.goal });
         let days = plan.days.map(d => NourishPlanner.fitDay(d, planSettings, servingsWanted()));
         // The last check, with or without an AI: every day within 10% of the calorie target.
-        const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (plan.pools[m] || []).concat(typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(m) : [])]));
+        const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (plan.pools[m] || []).concat(typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off' ? NourishBuiltins.forMeal(m) : [])]));
         const kept = NourishPlanner.keepToTargets(days, { pools, settings: planSettings, people: servingsWanted(),
             exclude: NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }), weekday: d => (dayBase() + d) % 7, already: recentPlanDishes() });
         days = kept.days;
@@ -3681,7 +3731,7 @@ async function fillMissingMeals(plan) {
         meal = await closest(pool, slot, recent);
         if (meal) how = 'a found recipe not used yet';
         // 2. The built-in recipes (all of them, whatever the pool held).
-        if (!meal && typeof NourishBuiltins !== 'undefined') { meal = await closest(NourishBuiltins.forMeal(slot.meal), slot, recent); if (meal) how = 'a built-in recipe'; }
+        if (!meal && typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off') { meal = await closest(NourishBuiltins.forMeal(slot.meal), slot, recent); if (meal) how = 'a Nourish recipe'; }
         if (meal) meal = JSON.parse(JSON.stringify(meal));
         // 2b. A real recipe with one disliked ingredient: the AI suggests a swap (a small job).
         if (!meal && run && (plan.adaptable || []).length) {
@@ -3725,10 +3775,10 @@ async function fillMissingMeals(plan) {
         }
         // 4. A dish from a plan in the last two weeks (still never one already in this plan).
         if (!meal) {
-            meal = closest(pool.concat(typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(slot.meal) : []), slot, null);
+            meal = closest(pool.concat(typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off' ? NourishBuiltins.forMeal(slot.meal) : []), slot, null);
             if (meal) { meal = JSON.parse(JSON.stringify(await meal)); how = 'a recipe from a recent plan'; }
         }
-        if (!meal) {
+        if (!meal && settings.builtin_mode !== 'off') {
             meal = quickMealFor(slot.meal, slot.day, inPlan().names());
             if (meal) how = 'a quick built-in meal';
         }

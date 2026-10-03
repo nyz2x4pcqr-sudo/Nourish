@@ -528,8 +528,11 @@
         // What the app has learned the person likes (taste.js): −1…1, worth up to about a slot's worth of fit.
         if (ctx.taste) { try { cost -= ctx.taste(r) * 0.8; } catch (e) { /* no profile */ } }
         cost += (ctx.cuisineCount[cuisineOf(r)] || 0) * 0.35;
+        // Nourish's own recipes as a backup (the default): only when nothing from the web or the
+        // library fits about as well.
+        if (r.source_id === 'builtin' && ctx.builtinMode === 'backup') cost += 3;
         // A mix of sources: each meal already taken from the same place counts a little against it.
-        cost += ((ctx.sourceCount && ctx.sourceCount[r.source_id || 'other']) || 0) * 0.08;
+        if (r.source_id !== 'builtin' || ctx.builtinMode !== 'backup') cost += ((ctx.sourceCount && ctx.sourceCount[r.source_id || 'other']) || 0) * 0.08;
         return cost;
     }
 
@@ -550,7 +553,7 @@
         const on = m => split[MEALS.indexOf(m)] > 0;
         const used = dishList();                 // this plan: never twice
         const recent = dishList(already);        // recent plans: avoided
-        const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {}, sourceCount: {} };
+        const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {}, sourceCount: {}, builtinMode: settings.builtin_mode || 'mix' };
         const rejected = {};   // why recipes didn't fit a slot (for the log)
         // The real calories of a recipe at each realistic portion (amounts rounded as written), so
         // meals are chosen for how close the day can really get, not for a number on paper.
