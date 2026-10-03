@@ -124,6 +124,40 @@ public class MainActivity extends Activity implements NativeBridge.Host {
         });
     }
 
+    private static final int PICK_LIBRARY_FILES = 41;
+    private java.util.function.IntConsumer libraryPicked;
+
+    @Override
+    public void pickLibraryFiles(java.util.function.IntConsumer done) {
+        runOnUiThread(() -> {
+            if (libraryPicked != null) libraryPicked.accept(0);
+            libraryPicked = done;
+            android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            i.putExtra(android.content.Intent.EXTRA_MIME_TYPES, new String[] { "text/*", "application/pdf", "image/*", "application/octet-stream" });
+            i.putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true);
+            try {
+                startActivityForResult(i, PICK_LIBRARY_FILES);
+            } catch (Exception e) {
+                libraryPicked = null;
+                done.accept(0);
+            }
+        });
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != PICK_LIBRARY_FILES || libraryPicked == null) return;
+        final java.util.function.IntConsumer done = libraryPicked;
+        libraryPicked = null;
+        if (resultCode != RESULT_OK) { done.accept(0); return; }
+        final java.util.List<android.net.Uri> uris = RecipeLibrary.urisFrom(data);
+        new Thread(() -> done.accept(RecipeLibrary.copyIn(this, uris))).start();
+    }
+
     /** Matches the status and navigation bars to the page's light or dark theme. */
     @Override
     public void setTheme(String theme) {

@@ -127,6 +127,13 @@ final class NativeBridge: NSObject {
             let result = try TextReader.read(base64: a["image"] as? String ?? "")
             log("Read \(result["lines"] ?? 0) lines of text from a \(result["width"] ?? 0)×\(result["height"] ?? 0) picture in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
             return result
+        case "library":
+            switch a["op"] as? String ?? "" {
+            case "list": return RecipeLibrary.list()
+            case "read": return try RecipeLibrary.read(a["path"] as? String ?? "")
+            case "open": return RecipeLibrary.open()
+            default: throw BridgeError(message: "On iPhone, add recipe files in the Files app: On My iPhone → Nourish.")
+            }
         case "setMode":
             let mode = a["mode"] as? String ?? "local"
             DispatchQueue.main.async { self.setMode(mode) }

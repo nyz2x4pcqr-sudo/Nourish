@@ -43,6 +43,8 @@ final class NativeBridge {
         void setMode(String mode);
         void setTheme(String theme);
         void runOnUi(Runnable r);
+        /** Shows the system file picker; calls back with how many files were copied into the library. */
+        void pickLibraryFiles(java.util.function.IntConsumer done);
     }
 
     private static final String PREFS = "nourish";
@@ -142,7 +144,27 @@ final class NativeBridge {
             case "cancelGenerate": cancelRequested = true; if (engine != 0 && generating) Llm.cancel(engine); return new JSONObject();
             case "keepAwake": keepAwake(a.optBoolean("on")); return new JSONObject();
             case "setMode": host.setMode(a.optString("mode")); return new JSONObject();
+            case "library": return library(a);
             default: throw new IllegalArgumentException("Unknown command: " + cmd);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------- recipe library
+
+    private JSONObject library(JSONObject a) throws Exception {
+        switch (a.optString("op")) {
+            case "list": return RecipeLibrary.list(context);
+            case "read": return RecipeLibrary.read(context, a.optString("path"));
+            case "open":
+            case "add": {
+                java.util.concurrent.CompletableFuture<Integer> done = new java.util.concurrent.CompletableFuture<>();
+                host.pickLibraryFiles(done::complete);
+                JSONObject o = new JSONObject();
+                o.put("added", done.get(10, java.util.concurrent.TimeUnit.MINUTES));
+                o.put("folder", RecipeLibrary.root(context).getAbsolutePath());
+                return o;
+            }
+            default: throw new IllegalArgumentException("Unknown library request");
         }
     }
 

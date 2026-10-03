@@ -28,6 +28,7 @@ targets:
       - sdk: Metal.framework
       - sdk: Accelerate.framework
       - sdk: Vision.framework
+      - sdk: PDFKit.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.nourish.app
