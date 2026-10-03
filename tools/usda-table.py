@@ -354,6 +354,8 @@ def main():
     for key, (desc, aliases) in FOODS.items():
         want = desc.lower()
         fid = by_desc.get(want)
+        cands = []
+        best = (1,)
         if not fid:   # many names end in "(Includes foods for USDA's Food Distribution Program)"
             pre = sorted((len(d), d, i) for d, i in by_desc.items() if d.startswith(want))
             if pre:
@@ -369,6 +371,11 @@ def main():
                 best = max(cands)
                 fid = best[4]
                 sys.stderr.write(f"approx {key!r}: {desc!r} -> {best[3]!r} ({best[0]:.2f})\n")
+        if not fid or (cands and best[0] < 0.85):
+            # Show USDA's closest names, to pick the right description.
+            key_words = [w for w in re.split(r"[^a-z]+", key) if len(w) > 2]
+            near = sorted(d for d in by_desc if all(w.rstrip("s") in d for w in key_words))[:8]
+            sys.stderr.write(f"  candidates for {key!r}: {near}\n")
         if not fid:
             missing.append(key)
             continue
