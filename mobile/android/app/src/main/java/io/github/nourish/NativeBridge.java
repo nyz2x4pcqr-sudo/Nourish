@@ -3,6 +3,9 @@ package io.github.nourish;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -134,6 +137,7 @@ final class NativeBridge {
     private Object handle(String cmd, JSONObject a) throws Exception {
         switch (cmd) {
             case "specs": return specs();
+            case "network": return network();
             case "http": return http(a);
             case "hfToken": return hfToken(a);
             case "download": return download(a);
@@ -175,6 +179,19 @@ final class NativeBridge {
     }
 
     // ---------------------------------------------------------------------------------- recipe library
+
+    // Wi-Fi or mobile data, so the recipe library only refreshes in the background on Wi-Fi.
+    private JSONObject network() throws Exception {
+        JSONObject o = new JSONObject();
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network n = cm == null ? null : cm.getActiveNetwork();
+        NetworkCapabilities c = n == null ? null : cm.getNetworkCapabilities(n);
+        o.put("known", cm != null);
+        o.put("online", c != null && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET));
+        o.put("wifi", c != null && (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)));
+        o.put("expensive", cm != null && cm.isActiveNetworkMetered());
+        return o;
+    }
 
     private JSONObject library(JSONObject a) throws Exception {
         switch (a.optString("op")) {

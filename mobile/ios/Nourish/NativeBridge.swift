@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import os
 import UIKit
 import UserNotifications
@@ -99,6 +100,7 @@ final class NativeBridge: NSObject {
     private func run(_ cmd: String, _ a: [String: Any]) throws -> Any {
         switch cmd {
         case "specs": return specs()
+        case "network": return network()
         case "http": return try http(a)
         case "hfToken": return hfToken(a)
         case "download": return try startDownload(a)
@@ -178,6 +180,26 @@ final class NativeBridge: NSObject {
         "iPhone16,1": "iPhone 15 Pro", "iPhone16,2": "iPhone 15 Pro Max",
         "iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max", "iPhone17,3": "iPhone 16", "iPhone17,4": "iPhone 16 Plus", "iPhone17,5": "iPhone 16e",
     ]
+
+    /// Wi-Fi or cellular, so the recipe library only refreshes in the background on Wi-Fi.
+    private func network() -> [String: Any] {
+        let monitor = NWPathMonitor()
+        let ready = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var current: NWPath?
+        monitor.pathUpdateHandler = { path in
+            lock.lock(); defer { lock.unlock() }
+            if current == nil { current = path; ready.signal() }
+        }
+        monitor.start(queue: DispatchQueue(label: "nourish.network"))
+        _ = ready.wait(timeout: .now() + 2)
+        monitor.cancel()
+        lock.lock(); let path = current; lock.unlock()
+        guard let p = path else { return ["known": false] }
+        return ["known": true, "online": p.status == .satisfied,
+                "wifi": p.usesInterfaceType(.wifi) || p.usesInterfaceType(.wiredEthernet),
+                "expensive": p.isExpensive, "constrained": p.isConstrained]
+    }
 
     private func specs() -> [String: Any] {
         let id = Self.machineId()

@@ -18,17 +18,24 @@
     const B = root.NourishBuiltins || req('./builtins.js');
     const N = root.NourishNutrition || req('./nutrition.js');
 
-    const LIMITS = { parallel: 4, searches: 24, pages: 42, seconds: 90, cachedRecipes: 400 };
-    const CACHE = { recipes: 'nourish_recipe_cache', searches: 'nourish_search_cache', sitemaps: 'nourish_sitemap_cache', failures: 'nourish_source_failures' };
+    // Gentle and quick: a few requests at a time, caps on searches and pages, and a time limit.
+    const LIMITS = { parallel: 4, searches: 36, pages: 72, seconds: 40, cachedRecipes: 1200, perSlot: 21 };
+    const CACHE = { recipes: 'nourish_recipe_cache', searches: 'nourish_search_cache', sitemaps: 'nourish_sitemap_cache', failures: 'nourish_source_failures', categories: 'nourish_site_categories' };
     const DAY = 24 * 3600 * 1000;
 
-    // What to look for when the person has no particular likes (they're never searched on their own:
-    // likes only add to these and raise matching recipes).
+    // What to look for, meal by meal (breakfast words for breakfast, and so on). Each plan starts
+    // at a different place in the lists, so the library keeps growing with new recipes. The person's
+    // likes and cuisines come first.
     const QUERIES = {
-        breakfast: ['breakfast', 'eggs', 'oatmeal', 'frittata', 'yogurt', 'breakfast burrito', 'smoothie', 'pancakes'],
-        lunch: ['salad', 'soup', 'grain bowl', 'wrap', 'chickpea', 'lentil', 'quinoa', 'sandwich'],
-        dinner: ['chicken', 'salmon', 'shrimp', 'turkey', 'beef', 'tofu', 'pork', 'pasta', 'curry', 'stir fry', 'tacos', 'sheet pan'],
+        breakfast: ['eggs', 'overnight oats', 'yogurt bowl', 'smoothie', 'avocado toast', 'breakfast burrito', 'oatmeal', 'pancakes', 'frittata', 'egg muffins',
+            'chia pudding', 'breakfast tacos', 'omelette', 'scrambled eggs', 'breakfast sandwich', 'shakshuka', 'french toast', 'breakfast bowl', 'waffles', 'granola', 'smoothie bowl', 'egg bites'],
+        lunch: ['salad', 'wrap', 'sandwich', 'grain bowl', 'soup', 'chicken salad', 'quinoa salad', 'lettuce wraps', 'pasta salad', 'pita', 'lentil soup', 'noodle salad',
+            'burrito bowl', 'rice bowl', 'quesadilla', 'chickpea salad', 'tuna salad', 'buddha bowl', 'poke bowl', 'panini'],
+        dinner: ['chicken', 'salmon', 'shrimp', 'turkey', 'beef', 'tofu', 'pork', 'pasta', 'curry', 'stir fry', 'tacos', 'sheet pan dinner', 'chili', 'fish', 'skillet',
+            'meatballs', 'fajitas', 'enchiladas', 'noodles', 'stew', 'lentils', 'risotto', 'casserole'],
     };
+    const CORE = { breakfast: ['eggs', 'oatmeal', 'yogurt', 'smoothie', 'toast'], lunch: ['salad', 'soup', 'wrap', 'bowl', 'sandwich'], dinner: ['chicken', 'salmon', 'beef', 'tofu', 'shrimp', 'pasta'] };
+    const MEAT = /\b(chicken|salmon|shrimp|turkey|beef|pork|fish|meatballs|tuna|steak|lamb|bacon|sausage)\b/i;
     const ROUNDUP = /(\/(category|tag|collections?|recipes?)\/?$|best-|-ideas|ideas-|meal-plan|what-to-(cook|make|eat)|roundup|-challenge|-guide|-101|\d+-(easy|best|healthy|quick)|-recipes\/?$)/i;
     const NOT_RECIPE_TITLE = /\b(best|ideas|recipes|meal plan|meal prep plan|what to|roundup|guide|review|tips|how to (store|freeze)|gift|giveaway|favorites|vs\.?)\b|^\d+\s/i;
 
@@ -105,6 +112,10 @@
     }
 
     // Checks one recipe; returns it ready to plan with (nutrition settled, seasoning fixed) or null.
+    function whyChanged(before, now) {
+        const was = JSON.parse(before || '{}');
+        return Object.keys(now || {}).find(k => (now[k] || 0) > (was[k] || 0)) || '';
+    }
     // Why recipes were turned away, counted for the log ("a drink: 3, a dessert: 5…").
     function turnedAway(ctx, why) { const w = ctx.stats.why || (ctx.stats.why = {}); w[why] = (w[why] || 0) + 1; return null; }
     function vet(r, ctx) {
@@ -134,21 +145,27 @@
         const now = o.now || (() => Date.now());
         const cache = o.cache || { get: () => null, set: () => {} };
         const failures = cache.get(CACHE.failures) || {};
-        const stats = { started: now(), searches: 0, pages: 0, fromCache: 0, excluded: 0, bland: 0, unsure: 0, perSource: {}, failed: [] };
+        const stats = { started: now(), searches: 0, pages: 0, fromCache: 0, excluded: 0, bland: 0, unsure: 0, perSource: {}, failed: [], blocked: [] };
         return {
             o, now, cache, failures, stats,
+            categories: cache.get(CACHE.categories) || {},
+            sitemapsRead: {},
+            skip: new Set(),   // sites that failed during this search: not asked again this time
             log: o.log || (() => {}),
+            trace: o.trace || (() => {}),
             exclude: P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' }),
             out: false,
             timeUp() { return this.out || now() - stats.started > (o.limits && o.limits.seconds || LIMITS.seconds) * 1000; },
         };
     }
-    function siteOk(ctx, id) { const f = ctx.failures[id]; return !(f && f.n >= 2 && f.until > ctx.now()); }
-    function siteFailed(ctx, id, why) {
+    function siteOk(ctx, id) { const f = ctx.failures[id]; return !(f && f.until > ctx.now()); }
+    function siteFailed(ctx, id, why, blocked) {
         const f = ctx.failures[id] || { n: 0 };
         f.n++;
-        f.until = ctx.now() + DAY;
+        f.blocked = !!blocked;
+        f.until = blocked ? ctx.now() + (f.n >= 2 ? 30 : 7) * DAY : f.n >= 2 ? ctx.now() + DAY : 0;
         f.why = String(why || '').slice(0, 80);
+        f.at = ctx.now();
         ctx.failures[id] = f;
         if (ctx.stats.failed.indexOf(id) < 0) ctx.stats.failed.push(id);
     }
@@ -156,10 +173,11 @@
     function count(ctx, id, key) { const p = ctx.stats.perSource[id] || (ctx.stats.perSource[id] = { links: 0, recipes: 0 }); p[key]++; }
 
     // === SEARCHING ===
+    // 403/405 (refused) and 429 (too many requests) mean "leave us alone": the site is blocked.
     async function getPage(ctx, url, browser) {
         const res = await ctx.o.fetchPage(url, { browser });
         if (!res || !res.status) throw new Error('no answer');
-        if (res.status === 402 || res.status === 403 || res.status === 405 || res.status === 429 || res.status >= 500) {
+        if (res.status === 402 || res.status === 403 || res.status === 405 || res.status === 429) {
             const e = new Error(`HTTP ${res.status}`);
             e.blocked = true;
             throw e;
@@ -168,19 +186,56 @@
         return res;
     }
 
-    async function searchWp(ctx, site, q) {
+    // WordPress search, inside the site's own breakfast/lunch/dinner category when it has one.
+    async function searchWp(ctx, site, q, meal) {
         const base = `https://${site.domain}`;
-        const res = await getPage(ctx, `${base}/wp-json/wp/v2/posts?search=${encodeURIComponent(q)}&per_page=10&_fields=link,title`, false);
+        const cat = meal ? await wpCategory(ctx, site, meal) : null;
+        // Best match first, by the recipe's title: WordPress otherwise lists the newest posts that
+        // mention the word anywhere ("eggs" → a coconut cake), which is how searches used to bring
+        // back drinks, desserts and sauces. Older WordPress doesn't know search_columns: asked without.
+        const plain = ctx.categories[`${site.id}|plain`];
+        const url = `${base}/wp-json/wp/v2/posts?search=${encodeURIComponent(q)}&per_page=10&orderby=relevance${plain ? '' : '&search_columns=post_title'}&_fields=link,title${cat ? '&categories=' + cat : ''}`;
+        let res;
+        try { res = await getPage(ctx, url, false); } catch (e) {
+            if (e.blocked || plain || !/HTTP 400/.test(e.message)) throw e;
+            ctx.categories[`${site.id}|plain`] = { at: ctx.now(), id: 1 };
+            return searchWp(ctx, site, q, meal);
+        }
+        ctx.trace(`${site.id}: "${q}" (${meal || 'any'}${cat ? ', its ' + meal + ' category' : ''})`);
         let list;
         try { list = JSON.parse(res.body); } catch (e) { throw new Error('not a WordPress answer'); }
         if (!Array.isArray(list)) throw new Error('not a WordPress answer');
-        return list.map(p => ({ url: p && p.link, title: decode(p && p.title && p.title.rendered) })).filter(x => x.url);
+        const out = list.map(p => ({ url: p && p.link, title: decode(p && p.title && p.title.rendered) })).filter(x => x.url);
+        // Nothing in the category for these words: the whole site.
+        if (!out.length && cat) return searchWp(ctx, site, q, null);
+        return out;
+    }
+    // The site's category for a meal ("Breakfast", "Lunch", "Main Course"…), looked up once a month.
+    const MEAL_CATEGORY = { breakfast: ['breakfast', 'brunch'], lunch: ['lunch'], dinner: ['dinner', 'main-course', 'main-dishes', 'main-dish', 'mains', 'entrees'] };
+    async function wpCategory(ctx, site, meal) {
+        const all = ctx.categories;
+        const key = `${site.id}|${meal}`;
+        const hit = all[key];
+        if (hit && hit.at > ctx.now() - 30 * DAY) return hit.id || null;
+        let id = 0;
+        try {
+            const res = await getPage(ctx, `https://${site.domain}/wp-json/wp/v2/categories?search=${MEAL_CATEGORY[meal][0].split('-')[0]}&per_page=20&_fields=id,slug,count`, false);
+            const list = JSON.parse(res.body);
+            const best = (Array.isArray(list) ? list : []).filter(c => c && MEAL_CATEGORY[meal].some(w => c.slug === w || c.slug === w + '-recipes' || c.slug === 'healthy-' + w)).sort((x, y) => (y.count || 0) - (x.count || 0))[0];
+            if (best && best.count >= 10) id = best.id;
+        } catch (e) { if (e.blocked) throw e; }
+        all[key] = { at: ctx.now(), id };
+        return id || null;
     }
 
+    // A site's list of recipe addresses, downloaded at most once a month and kept small (just the
+    // paths), so a big sitemap isn't downloaded on every plan.
     async function sitemapUrls(ctx, site) {
         const all = ctx.cache.get(CACHE.sitemaps) || {};
         const hit = all[site.id];
-        if (hit && hit.at > ctx.now() - 7 * DAY && hit.urls.length) return hit.urls;
+        const prefix = `https://${site.domain}`;
+        if (hit && hit.at > ctx.now() - 30 * DAY && hit.paths && hit.paths.length) return hit.paths.map(p => prefix + p);
+        if (ctx.sitemapsRead[site.id]) return ctx.sitemapsRead[site.id];
         const res = await getPage(ctx, site.sitemap, false);
         let urls = (String(res.body).match(/<loc>([^<]+)<\/loc>/g) || []).map(x => decode(x.replace(/<\/?loc>/g, '')));
         const maps = urls.filter(u => /\.xml/i.test(u) && /recipe/i.test(u)).slice(0, 2);
@@ -188,9 +243,10 @@
             const r2 = await getPage(ctx, m, false);
             urls = urls.concat((String(r2.body).match(/<loc>([^<]+)<\/loc>/g) || []).map(x => decode(x.replace(/<\/?loc>/g, ''))));
         }
-        urls = urls.filter(u => !/\.xml/i.test(u) && !ROUNDUP.test(u)).slice(0, 3000);
-        all[site.id] = { at: ctx.now(), urls };
-        ctx.cache.set(CACHE.sitemaps, all);
+        urls = urls.filter(u => !/\.xml/i.test(u) && !ROUNDUP.test(u) && domainOf(u) === site.domain).slice(0, 2500);
+        ctx.sitemapsRead[site.id] = urls;
+        all[site.id] = { at: ctx.now(), paths: urls.map(u => { try { return new URL(u).pathname; } catch (e) { return ''; } }).filter(Boolean) };
+        saveCache(ctx, CACHE.sitemaps, all);
         return urls;
     }
     async function searchSitemap(ctx, site, q) {
@@ -198,28 +254,47 @@
         return (await sitemapUrls(ctx, site)).filter(u => words.every(w => slugWords(u).indexOf(w) >= 0)).slice(0, 10).map(url => ({ url, title: slugWords(url) }));
     }
 
-    async function searchSite(ctx, site, q) {
-        if (site.search === 'wp') return searchWp(ctx, site, q);
+    async function searchSite(ctx, site, q, meal) {
+        if (site.search === 'wp') return searchWp(ctx, site, q, meal);
         if (site.search === 'sitemap') return searchSitemap(ctx, site, q);
         if (site.search === 'web' && ctx.o.webSearch) return ctx.o.webSearch(`site:${site.domain} ${q} recipe`, 8);
         return [];
     }
 
-    // The searches for each meal: the person's likes and cuisines first, then the usual dishes, minus
-    // anything they avoid ("chicken" isn't searched for a vegetarian).
-    function queriesFor(meal, o) {
+    // The searches for each meal: the person's likes and cuisines first, then the meal's own words,
+    // starting at a different place each plan (`seed`), minus anything they avoid ("chicken" isn't
+    // searched for a vegetarian).
+    function queriesFor(meal, o, seed) {
         const likes = P.searchTerms(o.likes || '');
         const cuisines = P.searchTerms(String((o.settings && o.settings.cuisines) || '')).filter(t => (P.CUISINES || []).indexOf(t) >= 0);
         const ex = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
-        const base = QUERIES[meal];
+        // Broad words (lots of results) take turns with more specific ones (variety), and the
+        // specific ones start at a different place each day.
+        const core = CORE[meal];
+        const rest = QUERIES[meal].filter(q => core.indexOf(q) < 0);
+        const start = seed ? seed % rest.length : 0;
+        const turned = rest.slice(start).concat(rest.slice(0, start));
+        const rotated = [];
+        for (let i = 0; i < Math.max(core.length, turned.length); i++) { if (core[i]) rotated.push(core[i]); if (turned[i]) rotated.push(turned[i]); }
         const liked = likes.map(t => (meal === 'breakfast' && !PL.mealFit({ name: t, ingredients: [] }).breakfast ? `${t} breakfast` : t));
         const extra = meal === 'breakfast' ? [] : cuisines.map(c => `${c} ${meal === 'lunch' ? 'salad' : ''}`.trim());
         const seen = new Set();
-        return liked.concat(extra, base).filter(q => {
+        return liked.concat(extra, rotated).filter(q => {
             if (seen.has(q) || ex({ name: q, ingredients: [q] })) return false;
             seen.add(q);
             return true;
         });
+    }
+    // Does a search suit a site? Each site gets only the meals it has (sources.js `meals`), its own
+    // words if it has them (`terms`), and no meat searches on a vegetarian site.
+    function siteSuits(site, meal, q) {
+        if (site.meals && site.meals.indexOf(meal) < 0) return false;
+        if (site.veg && MEAT.test(q)) return false;
+        return true;
+    }
+    function siteQueries(site, meal, general) {
+        const own = site.terms && site.terms[meal];
+        return (own ? own.concat(general) : general).filter(q => siteSuits(site, meal, q));
     }
 
     function goodLink(link, site, meal, ctx) {
@@ -229,10 +304,25 @@
         if (ROUNDUP.test(link.url) || NOT_RECIPE_TITLE.test(link.title || '')) return false;
         const t = link.title || slugWords(link.url);
         if (ctx.exclude({ name: t, ingredients: [] })) return false;
+        // Drinks, desserts, sauces and condiments are turned away before their pages are read.
+        if (notAMeal({ name: t })) return false;
         const fit = PL.mealFit({ name: t, ingredients: [] });
         if (fit.why === 'a dessert' || fit.why === 'not a meal') return false;
         if (meal !== 'breakfast' && /\b(oatmeal|pancakes?|waffles?|granola|smoothie|muffins?|overnight oats)\b/i.test(t)) return false;
+        if (meal === 'breakfast' && fit.why === 'a dinner dish') return false;
         return true;
+    }
+
+    // Saves a cache; when the phone's storage is full, the oldest quarter goes and it tries again.
+    function saveCache(ctx, key, obj) {
+        let data = obj;
+        for (let i = 0; i < 4; i++) {
+            if (ctx.cache.set(key, data) !== false) return data;
+            const entries = Object.entries(data).sort((x, y) => ((y[1] && y[1].at) || 0) - ((x[1] && x[1].at) || 0));
+            data = Object.fromEntries(entries.slice(0, Math.floor(entries.length * 0.75)));
+            ctx.log(`Storage is full: kept the newest ${Object.keys(data).length} of ${entries.length} saved items (${key})`);
+        }
+        return data;
     }
 
     // === THE RECIPE APIS ===
@@ -261,15 +351,27 @@
     // o: { settings, likes, avoid, goal, days, enabled(id) → bool, fetchPage(url, {browser}) →
     //      {status, body}, readRecipe(html, url) → recipe|null, api(path, body) → json,
     //      webSearch(query, n) → [{url, title}], library() → [recipes], cache {get, set}, log, now,
-    //      customSites: [domain], limits }
+    //      customSites: [domain], limits, already: [dish names from recent plans] }
     // Returns { pools: { breakfast, lunch, dinner }, stats }.
+    //
+    // 1. The person's files, favourites and the local recipe library (every recipe read on earlier
+    //    plans, kept for a year): instant, and work offline.
+    // 2. The web, meal by meal, until each meal has at least 3 good candidates per day (21 for a
+    //    week) that aren't from recent plans, or the time is up: breakfast words on sites that have
+    //    breakfasts, inside the site's own breakfast category when it has one, and so on. Each page
+    //    read is checked (a meal, not a drink, dessert or sauce; seasoned; nutrition worked out) and
+    //    kept in the library.
+    // 3. Nourish's own recipes (builtins.js), so there's always enough.
     async function findRecipes(o) {
         const ctx = makeContext(o);
         const days = o.days || 7;
+        const MEALS = ['breakfast', 'lunch', 'dinner'];
         const mealsOn = PL.mealsOf(o.settings || {});
-        const want = Object.fromEntries(['breakfast', 'lunch', 'dinner'].map(m => [m, mealsOn.indexOf(m) >= 0 ? days + 6 : 0]));
         const limits = Object.assign({}, LIMITS, o.limits || {});
+        const perSlot = Math.max(3, Math.min(limits.perSlot, days * 3));
+        const want = m => (mealsOn.indexOf(m) >= 0 ? perSlot : 0);
         const enabled = o.enabled || (() => true);
+        const recent = PL.dishList(o.already || []);
         const found = [];
         // The same dish from two sites (or with a slightly different name) counts once.
         const names = PL.dishList();
@@ -281,136 +383,185 @@
             count(ctx, (source && source.id) || 'other', 'recipes');
             return true;
         };
-        // Tested recipes from the sites (and the person's own) are what we want most; TheMealDB's
-        // big batch doesn't count towards "enough", so the sites are still read.
-        // Nourish's own recipes are always there, so they don't count either: the web is still searched.
-        const have = meal => found.filter(r => r._fit[meal] && r.source_id !== 'themealdb' && r.source_id !== 'builtin').length;
+        // Good candidates for a meal: not Nourish's own (always there), not TheMealDB (a few, less
+        // tested), not from a recent plan.
+        const have = m => found.filter(r => r._fit[m] && r.source_id !== 'themealdb' && r.source_id !== 'builtin' && !recent.has(r.name)).length;
+        const short = m => want(m) - have(m);
 
-        // 1. The person's own recipe library and recipes already read on earlier plans (instant).
+        // 1. Your files, favourites and the local recipe library.
         if (o.library && enabled('library')) {
             // On equal terms with every other source (no head start): the books mainly teach (pairingScore).
             try { (await o.library()).forEach(r => add(Object.assign({}, r), { id: 'library', name: r.source_name || 'Your recipe library' })); } catch (e) { ctx.log('Library: ' + e.message); }
-        }
-        // Nourish's own recipes (builtins.js), on equal terms with every other source.
-        if (B && enabled('builtin')) {
-            ['breakfast', 'lunch', 'dinner'].forEach(m => B.forMeal(m).forEach(r => add(JSON.parse(JSON.stringify(r)), S.byId('builtin'))));
         }
         // Favourites from the Cookbook (taste.js decides how often they come back): on equal terms.
         if (o.favorites && o.favorites.recipes) {
             o.favorites.recipes.forEach(r => add(JSON.parse(JSON.stringify(r)), { id: r.source_id || 'cookbook', name: r.source_name || 'Your Cookbook' }));
         }
-        const recipeCache = ctx.cache.get(CACHE.recipes) || {};
+        let recipeCache = ctx.cache.get(CACHE.recipes) || {};
         Object.keys(recipeCache).forEach(url => {
             const c = recipeCache[url];
-            if (!c || !c.r || c.at < ctx.now() - 30 * DAY) return;
+            if (!c || !c.r || c.at < ctx.now() - 365 * DAY) return;
             const site = S.siteForUrl(url) || (c.r.source_id && S.byId(c.r.source_id));
             if (site && !enabled(site.id)) return;
             if (add(JSON.parse(JSON.stringify(c.r)), site || { id: c.r.source_id || 'other', name: c.r.source_name })) ctx.stats.fromCache++;
         });
+        ctx.stats.library = Object.keys(recipeCache).length;
 
-        // 2. The recipe APIs (one request each).
+        // 2a. The recipe APIs (one request each). TheMealDB is searched for every meal, a few each.
         const apiJobs = [];
-        if (o.api && enabled('themealdb')) {
+        if (o.api && enabled('themealdb') && siteOk(ctx, 'themealdb')) {
             apiJobs.push((async () => {
-                const terms = queriesFor('dinner', o).slice(0, 5).join(',');
+                const seed = Math.floor(ctx.now() / DAY);
+                const terms = queriesFor('dinner', o, seed).slice(0, 3).concat(['soup', 'salad']).join(',');
                 const data = await o.api('/api/recipes/themealdb', { query: terms, number: 30 });
-                ((data && data.meals) || []).forEach(m => add(fromMealDb(m), S.byId('themealdb')));
-            })().catch(e => { siteFailed(ctx, 'themealdb', e.message); }));
+                let n = 0;
+                ((data && data.meals) || []).forEach(m => { if (n < 12 && add(fromMealDb(m), S.byId('themealdb'))) n++; });
+            })().catch(e => { siteFailed(ctx, 'themealdb', e.message, e.blocked); }));
         }
         const spoonKey = o.settings && o.settings.spoonacular_api_key;
-        if (o.api && enabled('spoonacular') && (spoonKey || o.spoonacularKeySaved)) {
-            ['breakfast', 'lunch', 'dinner'].forEach(meal => apiJobs.push((async () => {
+        if (o.api && enabled('spoonacular') && (spoonKey || o.spoonacularKeySaved) && siteOk(ctx, 'spoonacular')) {
+            MEALS.filter(m => want(m)).forEach(meal => apiJobs.push((async () => {
                 const data = await o.api('/api/recipes/spoonacular', { query: queriesFor(meal, o)[0], number: 10, exclude: o.avoid || '', diet: o.spoonacularDiet, intolerances: (o.settings && o.settings.allergies) || undefined });
                 ((data && data.results) || []).forEach(r => add(fromSpoonacular(r), S.byId('spoonacular')));
-            })().catch(e => { siteFailed(ctx, 'spoonacular', e.message); })));
+            })().catch(e => { siteFailed(ctx, 'spoonacular', e.message, e.blocked); })));
         }
 
-        // 3. The recipe sites: searches spread over the sites, a few at a time.
+        // 2b. The recipe sites, meal by meal: the meal that's furthest from enough goes first, each
+        // site gets only searches that suit it, and every site gets its turn (no one site fills the
+        // pool: at most a fair share of the pages each).
         const goal = o.goal || (o.settings && o.settings.goal);
         let sites = S.usable().filter(s => enabled(s.id));
         (o.customSites || []).forEach(d => {
             const domain = String(d).toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
             if (domain && !sites.some(s => s.domain === domain)) sites.push({ id: 'custom:' + domain, name: domain, domain, search: 'wp', custom: true });
         });
+        ctx.stats.blocked = sites.filter(s => !siteOk(ctx, s.id)).map(s => `${s.id} (${(ctx.failures[s.id] || {}).why || 'failed'})`);
         sites = sites.filter(s => siteOk(ctx, s.id));
-        sites = shuffle(sites, Math.floor(ctx.now() / DAY));
+        const seed = Math.floor(ctx.now() / DAY);
+        sites = shuffle(sites, seed);
         // Healthier sites first when losing weight; sites with their own nutrition next; your own sites first of all.
         sites.sort((a, b) => (b.custom ? 2 : 0) - (a.custom ? 2 : 0) + (goal === 'Cut' ? (b.healthy ? 1 : 0) - (a.healthy ? 1 : 0) : 0) + ((b.nutrition ? 0.5 : 0) - (a.nutrition ? 0.5 : 0)));
         const searchCache = ctx.cache.get(CACHE.searches) || {};
-        const links = { breakfast: [], lunch: [], dinner: [] };
+        const queries = Object.fromEntries(MEALS.map(m => [m, queriesFor(m, o, seed)]));
         const seenLinks = new Set(Object.keys(recipeCache));
-        const tasks = [];
-        const queries = { breakfast: queriesFor('breakfast', o), lunch: queriesFor('lunch', o), dinner: queriesFor('dinner', o) };
-        let si = 0;
-        for (let round = 0; round < 8 && tasks.length < limits.searches * 2; round++) {
-            ['breakfast', 'lunch', 'dinner', 'dinner'].forEach((meal, k) => {
-                if (!want[meal]) return;
-                const q = queries[meal][(round * 2 + (k === 3 ? 1 : 0)) % queries[meal].length];
-                if (sites.length) tasks.push({ meal, q, site: sites[si++ % sites.length] });
-            });
-        }
+        const tried = new Set();
+        const turn = { breakfast: 0, lunch: 0, dinner: 0 };
+        const sitePages = {};
+        const fairPages = Math.max(4, Math.ceil(limits.pages / Math.max(1, sites.length)) * 2);
         let searches = 0;
-        const enough = () => ['breakfast', 'lunch', 'dinner'].every(m => links[m].length + have(m) >= want[m] * 1.6);
-        await Promise.all(apiJobs.concat([pool(tasks, limits.parallel, async t => {
-            if (!siteOk(ctx, t.site.id) || enough()) return;
-            const key = `${t.site.id}|${t.q}`;
-            let list = searchCache[key] && searchCache[key].at > ctx.now() - 3 * DAY ? searchCache[key].links : null;
-            if (!list) {
-                if (searches >= limits.searches) return;
-                searches++;
-                ctx.stats.searches++;
-                try {
-                    list = (await searchSite(ctx, t.site, t.q)).slice(0, 10);
-                    siteWorked(ctx, t.site.id);
-                    searchCache[key] = { at: ctx.now(), links: list };
-                } catch (e) {
-                    siteFailed(ctx, t.site.id, e.message);
-                    if (!e.blocked) siteFailed(ctx, t.site.id, e.message);   // not WordPress after all: skip it at once
-                    return;
+        let pages = 0;
+        const usableSite = s => siteOk(ctx, s.id) && !ctx.skip.has(s.id);
+        // The next search: for the meal that's furthest from enough, the next site in turn that
+        // suits it, with a word not tried on that site yet.
+        const spent = { breakfast: 0, lunch: 0, dinner: 0 };
+        const nextTask = () => {
+            // Every meal gets its turn, the ones furthest from enough more often.
+            const meals = MEALS.filter(m => short(m) > 0).sort((x, y) => short(y) / (1 + spent[y]) - short(x) / (1 + spent[x]));
+            for (const meal of meals) {
+                const suited = sites.filter(s => usableSite(s) && siteSuits(s, meal, '') && (sitePages[s.id] || 0) < fairPages);
+                for (let k = 0; k < suited.length; k++) {
+                    const site = suited[(turn[meal]++) % suited.length];
+                    // Each site starts at a different word, so the sites together cover more dishes.
+                    const list = siteQueries(site, meal, queries[meal]);
+                    const offset = (sites.indexOf(site) * 3) % Math.max(1, list.length);
+                    const q = list.slice(offset).concat(list.slice(0, offset)).find(x => !tried.has(`${site.id}|${meal}|${x}`));
+                    if (q) { tried.add(`${site.id}|${meal}|${q}`); spent[meal]++; return { site, meal, q }; }
                 }
             }
-            list.filter(l => goodLink(l, t.site, t.meal, ctx)).forEach(l => {
-                const url = String(l.url).split('#')[0];
-                if (seenLinks.has(url)) return;
-                seenLinks.add(url);
-                links[t.meal].push({ url, title: l.title, site: t.site, meal: t.meal });
-                count(ctx, t.site.id, 'links');
-            });
-        }, () => ctx.timeUp() || enough())]));
-
-        // 4. Read the recipe pages: the meals that need recipes most first, one site at a time in turn.
-        const order = [];
-        const queues = Object.fromEntries(Object.keys(links).map(m => [m, links[m].slice()]));
-        while (Object.values(queues).some(q => q.length)) {
-            ['dinner', 'lunch', 'breakfast', 'dinner'].forEach(m => { if (queues[m].length) order.push(queues[m].shift()); });
-        }
-        let pages = 0;
-        await pool(order, limits.parallel, async l => {
-            if (pages >= limits.pages || have(l.meal) >= want[l.meal] || !siteOk(ctx, l.site.id)) return;
+            return null;
+        };
+        const readPage = async (l, site, meal) => {
             pages++;
             ctx.stats.pages++;
+            sitePages[site.id] = (sitePages[site.id] || 0) + 1;
             let res;
-            try { res = await getPage(ctx, l.url, true); } catch (e) { if (e.blocked) siteFailed(ctx, l.site.id, e.message); return; }
+            try { res = await getPage(ctx, l.url, true); } catch (e) {
+                ctx.trace(`  ${e.message} ${l.url}`);
+                if (e.blocked) { siteFailed(ctx, site.id, `recipe pages: ${e.message}`, true); ctx.skip.add(site.id); }
+                return;
+            }
             const raw = o.readRecipe(res.body, res.url || l.url);
-            if (!raw) return;
+            if (!raw) { count(ctx, site.id, 'unreadable'); ctx.trace(`  no recipe data on ${l.url}`); return; }
             raw.source_url = res.url || l.url;
-            raw.source_name = l.site.name;
-            const t = tidy(raw, l.site);
+            raw.source_name = site.name;
+            const t = tidy(raw, site);
             if (t) recipeCache[t.source_url] = { at: ctx.now(), r: t };
-            add(raw, l.site);
-        }, () => ctx.timeUp());
+            const before = JSON.stringify(ctx.stats.why || {});
+            const ok = add(raw, site);
+            ctx.trace(`  ${ok ? 'kept' : 'not kept'}: ${raw.name}${ok ? '' : ` (${whyChanged(before, ctx.stats.why) || 'already have it'})`}`);
+        };
+        const worker = async () => {
+            while (!ctx.timeUp()) {
+                const t = nextTask();
+                if (!t) return;
+                const key = `${t.site.id}|${t.meal}|${t.q}`;
+                let list = searchCache[key] && searchCache[key].at > ctx.now() - 3 * DAY ? searchCache[key].links : null;
+                if (!list) {
+                    if (searches >= limits.searches) return;
+                    searches++;
+                    ctx.stats.searches++;
+                    try {
+                        list = (await searchSite(ctx, t.site, t.q, t.meal)).slice(0, 10);
+                        siteWorked(ctx, t.site.id);
+                        searchCache[key] = { at: ctx.now(), links: list };
+                    } catch (e) {
+                        ctx.trace(`${t.site.id}: "${t.q}" failed: ${e.message}${e.blocked ? ' (the site refuses the app: left alone for a while)' : ''}`);
+                        siteFailed(ctx, t.site.id, e.message, e.blocked);
+                        ctx.skip.add(t.site.id);
+                        continue;
+                    }
+                }
+                const good = list.filter(l => goodLink(l, t.site, t.meal, ctx)).map(l => Object.assign({}, l, { url: String(l.url).split('#')[0] })).filter(l => !seenLinks.has(l.url));
+                count(ctx, t.site.id, "links");
+                for (const l of good.slice(0, 4)) {
+                    if (ctx.timeUp() || pages >= limits.pages || short(t.meal) <= 0 || !usableSite(t.site) || (sitePages[t.site.id] || 0) >= fairPages) break;
+                    seenLinks.add(l.url);
+                    await readPage(l, t.site, t.meal);
+                }
+            }
+        };
+        if (!o.offline) await Promise.all(apiJobs.concat(Array.from({ length: limits.parallel }, worker)));
 
-        // Keep the caches small: newest recipes and searches only.
+        // 3. Nourish's own recipes, on equal terms with every other source.
+        if (B && enabled('builtin')) {
+            MEALS.forEach(m => B.forMeal(m).forEach(r => add(JSON.parse(JSON.stringify(r)), S.byId('builtin'))));
+        }
+
+        // The library keeps every recipe read (newest first when it has to be trimmed), and the
+        // searches, sitemaps and categories are remembered.
         const trim = (obj, n) => Object.fromEntries(Object.entries(obj).sort((a, b) => b[1].at - a[1].at).slice(0, n));
-        ctx.cache.set(CACHE.recipes, trim(recipeCache, limits.cachedRecipes));
-        ctx.cache.set(CACHE.searches, trim(searchCache, 300));
+        recipeCache = saveCache(ctx, CACHE.recipes, trim(recipeCache, limits.cachedRecipes));
+        ctx.stats.library = Object.keys(recipeCache).length;
+        saveCache(ctx, CACHE.searches, trim(searchCache, 400));
         ctx.cache.set(CACHE.failures, ctx.failures);
+        ctx.cache.set(CACHE.categories, ctx.categories);
 
         const pools = { breakfast: [], lunch: [], dinner: [] };
-        found.forEach(r => PL.MEALS.forEach(m => { if (r._fit[m]) pools[m].push(r); }));
+        found.forEach(r => MEALS.forEach(m => { if (r._fit[m]) pools[m].push(r); }));
         ctx.stats.seconds = Math.round((ctx.now() - ctx.stats.started) / 100) / 10;
         ctx.stats.recipes = found.length;
-        return { pools, stats: ctx.stats };
+        ctx.stats.perMeal = Object.fromEntries(MEALS.map(m => [m, { all: pools[m].length, web: have(m), builtin: pools[m].filter(r => r.source_id === 'builtin').length }]));
+        return { pools: balance(pools, perSlot, seed, recent), stats: ctx.stats };
+    }
+
+    // No one website fills a meal's pool: each keeps at most about a third of the web recipes (a
+    // varied pick, recipes from recent plans last). The person's files and Nourish's own recipes
+    // are all kept; the planner then spreads a plan's meals across sources (planner.js).
+    function balance(pools, perSlot, seed, recent) {
+        const out = {};
+        const isRecent = r => !!(recent && recent.has(r.name));
+        const keepAll = r => ['builtin', 'library', 'cookbook'].indexOf(r.source_id) >= 0;
+        Object.keys(pools).forEach(m => {
+            const list = pools[m];
+            const web = list.filter(r => !keepAll(r));
+            const cap = Math.max(10, Math.ceil(web.length * 0.35));
+            const bySource = {};
+            shuffle(web, seed + m.length).forEach(r => { (bySource[r.source_id || 'other'] = bySource[r.source_id || 'other'] || []).push(r); });
+            const kept = list.filter(keepAll);
+            Object.values(bySource).forEach(group => kept.push(...group.sort((a, b) => (isRecent(a) ? 1 : 0) - (isRecent(b) ? 1 : 0)).slice(0, cap)));
+            out[m] = kept;
+        });
+        return out;
     }
 
     // How much a recipe's source counts for or against it (lower is better). Every source is on
@@ -437,7 +588,7 @@
         return Object.assign(plan, { stats, pools });
     }
 
-    const api = { findRecipes, planFromSources, sourceCost, notAMeal, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
+    const api = { findRecipes, planFromSources, sourceCost, notAMeal, balance, siteSuits, siteQueries, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishFinder = api;
 })(typeof window !== 'undefined' ? window : globalThis);

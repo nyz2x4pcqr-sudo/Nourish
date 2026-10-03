@@ -476,6 +476,8 @@
         // What the app has learned the person likes (taste.js): −1…1, worth up to about a slot's worth of fit.
         if (ctx.taste) { try { cost -= ctx.taste(r) * 0.8; } catch (e) { /* no profile */ } }
         cost += (ctx.cuisineCount[cuisineOf(r)] || 0) * 0.35;
+        // A mix of sources: each meal already taken from the same place counts a little against it.
+        cost += ((ctx.sourceCount && ctx.sourceCount[r.source_id || 'other']) || 0) * 0.08;
         return cost;
     }
 
@@ -496,7 +498,7 @@
         const on = m => split[MEALS.indexOf(m)] > 0;
         const used = dishList();                 // this plan: never twice
         const recent = dishList(already);        // recent plans: avoided
-        const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {} };
+        const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {}, sourceCount: {} };
         const rejected = {};   // why recipes didn't fit a slot (for the log)
         // The real calories of a recipe at each realistic portion (amounts rounded as written), so
         // meals are chosen for how close the day can really get, not for a number on paper.
@@ -584,6 +586,7 @@
                 if (isFav(r)) favUsed++;
                 const c = cuisineOf(r);
                 ctx.cuisineCount[c] = (ctx.cuisineCount[c] || 0) + 1;
+                ctx.sourceCount[r.source_id || 'other'] = (ctx.sourceCount[r.source_id || 'other'] || 0) + 1;
             });
             addSnacks(day, settings, d, people, exclude);
             const snackKcal = (day.snacks || []).reduce((t, x) => t + x.nutrition.calories, 0);
