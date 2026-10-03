@@ -75,6 +75,23 @@ import json; r = json.load(open('$PROBE')); assert r['ok'], r; v = json.loads(r[
 assert v['fileSharing'] and v['foldersMade'], v
 print('Recipe folders:', v['folder'], '| file sharing on | path', v['path'])" || fail "recipe folders not set up for the Files app"
 
+echo "== 1c. An EPUB cookbook in Recipe Books is read on the phone a slice at a time (books.js + the native range reader)"
+node "$GITHUB_WORKSPACE/tools/make-sample-epub.js" "$DATA/Documents/Recipe Books/Easy Mornings.epub" 2>/dev/null || (cd ../.. && node tools/make-sample-epub.js "$DATA/Documents/Recipe Books/Easy Mornings.epub")
+printf 'kindle' > "$DATA/Documents/Recipe Books/Old book.azw3"
+probe "localStorage.removeItem(LIBRARY_KEY); await indexLibrary();
+  const idx = libraryIndex().files || {};
+  return JSON.stringify({ recipes: libraryRecipes().map(r => r.name + ' | ' + r.source_name), kindle: (idx['Recipe Books/Old book.azw3'] || {}).note || '' });" 120
+python3 - "$PROBE" <<'PY' || fail "the phone couldn't read an EPUB cookbook"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"])
+print("\n".join(v["recipes"])); print("Kindle file:", v["kindle"])
+assert any(x.startswith("Spinach & Feta Omelette | Easy Mornings & Evenings · Breakfast") for x in v["recipes"]), v
+assert len(v["recipes"]) == 3, v
+assert "Kindle" in v["kindle"], v
+PY
+rm -f "$DATA/Documents/Recipe Books/Easy Mornings.epub" "$DATA/Documents/Recipe Books/Old book.azw3"
+
 echo "== 2. Saved data survives a restart"
 probe "return localStorage.getItem('probe_saved');" 60
 python3 -c "import json; r = json.load(open('$PROBE')); assert r['value'] == 'kept', r" || fail "localStorage was not kept"
@@ -259,6 +276,26 @@ v = json.loads(r["value"])
 print("\n".join(v["log"]))
 for i, d in enumerate(v["days"]): print(f"Day {i + 1}: {d['kcal']} kcal |", " | ".join(d["meals"]))
 print(f"AUTOMATIC 7-DAY PLAN ON THE SIMULATOR: {v['seconds']} s" + ("" if v["finished"] else " (stopped at the 8-minute limit; see the 'Found ... recipes in ... s' line for the search time)"))
+PY
+
+echo "== 6e. Every recipe site, tried from inside the iPhone app (its own way of fetching pages): not pass/fail, sites change"
+probe "const rows = [];
+  for (const site of NourishSources.SITES.filter(s => s.status === 'ok')) {
+    const store = {}; const t0 = Date.now();
+    const o = Object.assign(finderOptions('', ''), { enabled: id => id === site.id, days: 7, limits: { seconds: 20, searches: 4, pages: 4, parallel: 2 },
+      cache: { get: k => (k in store ? JSON.parse(store[k]) : null), set: (k, v) => { store[k] = JSON.stringify(v); } }, trace: () => {}, log: () => {} });
+    let res = null, err = '';
+    try { res = await NourishFinder.findRecipes(o); } catch (e) { err = e.message; }
+    const f = store.nourish_source_failures ? (JSON.parse(store.nourish_source_failures)[site.id] || {}) : {};
+    rows.push({ id: site.id, recipes: res ? res.stats.recipes : 0, pages: res ? res.stats.pages : 0, seconds: Math.round((Date.now() - t0) / 1000), why: err || f.why || '', blocked: !!f.blocked });
+  }
+  return JSON.stringify(rows);" 900
+python3 - "$PROBE" <<'PY' || echo "(site table skipped)"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+print("SITES FROM THE IPHONE APP (simulator on a cloud Mac, so a datacenter address, not a phone network):")
+for row in json.loads(r["value"]):
+    print(f"  {row['id']:<18} {row['recipes']:>3} recipes from {row['pages']:>2} pages in {row['seconds']:>3} s" + (f"  FAILED: {row['why']}{' (refuses the app)' if row['blocked'] else ''}" if row['why'] else ""))
 PY
 
 echo "== 7. Screen headers stay below the status bar on all five tabs"
