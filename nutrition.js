@@ -80,7 +80,21 @@
     const PACK = /(\d+(?:\.\d+)?)\s*(?:-|\s)?\s*(oz|ounces?|g|grams?|ml|lb|pounds?)\b\.?\)?\s*(?:cans?|tins?|packages?|packets?|jars?|bags?|containers?|cartons?|blocks?|boxes?)?/i;
 
     // One ingredient line → { grams, key, free } or { unmatched: true }.
-    function readLine(line) {
+    // Oil, butter, sauces and toppings with no amount ("olive oil, for drizzling", "parmesan to
+    // serve") are easy to miss: they count with a typical amount per serving, marked as assumed.
+    const ASSUMED = [
+        [/\b(for (deep[- ]?)?frying|to fry)\b/, /\b(oil|lard|shortening|ghee|fat)\b/, 14, '1 tbsp per serving (absorbed when frying)'],
+        [null, /\b(oil|butter|ghee|margarine|lard|shortening|cooking fat)\b/, 5, '1 tsp per serving'],
+        [null, /\b(soy sauce|tamari|fish sauce|ketchup|mayo(nnaise)?|ranch|dressing|vinaigrette|bbq|barbecue|sriracha|hot sauce|salsa|pesto|sauce|aioli|gravy|syrup|honey|jam|tahini|hummus|peanut butter|nut butter)\b/, 15, '1 tbsp per serving'],
+        [null, /\b(cheese|parmesan|cheddar|mozzarella|feta|sour cream|cream|yogh?urt|cr[eè]me fra[iî]che|nuts?|almonds?|walnuts?|pecans?|cashews?|peanuts?|seeds?|croutons?|bacon bits|avocado|guacamole|chocolate)\b/, 15, '2 tbsp per serving'],
+    ];
+    function assumedAmount(raw, key) {
+        const text = clean(raw) + ' ' + (key || '');
+        const hit = ASSUMED.find(([when, what]) => (!when || when.test(raw.toLowerCase())) && what.test(text));
+        return hit ? { grams: hit[2], label: hit[3] } : null;
+    }
+
+    function readLine(line, servings = 1) {
         const raw = String(line || '').trim();
         if (!raw) return null;
         const item = Units ? Units.splitIngredient(raw) : { qty: null, unit: '', text: raw };
@@ -120,6 +134,8 @@
             // No amount ("salt to taste", "cooking spray"): seasonings count as nothing; anything else
             // is a guess, so the recipe is marked approximate.
             if (free) return { grams: 0, key: m.key, free: true };
+            const typical = assumedAmount(raw, m.key);
+            if (typical) return { grams: typical.grams * Math.max(1, Number(servings) || 1), key: m.key, assumed: typical.label };
             return { unmatched: true, line: raw, key: m.key };
         }
         return { grams: Math.max(0, grams), key: m.key, free };
@@ -132,19 +148,22 @@
         const total = { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
         const unmatched = [];
         const lines = [];
+        const assumed = [];
         (ingredients || []).forEach(line => {
-            const r = readLine(line);
+            const r = readLine(line, per);
             if (!r) return;
             if (r.unmatched) { unmatched.push(r.line); return; }
             const n = r.key ? FOODS[r.key].n : [0, 0, 0, 0];
             const f = r.grams / 100;
             total.calories += n[0] * f; total.protein_g += n[1] * f; total.carbs_g += n[2] * f; total.fat_g += n[3] * f;
-            lines.push({ line, key: r.key, grams: Math.round(r.grams) });
+            // Per line, per serving: the breakdown people can check.
+            lines.push({ line, key: r.key, grams: Math.round(r.grams), kcal: Math.round(n[0] * f / per), assumed: r.assumed || undefined });
+            if (r.assumed) assumed.push({ line: String(line), amount: r.assumed });
         });
         const round = v => Math.round(v / per);
         return {
             nutrition: { calories: round(total.calories), protein_g: round(total.protein_g), carbs_g: round(total.carbs_g), fat_g: round(total.fat_g) },
-            unmatched, lines, approximate: unmatched.length > 0,
+            unmatched, lines, assumed, approximate: unmatched.length > 0,
         };
     }
 
@@ -163,6 +182,9 @@
         recipe.nutrition = keepOwn ? { calories: Math.round(own.calories), protein_g: own.protein_g != null ? Math.round(own.protein_g) : calc.protein_g, carbs_g: own.carbs_g != null ? Math.round(own.carbs_g) : calc.carbs_g, fat_g: own.fat_g != null ? Math.round(own.fat_g) : calc.fat_g } : calc;
         recipe.nutrition_basis = keepOwn ? 'source' : 'calculated';
         recipe.nutrition_unmatched = c.unmatched.length ? c.unmatched.slice(0, 12) : undefined;
+        recipe.nutrition_assumed = c.assumed.length ? c.assumed.slice(0, 12) : undefined;
+        // The site's own numbers next to ours, so the breakdown can say how well they agree.
+        recipe.nutrition_check = own && calc.calories > 0 ? { source: Math.round(own.calories), calculated: calc.calories } : undefined;
         delete recipe.nutrition_estimated;
         return recipe;
     }

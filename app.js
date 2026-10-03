@@ -2147,12 +2147,37 @@ function nutritionPanel(meal) {
         h('span', { class: 'v num' }, g(key) != null ? String(Math.round(g(key))) : '—', h('small', { text: 'g' })));
     return h('section', { class: 'nutrition-panel', 'aria-label': 'Nutrition' },
         h('div', { class: 'nutrition-top' },
-            h('div', { class: 'nutrition-kcal num' }, formatCalories(n.calories), h('small', { text: meal.servings ? 'kcal per serving' : 'kcal' })),
+            h('div', { class: 'nutrition-kcal num' }, h('small', { class: 'about', text: 'about' }), formatCalories(n.calories), h('small', { text: meal.servings ? 'kcal per serving' : 'kcal' })),
             meal.nutrition_unmatched || meal.nutrition_estimated ? h('span', { class: 'chip warn', text: 'Approximate' }) : null),
         sum > 0 ? split : null,
         h('div', { class: 'nutrition-macros' }, macro('Protein', 'protein_g', 'protein'), macro('Carbs', 'carbs_g', 'carbs'), macro('Fat', 'fat_g', 'fat')),
         meal.servings ? h('p', { class: 'recipe-note', text: `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null,
-        nutritionNotes(meal).map(t => h('p', { class: 'recipe-note', text: t })));
+        nutritionNotes(meal).map(t => h('p', { class: 'recipe-note', text: t })),
+        calorieBreakdown(meal));
+}
+
+// "How is this worked out?": every ingredient with its calories per serving, what was assumed
+// (oil with no amount…), what couldn't be counted, and how the site's own numbers compare.
+function calorieBreakdown(meal) {
+    if (!(meal.ingredients || []).length || typeof NourishNutrition === 'undefined') return null;
+    const servings = Math.max(1, Number(meal.servings) || 1);
+    const c = NourishNutrition.calculate(meal.ingredients, servings);
+    const rows = c.lines.filter(l => l.kcal > 0 || l.assumed).sort((a, b) => b.kcal - a.kcal);
+    const check = meal.nutrition_check;
+    const shown = meal.nutrition && meal.nutrition.calories;
+    return h('details', { class: 'calorie-breakdown' },
+        h('summary', { text: 'How is this worked out?' }),
+        h('p', { class: 'recipe-note', text: `Each ingredient as written, per serving, from USDA food data. Together: about ${formatCalories(c.nutrition.calories)} kcal${shown && Math.abs(shown - c.nutrition.calories) > 15 ? ` (the recipe shows ${formatCalories(shown)}: ${meal.nutrition_basis === 'source' ? "the site's own number, which agrees within 15%" : 'it includes ingredients worked out another way'})` : ''}.` }),
+        h('div', { class: 'breakdown-rows' }, rows.map(l => h('div', { class: 'breakdown-row' },
+            h('span', { class: 'what' }, l.line, l.assumed ? h('small', { text: `no amount given, counted as ${l.assumed}` }) : null),
+            h('span', { class: 'kcal num', text: `${l.kcal}` })))),
+        c.unmatched.length ? h('p', { class: 'recipe-note', text: `Not counted (not in the food table): ${c.unmatched.join('; ')}.` }) : null,
+        check ? h('p', { class: 'recipe-note', text: `Cross-check: ${meal.source_name || 'the recipe site'} says ${formatCalories(check.source)} kcal, our calculation ${formatCalories(check.calculated)} kcal (${Math.round(Math.abs(check.source - check.calculated) / Math.max(1, check.calculated) * 100)}% apart). ${meal.nutrition_basis === 'source' ? "Close enough, so the site's number is used." : 'Too far apart, so our calculation is used.'}` }) : null);
+}
+
+function portionWords(p) {
+    const words = { 0.5: 'half', 0.75: 'three quarters', 1.25: '1¼ times', 1.5: '1½ times', 1.75: '1¾ times', 2: 'twice' };
+    return words[Math.round(p * 4) / 4] || `${Number(p).toFixed(2).replace(/0$/, '')}×`;
 }
 
 // Where the numbers come from, and what was changed to fit the person's targets, in plain words.
@@ -2161,7 +2186,7 @@ function nutritionNotes(meal) {
     if (meal.nutrition_basis === 'source') notes.push(`Numbers from ${meal.source_name || 'the recipe'}, checked against USDA data.`);
     else if (meal.nutrition_basis === 'calculated') notes.push('Numbers worked out from the ingredients with USDA data.');
     if (meal.nutrition_unmatched) notes.push(`Not counted (not in the food table): ${meal.nutrition_unmatched.join('; ')}.`);
-    if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion sized to your targets: about ${Number(meal.scaled.portion).toFixed(1)}× the original serving.`);
+    if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion: ${portionWords(meal.scaled.portion)} of the original serving, to fit your day. The amounts and calories are for that portion.`);
     if (meal.trimmed) notes.push('Less oil or sugar than the original, to fit your calories. Seasoning is unchanged.');
     if (meal.reseasoned) notes.push(`Seasoning added: ${meal.reseasoned.join(', ')}.`);
     return notes;
@@ -2349,6 +2374,7 @@ function updateTodayScreen() {
         summary = h('section', { class: 'card summary', id: 'calorieSection' },
             h('div', { class: 'ring' }, ring,
                 h('div', { class: 'ring-center' },
+                    known ? h('div', { class: 'ring-about', text: 'about' }) : null,
                     h('div', { class: 'ring-value num', id: 'calorieValue', text: known ? formatCalories(totalCal) : '—' }),
                     h('div', { class: 'ring-label', id: 'calorieLabel', text: known ? `of ${calTarget.toLocaleString()} kcal` : 'no nutrition data' }))),
             h('div', { class: 'macros' }, macros.filter(([, key]) => todayStatOn(key)).map(([label, key, max, cls]) => {
@@ -2358,7 +2384,8 @@ function updateTodayScreen() {
                 return h('div', {},
                     h('div', { class: 'macro-head' }, h('span', {}, h('i', { class: 'macro-dot', style: `background:var(--${cls.replace('macro-', '')})` }), label), h('span', { class: 'num', text: known ? `${Math.round(total)} / ${max}g` : '—' })),
                     h('div', { class: 'macro-track' }, fill));
-            })));
+            })),
+            known ? dayBreakdown(day, entry, totalCal, calTarget) : null);
     }
 
     const title = isToday(selectedDay) ? "Today's meals" : `${dayName(selectedDay)}'s meals`;
@@ -2374,6 +2401,25 @@ function updateTodayScreen() {
     if (active && active.scrollIntoView) requestAnimationFrame(() => {
         strip.scrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
     });
+}
+
+// "How today adds up": each meal, snack and extra with its calories, the real total and how far it
+// is from the target, in plain words. The total is never rounded or nudged to the target.
+function dayBreakdown(day, entry, total, target) {
+    const rows = daySlots(day).map(([t, m]) => [MEAL_LABELS[t] || 'Snack', m.name, m.nutrition && m.nutrition.calories, (entry.meals || {})[t]]);
+    (entry.items || []).forEach(it => rows.push(['Extra', it.name, it.nutrition && it.nutrition.calories, '']));
+    const diff = Math.round(total - target);
+    const pct = Math.abs(diff) / Math.max(1, target);
+    const verdict = Math.abs(diff) < 10 ? 'Right on your target.'
+        : pct <= 0.1 ? `${formatCalories(Math.abs(diff))} kcal ${diff < 0 ? 'under' : 'over'} your target, which is close enough: plans aim for within 5–10%.`
+        : `${formatCalories(Math.abs(diff))} kcal ${diff < 0 ? 'under' : 'over'} your target.`;
+    return h('details', { class: 'calorie-breakdown day' },
+        h('summary', { text: 'How today adds up' }),
+        h('div', { class: 'breakdown-rows' }, rows.map(([slot, name, kcal, status]) => h('div', { class: 'breakdown-row' + (status === 'skipped' ? ' skipped' : '') },
+            h('span', { class: 'what' }, name, h('small', { text: `${slot}${status === 'skipped' ? ' · skipped, not counted' : status === 'eaten' ? ' · eaten' : ''}` })),
+            h('span', { class: 'kcal num', text: kcal != null ? formatCalories(kcal) : '—' }))),
+            h('div', { class: 'breakdown-row total' }, h('span', { class: 'what', text: 'Total (about)' }), h('span', { class: 'kcal num', text: formatCalories(total) }))),
+        h('p', { class: 'recipe-note', text: `${verdict} Every number is worked out from the ingredients as written; open a recipe to see its breakdown.` }));
 }
 
 function mealCard(type, meal, dayIndex, status) {
@@ -2911,6 +2957,8 @@ function normalizeMeal(m) {
         incomplete: Array.isArray(m.incomplete) && m.incomplete.length ? m.incomplete.map(String).slice(0, 12) : undefined,
         nutrition_basis: m.nutrition_basis === 'source' || m.nutrition_basis === 'calculated' ? m.nutrition_basis : undefined,
         nutrition_unmatched: Array.isArray(m.nutrition_unmatched) && m.nutrition_unmatched.length ? m.nutrition_unmatched.map(String).slice(0, 12) : undefined,
+        nutrition_assumed: Array.isArray(m.nutrition_assumed) && m.nutrition_assumed.length ? m.nutrition_assumed.slice(0, 12).map(a => ({ line: String(a.line || ''), amount: String(a.amount || '') })) : undefined,
+        nutrition_check: m.nutrition_check && Number(m.nutrition_check.source) > 0 ? { source: toNumber(m.nutrition_check.source), calculated: toNumber(m.nutrition_check.calculated) } : undefined,
         scaled: m.scaled && Number(m.scaled.portion) > 0 ? { from_servings: toNumber(m.scaled.from_servings), portion: toNumber(m.scaled.portion) } : undefined,
         reseasoned: Array.isArray(m.reseasoned) && m.reseasoned.length ? m.reseasoned.map(String).slice(0, 6) : undefined,
         trimmed: m.trimmed ? true : undefined,

@@ -273,14 +273,29 @@
     // === PORTIONS ===
     const FATTY = /\b(oil|butter|ghee|margarine|lard|shortening|mayonnaise|mayo)\b/i;
     const SWEET = /\b(sugar|honey|maple syrup|syrup|agave|molasses|jam|chocolate chips)\b/i;
+    const WHOLE = /\b(eggs?|egg whites?|egg yolks?|tortillas?|wraps?|pitas?|buns?|bagels?|english muffins?|muffins?|rolls?|slices?|fillets?|breasts?|thighs?|drumsticks?|wings?|chops?|sausages?|patt(y|ies)|burgers?|hot dogs?|crackers?|rice cakes?|cloves?)\b/i;
     function scaleLine(line, k) {
         const item = U.splitIngredient(line);
         if (item.qty == null || Math.abs(k - 1) < 0.01) return String(line);
         let q = item.qty * k;
-        const unit = item.unit;
-        if (!unit || unit === 'clove' || unit === 'can' || unit === 'slice' || unit === 'piece' || unit === 'fillet') q = Math.max(0.5, Math.round(q * 2) / 2);
+        let unit = item.unit;
+        // Under a pound reads better (and is more exact) in ounces: 6 oz, not ½ lb. A bit of a cup
+        // in tablespoons, a bit of a tablespoon in teaspoons: 2 tsp oil, not ¾ tbsp.
+        if (unit === 'lb' && q < 1) { q *= 16; unit = 'oz'; }
+        if (unit === 'cup' && q < 0.25) { q *= 16; unit = 'tbsp'; }
+        if (unit === 'tbsp' && q < 1 && Math.abs(q * 2 - Math.round(q * 2)) > 0.01) { q *= 3; unit = 'tsp'; }
+        if (unit === 'tsp' && q >= 0.5 && item.unit !== 'tsp') q = Math.max(0.5, Math.round(q * 2) / 2);
+        // Things you can't cook half of (eggs, tortillas, slices, fillets…) stay whole.
+        if ((!unit || unit === 'slice' || unit === 'piece' || unit === 'fillet') && WHOLE.test(item.text || '')) q = Math.max(1, Math.round(q));
+        else if (!unit || unit === 'clove' || unit === 'can' || unit === 'slice' || unit === 'piece' || unit === 'fillet') q = Math.max(0.5, Math.round(q * 2) / 2);
         else if (unit === 'g' || unit === 'ml') q = Math.max(5, Math.round(q / 5) * 5);
-        else q = q >= 0.3 ? Math.max(0.25, Math.round(q * 4) / 4) : Math.max(0.125, Math.round(q * 8) / 8);   // kitchen fractions: ¼ ½ ¾ (⅛ for pinches)
+        else if (unit === 'oz' && q >= 2) q = Math.round(q);
+        else if (unit === 'cup' && q >= 0.25) {
+            // Cups: the nearest of ¼ ⅓ ½ ⅔ ¾ (and whole cups plus those).
+            const whole = Math.floor(q), part = q - whole;
+            const best = [0, 0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1].reduce((a, b) => (Math.abs(b - part) < Math.abs(a - part) ? b : a));
+            q = whole + best;
+        } else q = q >= 0.3 ? Math.max(0.25, Math.round(q * 4) / 4) : Math.max(0.125, Math.round(q * 8) / 8);   // kitchen fractions: ¼ ½ ¾ (⅛ for pinches)
         const amount = U.formatAmount(q, unit);
         return item.note !== undefined ? `${item.text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${item.text}`.trim();
     }
@@ -313,6 +328,7 @@
         r.nutrition = { calories: Math.max(1, n.calories - (before.calories - after.calories)), protein_g: Math.max(0, n.protein_g - (before.protein_g - after.protein_g)),
             carbs_g: Math.max(0, n.carbs_g - (before.carbs_g - after.carbs_g)), fat_g: Math.max(0, n.fat_g - (before.fat_g - after.fat_g)) };
     }
+    const baseCalc = new WeakMap();   // a recipe's own calculation, worked out once
     // The recipe made for `people`, each portion `factor` times one of the recipe's servings.
     function scaleRecipe(r, factor, people) {
         const out = JSON.parse(JSON.stringify(r));
@@ -322,12 +338,58 @@
         out.servings = people;
         if (Math.abs(factor - 1) > 0.05 || from !== people) out.scaled = { from_servings: from, portion: Math.round(factor * 100) / 100 };
         delete out._lines; delete out._fit;
-        // Per person = one serving of the recipe (as settled) × the portion. Worked out from the
-        // settled numbers, not the rounded amounts, so an amount that can't be scaled ("a handful")
-        // never leaves the calories unchanged.
+        // Honest numbers: worked out again from the amounts as written after scaling (2 eggs, not
+        // 1.7), as a change to the recipe's settled numbers (which may be the site's own, checked
+        // against our calculation). An amount that can't be scaled ("a handful") falls back on the portion.
         const n = r.nutrition || N.calculate(r.ingredients, from).nutrition;
-        const round = v => Math.round((Number(v) || 0) * factor);
-        out.nutrition = { calories: round(n.calories), protein_g: round(n.protein_g), carbs_g: round(n.carbs_g), fat_g: round(n.fat_g) };
+        let before = baseCalc.get(r);
+        if (!before || before.from !== from || before.list !== r.ingredients) { before = { from, list: r.ingredients, n: N.calculate(r.ingredients, from).nutrition }; baseCalc.set(r, before); }
+        before = before.n;
+        const after = N.calculate(out.ingredients, people).nutrition;
+        const ratio = key => (before[key] > 0 && after[key] >= 0 ? after[key] / before[key] : factor);
+        const kcalRatio = before.calories > 0 && after.calories > 0 ? after.calories / before.calories : factor;
+        // Lines the calculator can't see (unmatched) keep scaling with the portion.
+        const seen = before.calories / Math.max(1, Number(n.calories) || 1);
+        const change = key => (key === 'calories' ? kcalRatio : ratio(key)) * Math.min(1, seen) + factor * Math.max(0, 1 - Math.min(1, seen));
+        const val = key => Math.round((Number(n[key]) || 0) * change(key));
+        out.nutrition = { calories: val('calories'), protein_g: val('protein_g'), carbs_g: val('carbs_g'), fat_g: val('fat_g') };
+        return out;
+    }
+
+    // Realistic portions: a quarter of a serving at a time, between half and double. Days get near
+    // the target by choosing meals that fit, then these small changes; never an odd ×1.37.
+    const PORTIONS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+    function portionOptions(f) {
+        // The realistic portions near what's needed (rounded amounts don't always move the
+        // calories, so a few are tried), and the recipe as written when it's close.
+        const out = PORTIONS.filter(p => p >= f * 0.7 && p <= f * 1.4);
+        if (!out.length) out.push(snapPortion(Math.max(0.5, Math.min(2, f))));
+        if (Math.abs(Math.log(f)) < Math.log(1.3)) out.push(1);
+        return [...new Set(out)];
+    }
+    function snapPortion(f) { return PORTIONS.reduce((a, b) => (Math.abs(Math.log(b / f)) < Math.abs(Math.log(a / f)) ? b : a), 1); }
+    // Sizes a day's meals together: for each, the realistic portions around what its share of the day
+    // needs; then the combination whose real total is closest to the target (a small preference for
+    // recipes as written). Totals are never forced or rounded to the target.
+    // items: [{ key, r, want }] (r with settled numbers, want: its kcal share). fixed: kcal already in the day.
+    function sizeMeals(items, target, people, fixed = 0) {
+        const choices = items.map(it => portionOptions(it.want / it.r.nutrition.calories).map(p => {
+            const out = scaleRecipe(it.r, p, people);
+            if (Math.abs(p - 1) < 0.01 && Number(it.r.servings) === people) delete out.scaled;
+            return { p, out };
+        }));
+        let best = null;
+        const walk = (i, picked, total) => {
+            if (i === choices.length) {
+                const cost = Math.abs(Math.log(Math.max(1, total) / target)) + picked.reduce((c, x) => c + Math.abs(Math.log(x.p)) * 0.02, 0);
+                if (!best || cost < best.cost) best = { cost, picked: picked.slice() };
+                return;
+            }
+            choices[i].forEach(c => { picked.push(c); walk(i + 1, picked, total + c.out.nutrition.calories); picked.pop(); });
+        };
+        walk(0, [], fixed);
+        const out = {};
+        items.forEach((it, i) => { out[it.key] = best ? best.picked[i].out : scaleRecipe(it.r, 1, people); });
         return out;
     }
 
@@ -369,7 +431,10 @@
         const rich = r._richKcal || 0;   // calories trimRich could save per serving
         if (f < 0.6 && n.calories - rich > 0) f = Math.max(f, kcalTarget / (n.calories - rich) * 0.95);
         if (f < 0.55 || f > 2) return Infinity;
-        let cost = Math.abs(Math.log(f)) * 2;
+        // Recipes that are close to the slot as written come first; a realistic portion that still
+        // misses counts against it too.
+        const portion = snapPortion(f);
+        let cost = Math.abs(Math.log(f)) * 1.5 + Math.abs(Math.log(f / portion)) * 2;
         const share = kcalTarget / ctx.targets.kcal;
         const pTarget = ctx.targets.protein * share;
         const fTarget = ctx.targets.fat * share;
@@ -394,6 +459,25 @@
         const used = new Set(already.map(n => normName(n)));
         const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {} };
         const rejected = {};   // why recipes didn't fit a slot (for the log)
+        // The real calories of a recipe at each realistic portion (amounts rounded as written), so
+        // meals are chosen for how close the day can really get, not for a number on paper.
+        const portionKcal = new Map();
+        const realKcal = (r, p) => {
+            const key = `${r.name}|${r.source_url || ''}|${p}`;
+            if (!portionKcal.has(key)) portionKcal.set(key, scaleRecipe(r, p, people).nutrition.calories);
+            return portionKcal.get(key);
+        };
+        const reachable = (picks, target) => {
+            // The closest real total the picks can reach with realistic portions.
+            let best = Infinity;
+            const opts = picks.map(x => portionOptions(x.want / x.r.nutrition.calories).map(p => realKcal(x.r, p)));
+            const walk = (i, total) => {
+                if (i === opts.length) { best = Math.min(best, Math.abs(Math.log(Math.max(1, total) / target))); return; }
+                opts[i].forEach(k => walk(i + 1, total + k));
+            };
+            walk(0, 0);
+            return best;
+        };
         const out = [];
         const missing = [];
         const report = [];
@@ -431,9 +515,14 @@
                     cost += Math.max(0, (pT * 0.9 - p) / pT) * 4 + Math.max(0, (f - fT * 1.1) / fT) * 4;
                 }
                 if (new Set(cuis).size < cuis.length) cost += 0.6;
+                // How close the day can really get once portions are realistic: 5% off costs about 0.5.
+                const picks = pick.map((x, i) => (x ? { r: x.r, want: targets.kcal * split[i] } : null)).filter(Boolean);
+                const wanted = picks.reduce((t, x) => t + x.want, 0);
+                if (picks.length && (!best || cost < best.cost)) cost += Math.max(0, reachable(picks, wanted) - 0.02) * 10;
                 if (!best || cost < best.cost) best = { pick, cost };
             })));
             const day = {};
+            const items = [];
             MEALS.forEach((m, i) => {
                 const chosen = best && best.pick[i];
                 if (!on(m)) return;
@@ -441,36 +530,20 @@
                 const r = JSON.parse(JSON.stringify(chosen.r));
                 const kcal = targets.kcal * split[i];
                 if (kcal / r.nutrition.calories < 0.85) trimAndRecount(r, r.nutrition.calories - kcal / 0.85);
-                day[m] = scaleRecipe(r, Math.max(0.5, Math.min(2, kcal / r.nutrition.calories)), people);
+                items.push({ key: m, r, want: kcal });
                 used.add(normName(r.name));
                 const c = cuisineOf(r);
                 ctx.cuisineCount[c] = (ctx.cuisineCount[c] || 0) + 1;
             });
             addSnacks(day, settings, d, people, exclude);
-            fineTune(day, targets.kcal, people, MEALS.filter(on).length);
+            const snackKcal = (day.snacks || []).reduce((t, x) => t + x.nutrition.calories, 0);
+            // A day with a gap is sized to its own meals' shares only (the AI fills the gap later).
+            const target = items.length === MEALS.filter(on).length ? targets.kcal - snackKcal : items.reduce((t, it) => t + it.want, 0);
+            Object.assign(day, sizeMeals(items, Math.max(1, target), people));
             out.push(day);
             report.push(dayTotals(day));
         }
         return { days: out, missing, report, targets, split, rejected };
-    }
-    // Rounding amounts moves calories a little: nudge portions until the day is within 5%.
-    // need: how many main meals a complete day has (days with a gap aren't nudged).
-    function fineTune(day, kcal, people, need = 3) {
-        for (let pass = 0; pass < 4; pass++) {
-            const t = dayTotals(day).kcal;
-            const meals = MEALS.filter(m => day[m] && day[m].nutrition && day[m].nutrition.calories > 0);
-            if (!t || !meals.length || meals.length < need || Math.abs(t - kcal) / kcal <= 0.035) return;
-            // The biggest meal that can still move in the needed direction (portions stay 0.5×–2×).
-            const portion = r => (r.scaled ? r.scaled.portion : 1);
-            const up = kcal > t;
-            const big = meals.filter(m => (up ? portion(day[m]) < 1.95 : portion(day[m]) > 0.55))
-                .sort((a, b) => day[b].nutrition.calories - day[a].nutrition.calories)[0];
-            if (!big) return;
-            const r = day[big];
-            const f = Math.max(0.5 / portion(r), Math.min(2 / portion(r), (r.nutrition.calories + (kcal - t)) / r.nutrition.calories));
-            const base = Object.assign({}, r, { servings: people });   // amounts already for `people`; numbers per person
-            day[big] = Object.assign(scaleRecipe(base, f, people), { scaled: r.scaled ? Object.assign({}, r.scaled, { portion: Math.round(portion(r) * f * 100) / 100 }) : { from_servings: people, portion: Math.round(f * 100) / 100 } });
-        }
     }
     // One meal made about `kcal` lighter: oil and sugar first, then a smaller portion (never below
     // 60% of what it was). Seasoning stays.
@@ -480,7 +553,7 @@
         if (!n || !(kcal > 0)) return r;
         trimAndRecount(r, kcal);
         const want = Math.max(n * 0.6, n - kcal);
-        const f = Math.min(1, want / r.nutrition.calories);
+        const f = Math.min(1, Math.max(0.75, snapPortion(want / r.nutrition.calories)));   // ¾ at the least: still a meal
         const prev = meal.scaled ? meal.scaled.portion : 1;
         const out = scaleRecipe(Object.assign({}, r, { servings: people || r.servings || 1 }), f, people || r.servings || 1);
         out.scaled = { from_servings: (meal.scaled && meal.scaled.from_servings) || r.servings || 1, portion: Math.round(prev * f * 100) / 100 };
@@ -492,17 +565,27 @@
         const targets = targetsOf(settings || {});
         const split = splitOf(settings);
         const out = Object.assign({}, day);
+        const items = [];
+        let fixed = (Array.isArray(day.snacks) ? day.snacks : []).reduce((t, x) => t + ((x.nutrition && x.nutrition.calories) || 0), 0);
         MEALS.forEach((m, i) => {
             const r = out[m];
-            if (!r || !r.nutrition || !(r.nutrition.calories > 0) || !(r.ingredients || []).length || !(split[i] > 0)) return;
+            if (!r || !r.nutrition || !(r.nutrition.calories > 0)) return;
+            if (!(r.ingredients || []).length || !(split[i] > 0)) { fixed += r.nutrition.calories; return; }
             const kcal = targets.kcal * split[i];
-            let copy = JSON.parse(JSON.stringify(r));
+            const copy = JSON.parse(JSON.stringify(r));
+            // Already sized (amounts are for `people`): work from one serving as it stands.
+            if (copy.scaled) copy.servings = people || Number(copy.servings) || 1;
             if (kcal / copy.nutrition.calories < 0.85) trimAndRecount(copy, copy.nutrition.calories - kcal / 0.85);
-            const f = kcal / copy.nutrition.calories;
-            if (Math.abs(f - 1) <= 0.05 && !copy.trimmed) return;
-            out[m] = scaleRecipe(copy, Math.max(0.5, Math.min(2, f)), people || Number(copy.servings) || 1);
+            items.push({ key: m, r: copy, want: kcal, prev: r });
         });
-        fineTune(out, targets.kcal, people || 1, mealsOf(settings).length);
+        const sized = sizeMeals(items, Math.max(1, targets.kcal - fixed), people || 1);
+        items.forEach(it => {
+            const s = sized[it.key];
+            // Unchanged unless it really moves: a meal at its portion stays exactly as it was.
+            if (s.scaled && it.prev.scaled) s.scaled = Object.assign({}, s.scaled, { from_servings: it.prev.scaled.from_servings, portion: Math.round(it.prev.scaled.portion * s.scaled.portion * 100) / 100 });
+            if (!s.scaled && !it.r.trimmed) return;
+            out[it.key] = s;
+        });
         return out;
     }
     function dayTotals(day) {
@@ -548,7 +631,7 @@
         for (let i = 0; i < n; i++) {
             const r = ok[(d * n + i) % ok.length];
             if (snacks.some(x => x.name === r.name)) continue;
-            snacks.push(scaleRecipe(r, Math.max(0.5, Math.min(2, kcal / r.nutrition.calories)), people));
+            snacks.push(scaleRecipe(r, snapPortion(Math.max(0.5, Math.min(2, kcal / r.nutrition.calories))), people));
         }
         day.snacks = snacks;
         return day;
@@ -624,7 +707,7 @@
         }).join('');
     }
 
-    const api = { quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
+    const api = { sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);
