@@ -9,6 +9,8 @@
 // recipe data these sites publish for search engines.
 // healthy: the site focuses on lighter cooking (preferred when the goal is Lose).
 // nutrition: the site publishes nutrition per serving (cross-checked against our own numbers).
+// meals: the meals a site has enough of (searched only for those); veg: a vegetarian site (no meat
+// searches); terms: the site's own search words per meal. Checked with tools/sites-diagnose.js.
 // status: 'ok' = checked (robots.txt, terms, recipe data) and used by default; 'dropped' = kept here
 // with the reason, so it isn't added again by mistake. See SOURCES.md for the checks.
 (function (root) {
@@ -30,23 +32,23 @@
     // read it too (tools/sources-check.js).
     const SITES = [
         { id: 'skinnytaste', name: 'Skinnytaste', domain: 'skinnytaste.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
-        { id: 'budgetbytes', name: 'Budget Bytes', domain: 'budgetbytes.com', group: 'healthy', search: 'wp', nutrition: true, status: 'ok' },
-        { id: 'cookieandkate', name: 'Cookie and Kate', domain: 'cookieandkate.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
-        { id: 'minimalistbaker', name: 'Minimalist Baker', domain: 'minimalistbaker.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
-        { id: 'loveandlemons', name: 'Love and Lemons', domain: 'loveandlemons.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
+        { id: 'budgetbytes', name: 'Budget Bytes', domain: 'budgetbytes.com', group: 'healthy', search: 'wp', nutrition: true, status: 'dropped', why: 'refuses the app\'s searches and recipe pages (403), on phones and servers' },
+        { id: 'cookieandkate', name: 'Cookie and Kate', domain: 'cookieandkate.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'refuses the app\'s searches and recipe pages (403), on phones and servers' },
+        { id: 'minimalistbaker', name: 'Minimalist Baker', domain: 'minimalistbaker.com', group: 'healthy', search: 'wp', veg: true, healthy: true, nutrition: true, status: 'ok' },
+        { id: 'loveandlemons', name: 'Love and Lemons', domain: 'loveandlemons.com', group: 'healthy', search: 'wp', veg: true, healthy: true, nutrition: true, status: 'ok' },
         { id: 'wellplated', name: 'Well Plated', domain: 'wellplated.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
-        { id: 'ambitiouskitchen', name: 'Ambitious Kitchen', domain: 'ambitiouskitchen.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
-        { id: 'pinchofyum', name: 'Pinch of Yum', domain: 'pinchofyum.com', group: 'healthy', search: 'wp', status: 'ok' },
-        { id: 'recipetineats', name: 'RecipeTin Eats', domain: 'recipetineats.com', group: 'general', search: 'wp', nutrition: true, status: 'ok' },
-        { id: 'hotthaikitchen', name: 'Hot Thai Kitchen', domain: 'hot-thai-kitchen.com', group: 'world', search: 'wp', status: 'ok' },
-        { id: 'mexicoinmykitchen', name: 'Mexico in My Kitchen', domain: 'mexicoinmykitchen.com', group: 'world', search: 'wp', nutrition: true, status: 'ok' },
-        { id: 'mediterraneandish', name: 'The Mediterranean Dish', domain: 'themediterraneandish.com', group: 'world', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
-        { id: 'feelgoodfoodie', name: 'FeelGoodFoodie', domain: 'feelgoodfoodie.net', group: 'healthy', search: 'sitemap', sitemap: 'https://feelgoodfoodie.net/recipe-sitemap.xml', healthy: true, nutrition: true, status: 'ok' },
+        { id: 'ambitiouskitchen', name: 'Ambitious Kitchen', domain: 'ambitiouskitchen.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
+        { id: 'pinchofyum', name: 'Pinch of Yum', domain: 'pinchofyum.com', group: 'healthy', search: 'wp', status: 'dropped', why: 'refuses the app\'s recipe pages (405, a bot check)' },
+        { id: 'recipetineats', name: 'RecipeTin Eats', domain: 'recipetineats.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
+        { id: 'hotthaikitchen', name: 'Hot Thai Kitchen', domain: 'hot-thai-kitchen.com', group: 'world', search: 'wp', status: 'dropped', why: 'refuses the app\'s searches and recipe pages (403)' },
+        { id: 'mexicoinmykitchen', name: 'Mexico in My Kitchen', domain: 'mexicoinmykitchen.com', group: 'world', search: 'wp', nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
+        { id: 'mediterraneandish', name: 'The Mediterranean Dish', domain: 'themediterraneandish.com', group: 'world', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
+        { id: 'feelgoodfoodie', name: 'FeelGoodFoodie', domain: 'feelgoodfoodie.net', group: 'healthy', search: 'sitemap', sitemap: 'https://feelgoodfoodie.net/recipe-sitemap.xml', healthy: true, nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403); its 1.7 MB sitemap was downloaded on every plan for nothing' },
         { id: 'thehealthymaven', name: 'The Healthy Maven', domain: 'thehealthymaven.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
-        { id: 'cafedelites', name: 'Cafe Delites', domain: 'cafedelites.com', group: 'general', search: 'wp', nutrition: true, status: 'ok' },
-        { id: 'spendwithpennies', name: 'Spend With Pennies', domain: 'spendwithpennies.com', group: 'general', search: 'wp', nutrition: true, status: 'ok' },
-        { id: 'seonkyoung', name: 'Seonkyoung Longest', domain: 'seonkyounglongest.com', group: 'world', search: 'wp', nutrition: true, status: 'ok' },
-        { id: 'isabeleats', name: 'Isabel Eats', domain: 'isabeleats.com', group: 'world', search: 'wp', nutrition: true, status: 'ok' },
+        { id: 'cafedelites', name: 'Cafe Delites', domain: 'cafedelites.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
+        { id: 'spendwithpennies', name: 'Spend With Pennies', domain: 'spendwithpennies.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
+        { id: 'seonkyoung', name: 'Seonkyoung Longest', domain: 'seonkyounglongest.com', group: 'world', search: 'wp', terms: { breakfast: ['egg', 'porridge', 'toast'], lunch: ['rice bowl', 'noodles', 'kimbap', 'salad', 'soup'], dinner: ['chicken', 'beef', 'pork', 'tofu', 'stir fry', 'noodles'] }, nutrition: true, status: 'ok' },
+        { id: 'isabeleats', name: 'Isabel Eats', domain: 'isabeleats.com', group: 'world', search: 'wp', nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
         { id: 'hellofresh', name: 'HelloFresh', domain: 'hellofresh.com', group: 'mealkit', status: 'dropped', why: 'terms forbid robots and scrapers (section 16.7)' },
         { id: 'everyplate', name: 'EveryPlate', domain: 'everyplate.com', group: 'mealkit', status: 'dropped', why: 'terms forbid robots and scrapers (same terms as HelloFresh)' },
         { id: 'greenchef', name: 'Green Chef', domain: 'greenchef.com', group: 'mealkit', status: 'dropped', why: 'terms forbid robots and scrapers (same terms as HelloFresh)' },

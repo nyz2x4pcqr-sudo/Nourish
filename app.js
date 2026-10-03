@@ -153,8 +153,9 @@ const secretEditing = {};      // API key rows switched to "type a new key"
 let settingsPage = null;
 
 // === STORAGE (localStorage can throw in private browsing) ===
+// Returns false when it couldn't be saved (storage full), so callers can make room.
 function store(key, value) {
-    try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); } catch (e) { /* not persisted */ }
+    try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); return true; } catch (e) { return false; }
 }
 function load(key, fallback = null) {
     try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch (e) { return fallback; }
@@ -277,6 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // The recipe library: read a little after start, then when the app comes back (at most every 5 minutes).
     librarySummary(libraryIndex());
     setTimeout(libraryLocation, 2500);
+    setTimeout(refreshRecipeLibrary, 45000);
     let libraryChecked = 0;
     const checkLibrary = () => { if (Date.now() - libraryChecked > 300000) { libraryChecked = Date.now(); indexLibrary(); } };
     setTimeout(checkLibrary, 8000);
@@ -3507,7 +3509,33 @@ function finderOptions(likes, hates) {
         already: recentPlanDishes(),
         cache: { get: k => loadJSON(k, null), set: (k, v) => store(k, v) },
         log: m => nlog('plan', m),
+        trace: m => nlog('sources', m, null, 'debug'),
     };
+}
+
+// The recipe library grows quietly while the app is open: at most twice a day, on Wi-Fi only
+// (never on mobile data), and never while a plan is being made.
+const LIBRARY_REFRESH_KEY = 'nourish_library_refreshed';
+async function onWifi() {
+    if (isLocalMode() && nativeAvailable()) {
+        try { const n = await nativeCall('network', {}, { timeoutMs: 5000 }); return !!(n && n.known && n.online && n.wifi && !n.expensive && !n.constrained); } catch (e) { return false; }
+    }
+    const c = navigator.connection;
+    return !(c && (c.saveData || c.type === 'cellular'));
+}
+async function refreshRecipeLibrary() {
+    try {
+        if (planJob || document.hidden || settings.plan_source === 'ai') return;
+        if (Number(load(LIBRARY_REFRESH_KEY, 0)) > Date.now() - 12 * 3600e3) return;
+        if (!(await onWifi())) { nlog('sources', 'Recipe library: not refreshed (not on Wi-Fi)', null, 'debug'); return; }
+        store(LIBRARY_REFRESH_KEY, String(Date.now()));
+        const o = Object.assign(finderOptions(prefs.likes, prefs.hates), { limits: { seconds: 60, searches: 24, pages: 40, parallel: 2 } });
+        o.enabled = (orig => id => id !== 'library' && id !== 'builtin' && orig(id))(o.enabled);
+        const { stats } = await NourishFinder.findRecipes(o);
+        nlog('sources', `Recipe library refreshed in the background: ${stats.pages} pages read, the library now has ${stats.library} recipes`, { perMeal: stats.perMeal, turnedAway: stats.why, leftAlone: stats.blocked });
+    } catch (e) {
+        nlog('sources', `Recipe library refresh failed: ${e.message}`, null, 'warn');
+    }
 }
 
 async function runSmartPlan(likes, hates) {
@@ -3519,8 +3547,10 @@ async function runSmartPlan(likes, hates) {
     try {
         const plan = await NourishFinder.planFromSources(finderOptions(likes, hates));
         const st = plan.stats;
-        nlog('plan', `Found ${st.recipes} usable recipes in ${st.seconds} s (${st.searches} searches, ${st.pages} pages, ${st.fromCache} from earlier plans); ${plan.missing.length} meals still to fill`,
-            { perSource: st.perSource, skipped: st.failed, excluded: st.excluded, bland: st.bland });
+        const pm = st.perMeal || {};
+        nlog('plan', `Found ${st.recipes} usable recipes in ${st.seconds} s (${st.searches} searches, ${st.pages} pages, ${st.fromCache} from your recipe library of ${st.library || 0}); ` +
+            `good new ones per meal: breakfast ${(pm.breakfast || {}).web || 0}, lunch ${(pm.lunch || {}).web || 0}, dinner ${(pm.dinner || {}).web || 0} (plus Nourish's own); ${plan.missing.length} meals still to fill`,
+            { perSource: st.perSource, perMeal: pm, turnedAway: st.why, failed: st.failed, leftAlone: st.blocked, excluded: st.excluded, bland: st.bland });
         if (localPlanCancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         if (plan.missing.length) await fillMissingMeals(plan);
         const days = plan.days.map(d => NourishPlanner.fitDay(d, Object.assign({}, settings, { goal: prefs.goal }), servingsWanted()));

@@ -298,6 +298,41 @@
         return added;
     }
 
+    // === A LIGHT CHANGE FOR SOMETHING THE PERSON AVOIDS ===
+    // A real recipe with one disliked ingredient on the side (not in the dish's name, not an allergy
+    // or the diet: those are never adapted) gets a sensible swap: mushrooms → zucchini, cilantro →
+    // parsley. The AI may suggest one when this list has none (ondevice.js).
+    const SUBS = {
+        mushroom: 'zucchini', cilantro: 'parsley', coriander: 'parsley', olive: 'cherry tomatoes', tomato: 'bell pepper', 'bell pepper': 'zucchini', eggplant: 'zucchini',
+        zucchini: 'green beans', spinach: 'kale', kale: 'spinach', cauliflower: 'broccoli', broccoli: 'green beans', pea: 'corn', corn: 'peas', celery: 'cucumber',
+        cucumber: 'celery', avocado: 'cucumber', feta: 'goat cheese', 'goat cheese': 'feta', 'blue cheese': 'feta', cheddar: 'monterey jack', 'sour cream': 'greek yogurt',
+        mayonnaise: 'greek yogurt', mayo: 'greek yogurt', raisin: 'chopped dates', honey: 'maple syrup', jalapeno: 'bell pepper', 'chili flakes': 'smoked paprika',
+        'red pepper flakes': 'smoked paprika', cabbage: 'lettuce', radish: 'cucumber', arugula: 'spinach', 'sun-dried tomato': 'bell pepper', walnut: 'pumpkin seeds',
+        pecan: 'pumpkin seeds', almond: 'sunflower seeds', cashew: 'sunflower seeds', 'coconut milk': 'milk', ricotta: 'cottage cheese', 'cottage cheese': 'ricotta',
+        dill: 'parsley', basil: 'parsley', mint: 'parsley', asparagus: 'green beans', 'brussels sprout': 'broccoli', beet: 'carrot', parsnip: 'carrot', leek: 'green onion',
+    };
+    function substituteFor(term) {
+        const t = String(term || '').toLowerCase().replace(/(e?s)$/, '');
+        return SUBS[t] || SUBS[String(term || '').toLowerCase()] || null;
+    }
+    // Swaps `term` for `sub` in the ingredients and steps. Returns the changed copy, or null when the
+    // term is the dish itself (in its name).
+    function adapt(r, term, sub) {
+        if (!term || !sub) return null;
+        const esc = String(term).toLowerCase().replace(/(e?s)$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '[\\s-]+');
+        const re = new RegExp('\\b' + esc + '(e?s)?\\b', 'gi');
+        if (re.test(r.name || '')) return null;
+        re.lastIndex = 0;
+        const out = JSON.parse(JSON.stringify(r));
+        let changed = false;
+        out.ingredients = (r.ingredients || []).map(l => { re.lastIndex = 0; if (!re.test(l)) return l; changed = true; re.lastIndex = 0; return String(l).replace(re, sub); });
+        if (!changed) return null;
+        out.steps = (r.steps || []).map(st => { re.lastIndex = 0; return String(st).replace(re, sub); });
+        out.adapted = (r.adapted || []).concat([`${term} → ${sub}`]);
+        delete out._lines; delete out.nutrition; delete out._fit;
+        return out;
+    }
+
     // === PORTIONS ===
     const FATTY = /\b(oil|butter|ghee|margarine|lard|shortening|mayonnaise|mayo)\b/i;
     const SWEET = /\b(sugar|honey|maple syrup|syrup|agave|molasses|jam|chocolate chips)\b/i;
@@ -801,7 +836,7 @@
         }).join('');
     }
 
-    const api = { sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

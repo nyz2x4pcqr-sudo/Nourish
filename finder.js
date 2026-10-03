@@ -95,13 +95,13 @@
     // keywords (its structured data) as well as its name: never counted as meals.
     const DRINK = /\b(drinks?|beverages?|cocktails?|mocktails?|smoothies?|shakes?|juices?|lemonade|agua fresca|horchata|tea|latte|coffee|punch|sangria|spritz|margarita|lassi|kombucha|hot chocolate|cocoa)\b/i;
     const SWEET = /\b(desserts?|sweets?|baking|baked goods|cakes?|cookies?|pies?|tarts?|candy|candies|treats?|puddings?|ice cream|frozen desserts?|pastr(y|ies)|brownies?|bars|cupcakes?|curd|jams?|jellies|preserves|compote|sorbet|fudge|frosting|cobbler|crumble|crisp)\b/i;
-    const CONDIMENT = /\b(sauces?|condiments?|dressings?|dips?|spreads?|marinades?|seasonings?|spice (mix|blend|rub)s?|rubs?|salsas?|crema|pesto|chutney|relish|pickles?|vinaigrettes?|gravy|syrups?|stocks?|broths?|butter|aioli|mayo(nnaise)?)\b/i;
+    const CONDIMENT = /\b(sauces?|condiments?|dressings?|dips?|spreads?|marinades?|seasonings?|spice (mix|blend|rub)s?|rubs?|salsas?|crema|pesto|chutney|relish|pickles?|vinaigrettes?|gravy|syrups?|stocks?|broths?|butter|aioli|mayo(nnaise)?|oil|chili oil|chili crisp|hack)\b/i;
     const SIDEDISH = /\b(side dish(es)?|sides?|appetizers?|starters?|snacks?|breads?|rolls|biscuits|muffins? \(sweet\)|applesauce|apple sauce|baby food)\b/i;
     function notAMeal(r) {
         // The site's own category and course (keywords are too loose: "garlic butter sauce" on a steak).
         const cat = [].concat(r.category || [], r.course || []).join(', ');
         const name = String(r.name || '');
-        const dish = name.replace(/\s+(with|on|over|served with)\s+.*$/i, '');
+        const dish = name.replace(/\s+(with|on|over|served with)\s+.*$/i, '').replace(/[^\x00-\x7f]+/g, ' ').replace(/\s+/g, ' ').trim();
         const mealish = /\b(main( course| dish)?|entr[eé]e|dinner|lunch|breakfast|brunch|supper)\b/i.test(cat);
         // Smoothies stay: they're a breakfast here (the breakfast check decides).
         if ((DRINK.test(dish) && !/smoothie|shake/i.test(dish)) || (/\b(drinks?|beverages?|cocktails?)\b/i.test(cat) && !mealish)) return 'a drink';
@@ -120,7 +120,18 @@
     function turnedAway(ctx, why) { const w = ctx.stats.why || (ctx.stats.why = {}); w[why] = (w[why] || 0) + 1; return null; }
     function vet(r, ctx) {
         if (!r) return null;
-        if (ctx.exclude(r)) { ctx.stats.excluded++; return turnedAway(ctx, 'has something you avoid'); }
+        const avoided = ctx.exclude(r);
+        if (avoided) {
+            // Only a disliked side ingredient (never an allergy or the diet): swapped for something
+            // similar when there's a sensible swap; otherwise kept aside for the AI to suggest one.
+            const hard = ctx.excludeHard(r);
+            const sub = !hard && PL.substituteFor(avoided);
+            const changed = sub && PL.adapt(r, avoided, sub);
+            if (changed && !ctx.exclude(changed)) { ctx.stats.adapted = (ctx.stats.adapted || 0) + 1; return vet(changed, ctx); }
+            if (!hard && ctx.adaptable.length < 40 && PL.adapt(r, avoided, 'x')) ctx.adaptable.push({ r, term: avoided });
+            ctx.stats.excluded++;
+            return turnedAway(ctx, 'has something you avoid');
+        }
         const kind = notAMeal(r);
         if (kind) return turnedAway(ctx, kind);
         // The source's numbers are per serving of the recipe as written; settle() checks them.
@@ -154,6 +165,8 @@
             log: o.log || (() => {}),
             trace: o.trace || (() => {}),
             exclude: P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' }),
+            excludeHard: P.excluder({ avoid: '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' }),
+            adaptable: [],   // recipes with one disliked side ingredient and no ready swap (the AI may suggest one)
             out: false,
             timeUp() { return this.out || now() - stats.started > (o.limits && o.limits.seconds || LIMITS.seconds) * 1000; },
         };
@@ -541,7 +554,7 @@
         ctx.stats.seconds = Math.round((ctx.now() - ctx.stats.started) / 100) / 10;
         ctx.stats.recipes = found.length;
         ctx.stats.perMeal = Object.fromEntries(MEALS.map(m => [m, { all: pools[m].length, web: have(m), builtin: pools[m].filter(r => r.source_id === 'builtin').length }]));
-        return { pools: balance(pools, perSlot, seed, recent), stats: ctx.stats };
+        return { pools: balance(pools, perSlot, seed, recent), stats: ctx.stats, adaptable: ctx.adaptable };
     }
 
     // No one website fills a meal's pool: each keeps at most about a third of the web recipes (a
@@ -580,12 +593,12 @@
 
     // Finds recipes and plans the week. Returns { days, missing, report, stats, targets }.
     async function planFromSources(o) {
-        const { pools, stats } = await findRecipes(o);
+        const { pools, stats, adaptable } = await findRecipes(o);
         const sourcePenalty = r => sourceCost(r, o);
         const exclude = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
         const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste, favorites: o.favorites });
         plan.days.forEach(d => PL.MEALS.forEach(m => { if (d[m]) { delete d[m]._fit; delete d[m].sameAs; delete d[m].preferred; } }));
-        return Object.assign(plan, { stats, pools });
+        return Object.assign(plan, { stats, pools, adaptable });
     }
 
     const api = { findRecipes, planFromSources, sourceCost, notAMeal, balance, siteSuits, siteQueries, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
