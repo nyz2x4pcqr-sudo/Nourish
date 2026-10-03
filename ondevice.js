@@ -366,6 +366,10 @@ function allProblems(meal, type, earlier, limited, limits) {
     }
     const repeat = (earlier || []).find(n => sameDish(n, meal.name));
     if (repeat) out.push(`same dish as "${repeat}"`);
+    const avoided = avoidCheck() && avoidCheck()(meal);
+    if (avoided) out.push(`has ${avoided}, which they avoid`);
+    const badName = nameProblem(meal.name);
+    if (badName) out.push(`the name is ${badName}`);
     return out.filter((p, i) => out.indexOf(p) === i);
 }
 
@@ -423,30 +427,170 @@ async function makeMeal(job, run, h) {
         let meal = null;
         try { meal = (typeof parseLLMJSON === 'function' ? parseLLMJSON : require('./json-repair.js').parseLLMJSON)(text); } catch (e) { meal = null; }
         if (meal && meal.recipe && !meal.name) meal = meal.recipe;
+        let repairs = [];
         if (meal && typeof meal === 'object') {
             dropJunk({ [job.type]: meal });
             tidyMeal(meal);
+            repairs = repairMeal(meal, job.type, job);
+            if (repairs.length) logPlan(`${job.label || job.type}: fixed in code`, repairs);
         }
         const problems = allProblems(meal, job.type, job.earlier, !!job.grammar, job.limits);
+        const hard = hardProblems(problems);
         if (firstProblems == null) firstProblems = problems;
-        const score = mealScore(meal, problems);
-        if (!best || score < best.score) best = { meal, problems, score };
-        if (!problems.length) break;
-        logPlan(`${job.label || job.type}: try ${attempt + 1} of ${limit()} has ${problems.length} problem(s)${attempt + 1 < limit() ? ', making it again' : ''}`, problems, 'warn');
+        const score = mealScore(meal, hard) + (problems.length - hard.length) * 0.01;
+        if (!best || score < best.score) best = { meal, problems: hard, soft: problems.filter(p => hard.indexOf(p) < 0), score };
+        // Only real problems are worth another try; small ones are fixed above or lived with.
+        if (!hard.length) break;
+        logPlan(`${job.label || job.type}: try ${attempt + 1} of ${limit()} has ${hard.length} real problem(s)${attempt + 1 < limit() ? ', making it again' : ''}`, problems, 'warn');
         feedback = `\n\nYour last try "${(meal && meal.name) || '?'}" had these problems, so write it again without them: ${problems.slice(0, 6).join('; ')}.`;
     }
     // Nothing readable in any try (no name, no ingredients): the caller reports it. Anything else is
     // kept, however weak, and marked "may be incomplete", so one bad meal never stops a whole plan.
     if (!best || !usableMeal(best.meal)) return { meal: null, problems: (best && best.problems) || ['no answer'], attempts, firstProblems: firstProblems || [] };
-    // Only the calories are off: calories follow the macros (the more detailed numbers).
-    if (Recipes.onlyCaloriesWrong(best.problems)) {
-        logPlan(`${job.label || job.type}: calories set from the macros`, best.problems, 'warn');
-        Recipes.fixCalories(best.meal);
-        best.problems = [];
-    }
+    if (best.soft && best.soft.length) logPlan(`${job.label || job.type}: kept with small issues`, best.soft);
     if (best.problems.length) best.meal.incomplete = best.problems;
     else delete best.meal.incomplete;
     return { meal: best.meal, problems: best.problems, attempts, firstProblems: firstProblems || [] };
+}
+
+// === REPAIRED IN CODE, NOT REMADE ===
+// A small phone model can't reliably write a whole recipe, so what's fixable is fixed here instead
+// of asking again: a label for a name ("Lunch for Jeff - Day 7") becomes a real dish name, a
+// description posing as a step goes, an ingredient no step uses is either worked in (seasoning,
+// herbs, toppings) or dropped, too many steps are merged, a missing serving step is added, and the
+// AI's own calories and macros are thrown away: they're worked out from the ingredients.
+const Nutrition = typeof NourishNutrition !== 'undefined' ? NourishNutrition : (() => { try { return require('./nutrition.js'); } catch (e) { return null; } })();
+const DAY_WORDS = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekday|weekend|today|tomorrow|tonight|day\s*\d+|week\s*\d+|#\s*\d+)\b/i;
+const LABEL_WORDS = new Set(('breakfast brunch lunch dinner supper snack meal meals recipe dish dishes plate bowl morning evening midday noon night day daily of the for a an and my your our his her their special ' +
+    'healthy simple easy quick power delight fuel energy boost start good great perfect tasty yummy light hearty classic box combo platter favorite favourite option idea balanced nutritious protein').split(/\s+/));
+function personNames() {
+    try { return String((typeof settings !== 'undefined' && settings.name) || '').toLowerCase().split(/[^a-z]+/).filter(w => w.length >= 3); } catch (e) { return []; }
+}
+// Why a dish name isn't a dish name ('' when it's fine): the person's name, a day, or only label words.
+function nameProblem(name, people) {
+    const n = String(name || '').trim();
+    if (n.length < 3) return 'no real name';
+    const words = n.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
+    if ((people || personNames()).some(p => words.indexOf(p) >= 0)) return "a person's name, not a dish";
+    if (DAY_WORDS.test(n)) return 'a day, not a dish';
+    if (!words.length || words.every(w => LABEL_WORDS.has(w))) return 'a label, not a dish';
+    return '';
+}
+const titleCase = t => String(t).replace(/\b[a-z]/g, c => c.toUpperCase());
+// A plain dish name from what's in it: "Chicken and Broccoli Rice Bowl", "Spinach Feta Omelette".
+function dishNameFor(meal, type) {
+    const SKIP = /^(salt|pepper|black pepper|water|ice|oil|olive oil|vegetable oil|butter|garlic|sugar|flour|cooking spray)$|powder|spice|seasoning|sauce|oil|vinegar|juice|zest|flakes|broth|stock|extract/;
+    const names = (meal.ingredients || []).map(l => (Grocery.parseIngredient(l) || {}).name || '')
+        .map(n => n.replace(/\b(boneless|skinless|fresh|large|small|medium|chopped|diced|sliced|minced|ground|low-sodium|reduced-sodium|cooked|canned|dried|frozen|extra|virgin|plain|whole|baby|lean|unsalted|shredded|grated|crumbled|rolled|fat-free|nonfat|light)\b/g, '').replace(/\s+/g, ' ').trim())
+        .filter(n => n && n.length > 2 && !SKIP.test(n));
+    const protein = Planner && Planner.mainProtein ? Planner.mainProtein(meal) : null;
+    const lead = protein && !/^(egg|yogurt|cottage cheese|protein powder|cheese)$/.test(protein) ? protein : (names[0] || type);
+    const other = names.find(n => n.indexOf(lead) < 0 && lead.indexOf(n) < 0 && !/^(egg|eggs)$/.test(n));
+    const text = `${meal.name || ''} ${(meal.ingredients || []).join(' ')} ${(meal.steps || []).join(' ')}`.toLowerCase();
+    const form = /\bblend/.test(text) ? 'Smoothie' : /\boats?\b|oatmeal|porridge/.test(text) ? 'Oatmeal' : /\bcorn tortilla|\btaco/.test(text) ? 'Tacos'
+        : /\btortilla|\bwrap\b/.test(text) ? 'Wrap' : /\beggs?\b/.test(text) && /\b(whisk|scramble|beat)/.test(text) ? (/omelet/.test(text) ? 'Omelette' : 'Scramble')
+        : /\b(soup|broth|stock)\b/.test(text) && /simmer/.test(text) ? 'Soup' : /\b(pasta|spaghetti|penne|linguine|noodles?)\b/.test(text) ? (/noodle/.test(text) ? 'Noodles' : 'Pasta')
+        : /\b(lettuce|greens|salad)\b/.test(text) && !/\bcook\b/.test(text) ? 'Salad' : /\bstir[- ]?fry/.test(text) ? 'Stir-Fry'
+        : /\b(bread|toast)\b/.test(text) ? 'Toast' : /\byogh?urt\b/.test(text) ? 'Yogurt Bowl' : /\b(rice|quinoa|farro|couscous)\b/.test(text) ? 'Bowl'
+        : type === 'dinner' ? 'Skillet' : 'Bowl';
+    const parts = [titleCase(lead)];
+    if (other && other.split(' ').length <= 2) parts.push('and', titleCase(other));
+    return `${parts.join(' ')} ${form}`.replace(/\s+/g, ' ').trim();
+}
+const SERVES = /\b(serv(e|es|ed|ing)|plat(e|es|ed|ing)|garnish|divide|enjoy|dish up|bowls?|plates?|top (it |them |each )?with)\b/i;
+const SEASONING_LINE = /salt|pepper|spice|herb|parsley|cilantro|basil|mint|dill|chive|lemon|lime|zest|sauce|vinegar|\boil\b|seeds?\b|\bnuts?\b|almond|walnut|pecan|cashew|peanut|cheese|parmesan|feta|yogh?urt|cream|honey|syrup|green onion|scallion|paprika|cumin|chil[il]|garlic|ginger|cinnamon|oregano|thyme|sesame|avocado/i;
+function joinWords(list) { return list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`; }
+function repairMeal(meal, type, job) {
+    const done = [];
+    // Too little to repair (a cut-off answer): left as it is, so it's reported and asked for again.
+    if (!usableMeal(meal) || meal.ingredients.length < 3 || !Array.isArray(meal.steps) || !meal.steps.length) return done;
+    const np = nameProblem(meal.name);
+    if (np) {
+        const was = meal.name;
+        meal.name = dishNameFor(meal, type);
+        done.push(`renamed "${was}" (${np}) to "${meal.name}"`);
+    }
+    if (Array.isArray(meal.steps) && meal.steps.length) {
+        // A description ("This tagine is…") isn't a step; a cut-off step stays so it's reported.
+        const kept = meal.steps.filter(st => Recipes.isCutOff(st) || Recipes.isInstruction(st));
+        if (kept.length && kept.length < meal.steps.length) { done.push(`removed ${meal.steps.length - kept.length} description step(s)`); meal.steps = kept; }
+        const unused = Recipes.unusedIngredients(meal);
+        if (unused.length) {
+            const season = unused.filter(l => SEASONING_LINE.test(l));
+            const drop = unused.filter(l => season.indexOf(l) < 0);
+            if (drop.length && meal.ingredients.length - drop.length >= 3) { meal.ingredients = meal.ingredients.filter(l => drop.indexOf(l) < 0); done.push(`dropped unused ${drop.join(', ')}`); }
+            if (season.length) {
+                const names = season.map(l => (Grocery.parseIngredient(l) || {}).name || l);
+                meal.steps.splice(Math.max(0, meal.steps.length - 1), 0, `Season with the ${joinWords(names)}; taste and adjust.`);
+                done.push(`worked in ${names.join(', ')}`);
+            }
+        }
+        // Too many steps for the slot: the shortest neighbours are joined (one too many is fine).
+        const L = (job && job.limits) || (PLAN_MEALS.indexOf(type) >= 0 ? slotLimitsFor(type, null) : null);
+        if (L && isFinite(L.steps) && meal.steps.length > L.steps + 1) {
+            const before = meal.steps.length;
+            while (meal.steps.length > Math.max(L.steps, 3)) {
+                let at = 0, best = Infinity;
+                for (let i = 0; i < meal.steps.length - 2; i++) { const len = meal.steps[i].length + meal.steps[i + 1].length; if (len < best) { best = len; at = i; } }
+                meal.steps.splice(at, 2, `${meal.steps[at].replace(/[.!]\s*$/, '')}, then ${meal.steps[at + 1].charAt(0).toLowerCase()}${meal.steps[at + 1].slice(1)}`);
+            }
+            done.push(`joined ${before - meal.steps.length} step(s)`);
+        }
+        if (!meal.steps.some(st => SERVES.test(st))) { meal.steps.push('Divide between plates and serve.'); done.push('added how to serve it'); }
+    }
+    // The AI's calories and macros are never used: worked out from the ingredients instead.
+    if (Nutrition && Array.isArray(meal.ingredients)) {
+        delete meal.nutrition;
+        Nutrition.settle(meal);
+        meal.nutrition_from = 'ingredients';
+    }
+    if (!meal.category || !String(meal.category).trim()) meal.category = [type];
+    // Bland: seasoned in code (salt with an amount, a couple of flavours that suit it).
+    if (Planner && Planner.flavorCheck && PLAN_MEALS.indexOf(type) >= 0 && !Planner.flavorCheck(meal).ok) {
+        const added = Planner.reseason(meal);
+        if (added.length) { if (Nutrition) Nutrition.settle(meal); done.push(`seasoned with ${added.join(', ')}`); }
+    }
+    return done;
+}
+// Real problems are worth asking again for; anything else is fixed in code or lived with (one step
+// or ingredient too many, a vague amount).
+const HARD_PROBLEM = /incomplete|cut off|length limit|isn't a|is a dinner dish|too heavy|is a dessert|not a meal|needs cooking|takes about|same dish as|^only [0-2] ingredient|^no name|^no calories|which they avoid/i;
+function hardProblems(problems) { return (problems || []).filter(p => HARD_PROBLEM.test(p)); }
+// What the person avoids (allergies, diet, dislikes), when the app is running.
+function avoidCheck() {
+    try { return NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }); } catch (e) { return null; }
+}
+
+// === SMALL JOBS FOR A SMALL MODEL ===
+// What a 2B model does well: pick between a few real recipes, suggest one ingredient to swap in, or
+// write one short sentence. Each answer is forced into a tiny format, so it's quick and always usable.
+async function aiChoose(run, type, names) {
+    if (!run || !names || names.length < 2) return 0;
+    const list = names.slice(0, 5);
+    const likes = typeof prefs !== 'undefined' && prefs.likes ? ` They like: ${prefs.likes}.` : '';
+    const learned = (() => { try { return typeof NourishTaste !== 'undefined' && typeof tasteProfile === 'function' ? NourishTaste.guidance(tasteProfile()) : ''; } catch (e) { return ''; } })();
+    const text = await run([{ role: 'system', content: 'You pick recipes for a meal plan. Reply with one number only.' },
+        { role: 'user', content: `Which ${type} would this person enjoy most?${likes}${learned ? ' ' + learned : ''}\n${list.map((n, i) => `${i + 1}. ${n}`).join('\n')}\nReply with the number.` }],
+    { grammar: `root ::= [1-${list.length}]`, maxTokens: 4, id: `choose-${type}` });
+    const k = parseInt(String(text || '').trim(), 10);
+    return k >= 1 && k <= list.length ? k - 1 : 0;
+}
+async function aiSubstitute(run, recipeName, avoid) {
+    if (!run) return '';
+    const text = await run([{ role: 'system', content: 'You are a chef. Reply with one ingredient name only (1 to 3 words), nothing else.' },
+        { role: 'user', content: `In "${recipeName}", what single ingredient best replaces ${avoid} for someone who doesn't eat ${avoid}? Reply with the ingredient only.` }],
+    { grammar: 'root ::= [a-z] [a-z ]{1,24}', maxTokens: 12, id: 'substitute' });
+    const sub = String(text || '').toLowerCase().replace(/[^a-z ]/g, '').trim();
+    return sub && sub.indexOf(String(avoid).toLowerCase().replace(/s$/, '')) < 0 ? sub : '';
+}
+async function aiDescribe(run, meal) {
+    if (!run || !meal) return '';
+    const text = await run([{ role: 'system', content: 'You write one short, appetizing sentence about a dish. No names of people or days.' },
+        { role: 'user', content: `Describe "${meal.name}" (made with ${(meal.ingredients || []).slice(0, 6).join(', ')}) in one sentence of at most 20 words.` }],
+    { grammar: 'root ::= [A-Z] [^"\\\x00-\x1F]{20,140} "."', maxTokens: 60, id: 'describe' });
+    const t = String(text || '').trim();
+    const people = personNames();
+    return t && !people.some(p => t.toLowerCase().indexOf(p) >= 0) && !DAY_WORDS.test(t) ? t.slice(0, 160) : '';
 }
 
 // Which try to keep: a complete one before an incomplete one, then the one with the fewest problems.
@@ -471,7 +615,7 @@ function mealFormat(servings) {
     return `{"name":"","servings":${servings},"ingredients":[""],"steps":[""],"time_minutes":0,"nutrition":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}}`;
 }
 function mealSystem(servings) {
-    return 'You are a chef writing recipes for a meal plan. Reply with ONLY raw JSON in this format, no markdown: ' + mealFormat(servings) + '\n' + recipeRules(servings) + (typeof profileText === 'function' ? '\n\nThe person:\n' + profileText() : '');
+    return 'You are a chef writing recipes for a meal plan. Reply with ONLY raw JSON in this format, no markdown: ' + mealFormat(servings) + '\n' + recipeRules(servings) + (typeof profileText === 'function' ? '\n\nThe person:\n' + profileText({ forRecipe: true }) : '');
 }
 // The rules for a meal slot on a plan day (planner.js slotLimits with the person's schedule).
 function slotLimitsFor(type, d) {
@@ -505,8 +649,9 @@ function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
     const share = (split && split[PLAN_MEALS.indexOf(type)]) || MEAL_SHARE[type] || 0.33;
     const kcal = Math.round((Number(s.calorie_target) || 2000) * share / 10) * 10;
     const protein = Math.round((Number(s.protein_target) || 100) * share);
-    return `${conversation ? conversation + '\n\n' : ''}${dish ? `Write the full recipe for "${dish}", the ${type}` : `Make the ${type}`} for Day ${d + 1}${typeof dayName === 'function' ? ` (${dayName(d)})` : ''}` +
-        `${cuisine && !dish ? `. Cuisine: ${cuisine}` : ''}. Aim for about ${kcal} kcal and ${protein} g protein per serving.${slotRulesText(type, d)}` +
+    // No day number, day name or person's name anywhere a small model could copy into the dish's name.
+    return `${conversation ? conversation + '\n\n' : ''}${dish ? `Write the full recipe for "${dish}", a ${type}` : `Make one ${type} recipe`}` +
+        `${cuisine && !dish ? `. Cuisine: ${cuisine}` : ''}. Give it a real dish name that says what it is (like "Lemon Garlic Salmon with Rice"), never a label like "${type[0].toUpperCase() + type.slice(1)} of the Day". Aim for about ${kcal} kcal and ${protein} g protein per serving.${slotRulesText(type, d)}` +
         `${recent && recent.length ? ` Make it different from: ${recent.join(', ')}.` : ''}${extra ? ' ' + extra : ''}${guidanceFor({ type, d, cuisine, dish })} Return only the JSON for this one recipe.`;
 }
 // What the app adds to every meal request (app.js mealGuidance): time limits for the slot, what the
@@ -1438,5 +1583,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
+    module.exports = { repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }

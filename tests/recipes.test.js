@@ -94,25 +94,33 @@ test('a bad recipe is made again and told what was wrong; a good remake is kept'
     assert.match(asks[1], /"lean lamb" has no amount/);
 });
 
-test('after 2 remakes the best try is kept and marked "may be incomplete"', async () => {
+// Small problems (too few steps, an unused ingredient, a missing serving step) are fixed in code
+// instead of asking a small model to write the whole recipe again; only real problems (cut off,
+// wrong kind of meal, an avoided food) are worth another try.
+test('small problems are fixed in code, not remade: the first try without real problems is kept', async () => {
     let calls = 0;
-    const worse = Object.assign(copy(TAGINE), { servings: 2 });
+    const worse = Object.assign(copy(TAGINE), { servings: 2 });   // a step is cut off: a real problem
     const better = copy(GOOD);
-    better.steps = better.steps.slice(0, 4).concat(['Serve hot.']);   // too few steps, couscous etc. unused
+    better.steps = better.steps.slice(0, 4).concat(['Serve hot.']);   // too few steps, couscous etc. unused: small problems
     const answers = [worse, better, worse];
     const r = await makeMeal({ type: 'dinner', system: 's', ask: 'a', earlier: [] }, async () => JSON.stringify(answers[calls++]));
-    assert.equal(calls, MEAL_ATTEMPTS);
-    assert.equal(r.meal.steps.length, 5);   // the try with the fewest problems
-    assert.ok(Array.isArray(r.meal.incomplete) && r.meal.incomplete.length > 0);
-    assert.deepEqual(r.meal.incomplete, r.problems);
+    assert.equal(calls, 2);
+    assert.equal(r.meal.name, GOOD.name);
+    assert.deepEqual(r.problems, []);
+    assert.equal(r.meal.incomplete, undefined);
+    // The unused seasoning and garnish are worked into a step; nothing used is lost.
+    assert.ok(r.meal.steps.some(st => /cilantro/.test(st)), r.meal.steps.join(' | '));
 });
 
-test('only wrong calories: fixed from the macros, not marked incomplete', async () => {
+test("the AI's own calories and macros are never used: they're worked out from the ingredients", async () => {
     const meal = copy(GOOD);
     meal.nutrition.calories = 250;
-    const r = await makeMeal({ type: 'dinner', system: 's', ask: 'a', earlier: [] }, async () => JSON.stringify(meal));
-    assert.equal(r.attempts, MEAL_ATTEMPTS);
-    assert.equal(r.meal.nutrition.calories, 560);
+    let calls = 0;
+    const r = await makeMeal({ type: 'dinner', system: 's', ask: 'a', earlier: [] }, async () => { calls++; return JSON.stringify(meal); });
+    assert.equal(calls, 1);
+    assert.equal(r.meal.nutrition_basis, 'calculated');
+    assert.equal(r.meal.nutrition.calories, require('../nutrition.js').calculate(r.meal.ingredients, 2).nutrition.calories);
+    assert.notEqual(r.meal.nutrition.calories, 250);
     assert.equal(r.meal.incomplete, undefined);
 });
 

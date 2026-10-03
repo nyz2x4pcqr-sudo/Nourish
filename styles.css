@@ -853,6 +853,7 @@ select {
 .recipe-header { position: relative; z-index: 2; margin-top: -54px; padding: 0 var(--s-5) var(--s-2); }
 .recipe-header .meal-type { color: var(--accent-text); }
 .recipe-name { font-size: var(--fs-title-1); font-weight: 580; letter-spacing: -0.025em; line-height: 1.1; margin: 6px 0 var(--s-4); overflow-wrap: anywhere; }
+.recipe-description { color: var(--text-2); margin: -8px 0 var(--s-4); line-height: 1.45; }
 .recipe-meta { display: flex; flex-wrap: wrap; gap: 6px; }
 .recipe-note { font-size: var(--fs-footnote); color: var(--text-3); margin: var(--s-3) 0 0; }
 

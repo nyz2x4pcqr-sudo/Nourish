@@ -676,6 +676,42 @@
         });
         return out;
     }
+    // The last check on every plan, whoever made it: a day more than 10% off the calorie target has
+    // its furthest-off meal swapped for one that brings it back (from `pools`, never a dish already
+    // in the plan, always fitting the slot), then is sized again. Returns the days and what changed.
+    function keepToTargets(days, { pools = {}, settings = {}, people = 1, exclude, weekday, tolerance = 0.1 } = {}) {
+        const targets = targetsOf(settings);
+        const split = splitOf(settings);
+        const used = dishList(days.flatMap(d => MEALS.map(m => d && d[m] && d[m].name).filter(Boolean)));
+        const changes = [];
+        const out = days.map((day, d) => {
+            if (!day) return day;
+            let cur = day;
+            for (let round = 0; round < 3; round++) {
+                const total = dayTotals(cur).kcal;
+                const off = total / targets.kcal - 1;
+                if (Math.abs(off) <= tolerance) break;
+                // The meal whose calories are furthest from its share, in the direction that's off.
+                const meals = MEALS.filter((m, i) => cur[m] && cur[m].nutrition && split[i] > 0 && !cur[m].leftover);
+                if (!meals.length) break;
+                const worst = meals.map(m => ({ m, ratio: cur[m].nutrition.calories / (targets.kcal * split[MEALS.indexOf(m)]) }))
+                    .sort((a, b) => (off > 0 ? b.ratio - a.ratio : a.ratio - b.ratio))[0];
+                const want = targets.kcal * split[MEALS.indexOf(worst.m)];
+                const limits = slotLimits(settings, worst.m, weekday ? weekday(d) : null);
+                const others = MEALS.filter(m => m !== worst.m).map(m => cur[m]).filter(Boolean);
+                const pick = (pools[worst.m] || []).filter(r => r && r.nutrition && r.nutrition.calories > 0 && !used.has(r.name) && !(exclude && exclude(r)) && !slotProblem(r, worst.m, limits)
+                    && !others.some(o => mainProtein(o) && mainProtein(o) === mainProtein(r)))
+                    .map(r => ({ r, f: want / r.nutrition.calories })).filter(x => x.f >= 0.55 && x.f <= 2)
+                    .sort((a, b) => Math.abs(Math.log(a.f)) - Math.abs(Math.log(b.f)))[0];
+                if (!pick) break;
+                changes.push(`day ${d + 1}: ${Math.round(total)} kcal against ${targets.kcal}; ${worst.m} "${cur[worst.m].name}" → "${pick.r.name}"`);
+                used.add(pick.r.name);
+                cur = fitDay(Object.assign({}, cur, { [worst.m]: JSON.parse(JSON.stringify(pick.r)) }), settings, people);
+            }
+            return cur;
+        });
+        return { days: out, changes };
+    }
     function dayTotals(day) {
         const t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
         const add = r => { const n = r && r.nutrition; if (n) { t.kcal += n.calories; t.protein += n.protein_g; t.carbs += n.carbs_g; t.fat += n.fat_g; } };
@@ -836,7 +872,7 @@
         }).join('');
     }
 
-    const api = { sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

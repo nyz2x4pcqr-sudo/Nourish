@@ -976,10 +976,12 @@ function extractText(provider, data) {
 }
 
 // === PROFILE → PROMPTS ===
-function profileText() {
+// forRecipe: for an AI writing a recipe, the person's name is left out (a small model would use it
+// as the dish's name: "Lunch for Jeff").
+function profileText({ forRecipe = false } = {}) {
     const s = settings;
     const lines = [];
-    if (s.name) lines.push(`Name: ${s.name}.`);
+    if (s.name && !forRecipe) lines.push(`Name: ${s.name}.`);
     lines.push(`Goal: ${GOALS[prefs.goal] || prefs.goal}.`, `Daily targets: about ${s.calorie_target} kcal and ${s.protein_target} g protein.`);
     if (s.diet && s.diet !== 'No restriction') lines.push(`Diet: ${s.diet}.`);
     if (s.allergies) lines.push(`Allergies/intolerances (NEVER include these): ${s.allergies}.`);
@@ -2143,6 +2145,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
         h('div', { class: 'recipe-header' },
             h('div', { class: 'meal-type', text: where }),
             h('h2', { class: 'recipe-name', text: meal.name }),
+            meal.description ? h('p', { class: 'recipe-description', text: meal.description }) : null,
             h('div', { class: 'recipe-meta' }, chips)),
         on('show_nutrition') && n ? nutritionPanel(meal) : null,
         Array.isArray(meal.incomplete) && meal.incomplete.length ? h('div', { class: 'recipe-warning', role: 'note' },
@@ -2191,6 +2194,22 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
     );
     content.scrollTop = 0;
     $('recipeSheet').classList.add('active');
+    describeLater(meal, mealType, dayIndex, cookbookId);
+}
+
+// A one-line description written by the AI on this phone or PC (a small job), once per recipe,
+// only when the model is already set up and nothing else is running.
+async function describeLater(meal, mealType, dayIndex, cookbookId) {
+    if (meal.description || planJob || !['local', 'lmstudio', 'ollama'].includes(settings.active_provider) || !aiReady()) return;
+    if (settings.active_provider === 'local' && !settings.local_model) return;
+    try {
+        const run = settings.active_provider === 'local' ? phoneRunner({ isCancelled: () => !!planJob }) : aiRunner();
+        const text = await aiDescribe(run, meal);
+        if (!text || meal.description) return;
+        meal.description = text;
+        if (dayIndex != null) changed('plan');
+        if (openRecipe && openRecipe.meal === meal) openRecipeSheet(mealType, meal, dayIndex, { cookbookId });
+    } catch (e) { nlog('plan', `No description: ${e.message}`, null, 'debug'); }
 }
 
 let recipeProgress = null;
@@ -3111,6 +3130,13 @@ function normalizeMeal(m) {
         trimmed: m.trimmed ? true : undefined,
         active_minutes: toNumber(m.active_minutes) > 0 ? toNumber(m.active_minutes) : undefined,
         quick: m.quick ? true : undefined,
+        wait_minutes: toNumber(m.wait_minutes) > 0 ? toNumber(m.wait_minutes) : undefined,
+        time_estimated: m.time_estimated ? true : undefined,
+        leftover: m.leftover ? true : undefined,
+        builtin: m.builtin ? true : undefined,
+        adapted: Array.isArray(m.adapted) && m.adapted.length ? m.adapted.map(String).slice(0, 4) : undefined,
+        description: m.description ? String(m.description).slice(0, 200) : undefined,
+        cuisine: m.cuisine ? String(m.cuisine).slice(0, 30) : undefined,
         library_path: m.library_path ? String(m.library_path).slice(0, 300) : undefined,
     }, safeSource(m));
     // Nutrition is never taken on trust: it's calculated from the ingredients (USDA data, nutrition.js),
@@ -3553,7 +3579,14 @@ async function runSmartPlan(likes, hates) {
             { perSource: st.perSource, perMeal: pm, turnedAway: st.why, failed: st.failed, leftAlone: st.blocked, excluded: st.excluded, bland: st.bland });
         if (localPlanCancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         if (plan.missing.length) await fillMissingMeals(plan);
-        const days = plan.days.map(d => NourishPlanner.fitDay(d, Object.assign({}, settings, { goal: prefs.goal }), servingsWanted()));
+        const planSettings = Object.assign({}, settings, { goal: prefs.goal });
+        let days = plan.days.map(d => NourishPlanner.fitDay(d, planSettings, servingsWanted()));
+        // The last check, with or without an AI: every day within 10% of the calorie target.
+        const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (plan.pools[m] || []).concat(typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(m) : [])]));
+        const kept = NourishPlanner.keepToTargets(days, { pools, settings: planSettings, people: servingsWanted(),
+            exclude: NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }), weekday: d => (dayBase() + d) % 7 });
+        days = kept.days;
+        if (kept.changes.length) nlog('plan', `Kept ${kept.changes.length} day(s) to the calorie target`, kept.changes);
         if (!days.some(d => MEAL_TYPES.some(t => d[t]))) {
             throw new Error(aiReady()
                 ? "Couldn't find or write any recipes. Check your internet connection and try again."
@@ -3582,11 +3615,19 @@ async function fillMissingMeals(plan) {
     const inPlan = () => NourishPlanner.dishList(plan.days.flatMap(d => MEAL_TYPES.map(t => d[t] && !d[t].leftover && d[t].name).filter(Boolean)));
     const recent = NourishPlanner.dishList(recentPlanDishes());
     const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
-    // The closest fit on calories from a list, skipping what's in the plan and what doesn't fit the slot.
-    const closest = (list, slot, skip) => {
+    // The closest fits on calories from a list, skipping what's in the plan and what doesn't fit the slot.
+    const closestFew = (list, slot, skip) => {
         const used = inPlan();
-        return list.filter(r => r && !used.has(r.name) && !(skip && skip.has(r.name)) && !exclude(r) && !slotCheck(r, slot.meal, slot.day))
-            .sort((a, b) => Math.abs(Math.log(slot.kcal / a.nutrition.calories)) - Math.abs(Math.log(slot.kcal / b.nutrition.calories)))[0] || null;
+        // Only recipes a realistic portion (half to double) can bring to the slot's calories.
+        return list.filter(r => r && r.nutrition && r.nutrition.calories > 0 && slot.kcal / r.nutrition.calories >= 0.55 && slot.kcal / r.nutrition.calories <= 2 && !used.has(r.name) && !(skip && skip.has(r.name)) && !exclude(r) && !slotCheck(r, slot.meal, slot.day))
+            .sort((a, b) => Math.abs(Math.log(slot.kcal / a.nutrition.calories)) - Math.abs(Math.log(slot.kcal / b.nutrition.calories))).slice(0, 4);
+    };
+    const run = canWrite ? (onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled: () => localPlanCancelled }) : aiRunner()) : null;
+    // A small job for the AI: pick the one they'd enjoy most from a few real recipes.
+    const closest = async (list, slot, skip) => {
+        const few = closestFew(list, slot, skip);
+        if (few.length < 2 || !run) return few[0] || null;
+        try { return few[await aiChoose(run, slot.meal, few.map(r => r.name))] || few[0]; } catch (e) { return few[0]; }
     };
     let empty = 0;
     for (const slot of plan.missing) {
@@ -3596,11 +3637,26 @@ async function fillMissingMeals(plan) {
         let how = '';
         const pool = plan.pools[slot.meal] || [];
         // 1. A recipe that was found (web, your files, the built-in set) but not picked yet.
-        meal = closest(pool, slot, recent);
+        meal = await closest(pool, slot, recent);
         if (meal) how = 'a found recipe not used yet';
         // 2. The built-in recipes (all of them, whatever the pool held).
-        if (!meal && typeof NourishBuiltins !== 'undefined') { meal = closest(NourishBuiltins.forMeal(slot.meal), slot, recent); if (meal) how = 'a built-in recipe'; }
+        if (!meal && typeof NourishBuiltins !== 'undefined') { meal = await closest(NourishBuiltins.forMeal(slot.meal), slot, recent); if (meal) how = 'a built-in recipe'; }
         if (meal) meal = JSON.parse(JSON.stringify(meal));
+        // 2b. A real recipe with one disliked ingredient: the AI suggests a swap (a small job).
+        if (!meal && run && (plan.adaptable || []).length) {
+            for (const { r, term } of plan.adaptable.slice(0, 3)) {
+                try {
+                    const sub = await aiSubstitute(run, r.name, term);
+                    const changed = sub && NourishPlanner.adapt(r, term, sub);
+                    if (!changed) continue;
+                    NourishNutrition.settle(changed);
+                    if (exclude(changed) || slotCheck(changed, slot.meal, slot.day) || inPlan().has(changed.name) || !(changed.nutrition && changed.nutrition.calories > 0)) continue;
+                    meal = changed; how = `a real recipe with ${term} swapped for ${sub}`;
+                    plan.adaptable = plan.adaptable.filter(x => x.r !== r);
+                    break;
+                } catch (e) { /* next one */ }
+            }
+        }
         // 3. The AI, as the last resort.
         if (!meal && canWrite) {
             const others = plan.days.flatMap(d => MEAL_TYPES.map(t => d[t] && d[t].name).filter(Boolean));
@@ -3610,7 +3666,6 @@ async function fillMissingMeals(plan) {
             const ask = mealAsk({ type: slot.meal, d: slot.day, recent: sameDay,
                 extra: [prefs.likes ? `They like: ${prefs.likes}.` : '', prefs.hates ? `Never use: ${prefs.hates}.` : '',
                     sameDay.length ? 'Use a different main protein and vegetable from the other meals that day.' : ''].filter(Boolean).join(' ') });
-            const run = onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled: () => localPlanCancelled }) : aiRunner();
             try {
                 const r = await makeMeal({ type: slot.meal, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null,
                     earlier: others, id: `fill-${slot.day}-${slot.meal}`, label: `${dayName(slot.day)} ${slot.meal}`, limits: slotLimitsFor(slot.meal, slot.day) }, run, { isCancelled: () => localPlanCancelled });
@@ -3630,7 +3685,7 @@ async function fillMissingMeals(plan) {
         // 4. A dish from a plan in the last two weeks (still never one already in this plan).
         if (!meal) {
             meal = closest(pool.concat(typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(slot.meal) : []), slot, null);
-            if (meal) { meal = JSON.parse(JSON.stringify(meal)); how = 'a recipe from a recent plan'; }
+            if (meal) { meal = JSON.parse(JSON.stringify(await meal)); how = 'a recipe from a recent plan'; }
         }
         if (!meal) {
             meal = quickMealFor(slot.meal, slot.day, inPlan().names());

@@ -50,7 +50,8 @@
     // Ends mid-sentence: no full stop, or a last word that needs something after it.
     function isCutOff(step) {
         const text = stripNumbering(step).trim();
-        if (text.length < 12) return true;
+        // "Serve hot." is short but whole; "Add the" isn't.
+        if (text.length < 8 || (text.length < 12 && !/^[A-Za-z]+( [a-z]+){0,2}[.!]$/.test(text))) return true;
         if (!/[.!)]$/.test(text)) return true;
         return /\b(and|or|the|with|to|a|an|of|in|into|for|until|then|on|at|by|plus)[.!]$/i.test(text) || /-[.!]$/.test(text);
     }
@@ -107,7 +108,7 @@
         if (!(Number(meal.servings) >= 1)) out.push('no serving count');
         const n = meal.nutrition;
         if (!n || !(Number(n.calories) > 0)) out.push('no calories');
-        else if (!macrosMatch(n)) out.push(`calories (${Math.round(n.calories)}) don't match the macros (${Math.round(macroCalories(n))} from protein, carbs and fat)`);
+        else if (meal.nutrition_basis !== 'calculated' && !macrosMatch(n)) out.push(`calories (${Math.round(n.calories)}) don't match the macros (${Math.round(macroCalories(n))} from protein, carbs and fat)`);
 
         const ingredients = Array.isArray(meal.ingredients) ? meal.ingredients.map(String) : [];
         if (ingredients.length < 3) out.push(`only ${ingredients.length} ingredient${ingredients.length === 1 ? '' : 's'}`);
