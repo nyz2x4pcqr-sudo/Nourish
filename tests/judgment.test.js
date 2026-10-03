@@ -37,3 +37,24 @@ test('a savoury porridge with meat is a lunch or dinner, not a breakfast; a swee
     }
     assert.ok(fit('Apple Cinnamon Porridge', '', ['1/2 cup oats', '1 cup milk', '1 apple']).breakfast);
 });
+
+test('a main dish filed under a site\'s brunch list is still a dinner (roast pork is too heavy for breakfast, so it was fitting nothing)', () => {
+    const roast = PL.mealFit({ name: 'Roast pork with hasselback potatoes', category: 'Brunch', ingredients: ['1kg pork belly', '500g potatoes', '2 tbsp olive oil', '1 tsp salt'] });
+    assert.ok(roast.dinner, JSON.stringify(roast));
+    assert.ok(!roast.breakfast);
+    const bake = PL.mealFit({ name: 'Tuna pasta bake', category: 'Brunch', ingredients: ['300g penne', '2 cans tuna', '200g cheddar', '400g chopped tomatoes'] });
+    assert.ok(bake.dinner, JSON.stringify(bake));
+    // A real brunch dish filed under brunch stays a breakfast only.
+    const pancakes = PL.mealFit({ name: 'Buttermilk pancakes', category: 'Brunch', ingredients: ['200g flour', '300ml buttermilk', '1 egg', '2 tbsp sugar', '1 tsp baking powder', 'pinch salt'] });
+    assert.ok(pancakes.breakfast && !pancakes.dinner, JSON.stringify(pancakes));
+});
+
+test('a vegetable curry, stew or veggie pie is a dinner even without meat or fish', () => {
+    const pasanda = PL.mealFit({ name: 'Mushroom pasanda', category: 'Dinner', ingredients: ['400g chestnut mushrooms', '1 onion', '150ml natural yogurt', '2 tbsp ground almonds', '1 tsp garam masala', '1/2 tsp salt'] });
+    assert.ok(pasanda.dinner, JSON.stringify(pasanda));
+    const pie = PL.mealFit({ name: 'Carrot and swede-topped veggie cottage pie', category: '', ingredients: ['400g green lentils', '2 carrots', '1 swede', '1 onion', '500ml vegetable stock', '1 tbsp tomato puree'] });
+    assert.ok(pie.dinner, JSON.stringify(pie));
+    // Every recipe that fits no meal says why.
+    const sauce = PL.mealFit({ name: 'Hollandaise sauce', category: '', ingredients: ['3 egg yolks', '150g butter', '1 tbsp lemon juice'] });
+    assert.ok(!sauce.breakfast && !sauce.lunch && !sauce.dinner && sauce.why);
+});

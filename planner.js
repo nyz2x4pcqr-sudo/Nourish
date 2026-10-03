@@ -21,7 +21,7 @@
     const ONLY_BREAKFAST = /\b(oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|french toast|smoothie|parfait|chia (seed )?pudding|muffins?|scones?|overnight|acai|cereal)\b/i;
     const DESSERT = /\b(cake|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
     const NOT_DESSERT = /\b(chia( seed)? pudding|protein pudding|overnight|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry|rice cakes?|crab cakes?|fish cakes?|salmon cakes?|tuna cakes?|potato cakes?|pancakes?)\b/i;
-    const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib)\b/i;
+    const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|pasanda|jalfrezi|rogan josh|goulash|hotpot|cottage pie|shepherd'?s pie|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib)\b/i;
     // Fine for dinner, too much for a quick lunch.
     const HEAVY_LUNCH = /\b(baked (pasta|ziti|penne|rigatoni|macaroni|mac|spaghetti|gnocchi)|pasta bake|mac and cheese bake|stuffed shells|manicotti|cannelloni|pot roast|roast (chicken|turkey|lamb|pork|beef|duck)|whole (chicken|fish|turkey)|beef wellington|pie|gratin|moussaka|pastitsio|osso buco|cassoulet|coq au vin|bourguignon|slow cooker|crock ?pot|braised)\b/i;
     const NOT_A_MEAL = /\b(sauce|dressing|dip|marinade|seasoning|spice (mix|blend)|stock|broth|syrup|jam|butter|vinaigrette|gravy|salsa|pesto|chutney|pickle[sd]?|drink|cocktail|mocktail|lemonade|tea|coffee|latte|juice|bread|loaf|rolls|buns|crackers|croutons|bars|bites|energy balls|protein balls|trail mix|popcorn|chips)$/i;
@@ -53,16 +53,19 @@
         const eggDish = /\beggs?\b/i.test(dish) && !COMPONENT.test(name);
         const brk = !savoryPorridge && (BREAKFAST.test(name) || eggDish || /breakfast|brunch/.test(cat));
         // A recipe the site files under breakfast only stays at breakfast.
-        const brkOnlyCat = /breakfast|brunch/.test(cat) && !/lunch|dinner|main|entr[eé]e|supper/.test(cat);
-        const onlyBrk = !savoryPorridge && (ONLY_BREAKFAST.test(name) || (brk && sweetHeavy) || brkOnlyCat || /\bbreakfast\b/i.test(name));
+        // But a roast or a pasta bake on a brunch list is still a main dish: judged by what it is.
         const heavy = DINNER_ONLY.test(name);
+        const mainDish = heavy || HEAVY_LUNCH.test(name);
+        const brkOnlyCat = /breakfast|brunch/.test(cat) && !/lunch|dinner|main|entr[eé]e|supper/.test(cat) && !mainDish;
+        const onlyBrk = !savoryPorridge && (ONLY_BREAKFAST.test(name) || (brk && sweetHeavy) || brkOnlyCat || /\bbreakfast\b/i.test(name));
         const side = SIDE.test(cat) && !/main|breakfast|brunch|lunch|dinner/.test(cat);
         if (side) return { breakfast: false, lunch: false, dinner: false, why: 'a side or snack, not a meal' };
         const hasProtein = !!mainProtein(r);
         return {
             breakfast: brk && !heavy,
             lunch: !onlyBrk && !side && !sweetHeavy && !heavy && !HEAVY_LUNCH.test(name) && (hasProtein || /salad|soup|bowl|wrap|sandwich|pita|quesadilla|hummus|pasta|noodle|grain|lentil|bean|chickpea/i.test(name) || /\blunch\b/.test(cat)),
-            dinner: !onlyBrk && !side && !sweetHeavy && hasProtein,
+            // A curry, stew, roast or pie is a dinner by what it is, with or without meat.
+            dinner: !onlyBrk && !side && !sweetHeavy && (hasProtein || mainDish),
             why: heavy && brk ? 'a dinner dish' : '',
         };
     }

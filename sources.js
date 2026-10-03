@@ -50,7 +50,7 @@
         { id: 'seonkyoung', name: 'Seonkyoung Longest', domain: 'seonkyounglongest.com', group: 'world', search: 'wp', terms: { breakfast: ['egg', 'porridge', 'toast'], lunch: ['rice bowl', 'noodles', 'kimbap', 'salad', 'soup'], dinner: ['chicken', 'beef', 'pork', 'tofu', 'stir fry', 'noodles'] }, nutrition: true, status: 'ok' },
         { id: 'isabeleats', name: 'Isabel Eats', domain: 'isabeleats.com', group: 'world', search: 'wp', nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
         // --- Checked for 0.2 with the new ways of finding recipes (search pages, category pages, sitemaps, feeds) ---
-        { id: 'swasthi', name: 'Swasthi\'s Indian Healthy Recipes', domain: 'indianhealthyrecipes.com', group: 'world', find: ['category'], healthy: true, nutrition: true, status: 'ok',
+        { id: 'swasthi', name: 'Swasthi\'s Indian Healthy Recipes', domain: 'indianhealthyrecipes.com', group: 'world', find: ['category'], healthy: true, nutrition: true, status: 'ok', meals: ['breakfast'],   // its lunch and dinner list pages have moved (404)
             categories: { breakfast: ['/recipes/indian-breakfast/', '/recipes/indian-breakfast/page/{page}/'], lunch: ['/recipes/rice/', '/recipes/dal/'], dinner: ['/recipes/curry/', '/recipes/chicken/', '/recipes/paneer/'] },
             recipePath: '^/(?!recipes/|category/|tag/|page/|about|contact)[a-z0-9-]{8,}/$' },
         { id: 'bbcgoodfood', name: 'BBC Good Food', domain: 'bbcgoodfood.com', group: 'general', find: ['category', 'rss'], healthy: true, nutrition: true, status: 'ok',
@@ -74,11 +74,11 @@
             categories: { any: ['/living-with-diabetes/eating/recipes', '/living-with-diabetes/eating/recipes?page={page}'] }, recipePath: '/recipes/[a-z0-9-]+$' },
         { id: 'diabetesfoodhub', name: 'Diabetes Food Hub', domain: 'diabetesfoodhub.org', group: 'public-health', find: ['category'], healthy: true, nutrition: true, status: 'ok',
             categories: { breakfast: ['/recipes/breakfast-and-brunch'], lunch: ['/recipes/salads', '/recipes/soups-stews'], dinner: ['/recipes/main-dishes', '/recipes/veggie-rich'] },
-            recipePath: '^/recipes/(?!breakfast-and-brunch|kidney-friendly|vegan-vegetarian|lower-carb|veggie-rich|budget-friendly|main-dishes|salads|soups-stews|snacks|desserts|side-dishes|beverages)[a-z0-9-]+$' },
+            recipePath: '^/recipes/(?!breakfast-and-brunch|breakfast$|lunch$|dinner$|quick-easy|kid-friendly|kidney-friendly|vegan-vegetarian|lower-carb|veggie-rich|budget-friendly|main-dishes|salads|soups-stews|snacks|desserts|side-dishes|beverages)[a-z0-9-]+$' },
         { id: 'heartandstroke', name: 'Heart & Stroke Foundation', domain: 'heartandstroke.ca', group: 'public-health', find: ['category'], healthy: true, status: 'dropped', why: 'recipe category pages are missing (404) or have no recipe links',
             categories: { breakfast: ['/healthy-living/recipes/breakfast'], lunch: ['/healthy-living/recipes/salads', '/healthy-living/recipes/soups'], dinner: ['/healthy-living/recipes/main-dishes', '/healthy-living/recipes/fish-and-seafood'] },
             recipePath: '^/healthy-living/recipes/[a-z-]+/[a-z0-9-]+$' },
-        { id: 'canadafoodguide', name: 'Canada\'s Food Guide', domain: 'food-guide.canada.ca', group: 'public-health', find: ['sitemap'], healthy: true, status: 'ok',
+        { id: 'canadafoodguide', name: 'Canada\'s Food Guide', domain: 'food-guide.canada.ca', group: 'public-health', find: ['sitemap'], healthy: true, status: 'dropped', why: 'its sitemap lists no recipe pages, and its recipe lists are drawn by scripts',
             sitemap: 'https://food-guide.canada.ca/sitemap.xml', recipePath: '^/en/recipes/[a-z0-9-]+/?$' },
         { id: 'bbcfood', name: 'BBC Food', domain: 'bbc.co.uk', group: 'general', find: ['sitemap'], status: 'ok',
             sitemap: 'https://www.bbc.co.uk/food/sitemap.xml', recipePath: '^/food/recipes/[a-z0-9_]+$' },
