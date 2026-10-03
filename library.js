@@ -137,7 +137,12 @@
                     }
                     if (got.kind === 'pdf' && !got.text) entry.note = got.note || 'No text could be read from this PDF.';
                     entry.recipes = recipesFromFile(file, io.readStructured, io.readText);
-                    if (!entry.recipes.length && !entry.note) entry.note = 'No recipe found (it needs a title, an ingredients list and steps).';
+                    const text = file.text || (file.html && io.readText ? io.readText(file.html) : '');
+                    // Passages for the cooking notes: a recipe file is already covered by its recipes.
+                    entry.passages = passagesFrom(text, { max: entry.recipes.length > 3 || f.folder === 'Recipe Books' ? 250 : 40 })
+                        .filter(p => !entry.recipes.some(r => r.name && p.indexOf(r.name) >= 0 && p.length < 900));
+                    if (!entry.passages.length) delete entry.passages;
+                    if (!entry.recipes.length && !entry.passages && !entry.note) entry.note = 'No recipe found (it needs a title, an ingredients list and steps).';
                     read++;
                 } catch (e) {
                     entry.note = `Couldn't read it: ${e.message}`;
@@ -153,13 +158,117 @@
         return { index: idx, changed, read, errors, pending: Math.max(0, listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).length) };
     }
 
+    // === COOKING KNOWLEDGE (cookbooks as inspiration, not as a ranking) ===
+    // A cookbook's text is kept as short passages (about a paragraph each) that talk about food:
+    // pairings, seasoning, techniques, proportions. For each meal the few most relevant passages are
+    // found (a simple word-overlap search, fast enough for a phone) and given to the AI as notes.
+    const FOOD_WORDS = /\b(salt|pepper|garlic|onion|ginger|lemon|lime|butter|oil|olive|vinegar|herb|spice|cumin|paprika|chili|chilli|thyme|rosemary|basil|parsley|cilantro|coriander|mint|dill|oregano|sauce|stock|broth|roast|sear|saut[eé]|simmer|braise|bake|grill|poach|whisk|fold|marinate|season|caramel|crisp|tender|chicken|beef|pork|lamb|fish|salmon|egg|cheese|cream|yogh?urt|rice|pasta|noodle|bean|lentil|tomato|potato|mushroom|spinach|cup|tbsp|tsp|tablespoon|teaspoon|gram|ounce|minute|heat|pan|oven|skillet)\b/gi;
+    const STOP = new Set(('a an and the of to in on for with or at by from as is are be it its this that these those your you into over until then than so if but not no all any each '
+        + 'can will should may about up out off just very more most some such only also too well when while them they their there here what which who how use using used make made add added '
+        + 'one two three cup cups tbsp tsp minutes minute about large small medium').split(' '));
+    function terms(text) {
+        return String(text || '').toLowerCase().replace(/[^a-z\s'-]/g, ' ').split(/\s+/)
+            .map(w => w.replace(/^['-]+|['-]+$/g, '').replace(/(ies)$/, 'y').replace(/([^s])s$/, '$1'))
+            .filter(w => w.length > 2 && !STOP.has(w));
+    }
+    function passagesFrom(text, { max = 250, size = 600 } = {}) {
+        const foodish = p => (p.match(FOOD_WORDS) || []).length >= 2;
+        const paras = String(text || '').split(/\n\s*\n|\r\n\s*\r\n/).map(p => p.replace(/\s+/g, ' ').trim()).filter(p => p.length > 40 && foodish(p));
+        const out = [];
+        let cur = '';
+        const push = () => {
+            const t = cur.trim();
+            cur = '';
+            if (t.length < 80) return;
+            const food = (t.match(FOOD_WORDS) || []).length;
+            if (food >= 3 && food / Math.max(1, t.split(' ').length) > 0.04) out.push(t.slice(0, size + 200));
+        };
+        for (const p of paras) {
+            if (cur && (cur.length >= 150 || cur.length + p.length > size)) push();   // one topic per passage; only short bits are joined
+            cur = cur ? `${cur} ${p}` : p;
+            if (cur.length > size * 1.4) push();
+            if (out.length >= max) break;
+        }
+        if (cur && out.length < max) push();
+        return out;
+    }
+
+    // A search index over every file's passages, built once and reused until the index changes.
+    let knowledgeCache = null;
+    function knowledge(index) {
+        const at = (index && index.at) || 0;
+        if (knowledgeCache && knowledgeCache.at === at && knowledgeCache.index === index) return knowledgeCache;
+        const docs = [];
+        Object.keys((index && index.files) || {}).forEach(path => {
+            const e = index.files[path];
+            (e.passages || []).forEach(text => docs.push({ text, file: path, terms: new Set(terms(text)) }));
+            (e.recipes || []).forEach(r => docs.push({ text: `${r.name}: ${(r.ingredients || []).join(', ')}. ${(r.steps || []).join(' ')}`.slice(0, 700), file: path, recipe: r.name, terms: new Set(terms(`${r.name} ${(r.ingredients || []).join(' ')} ${(r.steps || []).join(' ')}`)) }));
+        });
+        const df = new Map();
+        docs.forEach(d => d.terms.forEach(t => df.set(t, (df.get(t) || 0) + 1)));
+        knowledgeCache = { at, index, docs, df, pairs: pairingsOf(docs) };
+        return knowledgeCache;
+    }
+    // The k passages that share the most (rarer) words with the question. [] when nothing matches well.
+    function retrieve(index, question, k = 3) {
+        const kb = knowledge(index);
+        if (!kb.docs.length) return [];
+        const q = [...new Set(terms(question))];
+        if (!q.length) return [];
+        const n = kb.docs.length;
+        const idf = t => Math.log(1 + n / (1 + (kb.df.get(t) || 0)));
+        const scored = kb.docs.map(d => {
+            let s = 0, hits = 0;
+            q.forEach(t => { if (d.terms.has(t)) { s += idf(t); hits++; } });
+            return { d, s: s / Math.sqrt(1 + d.terms.size / 40), hits };
+        }).filter(x => x.hits >= Math.min(2, q.length)).sort((a, b) => b.s - a.s);
+        const out = [];
+        const files = {};
+        for (const x of scored) {
+            if (out.length >= k) break;
+            if ((files[x.d.file] || 0) >= 2) continue;   // a mix of books when there are several
+            files[x.d.file] = (files[x.d.file] || 0) + 1;
+            out.push({ text: x.d.text, file: x.d.file, recipe: x.d.recipe || '' });
+        }
+        return out;
+    }
+
+    // Which flavour ingredients the books put together (garlic + lemon, cumin + lime, …): counted
+    // over every passage and recipe. Used to give recipes from *any* source a small nudge when
+    // they use pairings the person's books use.
+    const PAIR_WORDS = ['garlic', 'ginger', 'onion', 'shallot', 'scallion', 'lemon', 'lime', 'orange', 'chili', 'cumin', 'coriander', 'paprika', 'turmeric', 'cinnamon', 'nutmeg',
+        'thyme', 'rosemary', 'sage', 'oregano', 'basil', 'parsley', 'cilantro', 'dill', 'mint', 'tarragon', 'chive', 'bay', 'fennel', 'mustard', 'vinegar', 'soy', 'miso', 'sesame',
+        'honey', 'maple', 'butter', 'olive', 'cream', 'yogurt', 'parmesan', 'feta', 'tomato', 'mushroom', 'spinach', 'potato', 'chickpea', 'lentil', 'bean', 'rice', 'pasta', 'noodle',
+        'chicken', 'beef', 'pork', 'lamb', 'salmon', 'fish', 'shrimp', 'egg', 'tofu', 'avocado', 'pepper', 'carrot', 'zucchini', 'eggplant', 'cauliflower', 'broccoli', 'kale',
+        'coconut', 'peanut', 'almond', 'walnut', 'apple', 'pear', 'berry', 'caper', 'olive', 'anchovy', 'pea', 'corn', 'squash', 'pumpkin', 'leek', 'celery', 'cabbage'];
+    const PAIR_SET = new Set(PAIR_WORDS);
+    function flavourWords(termSet) { return [...termSet].filter(t => PAIR_SET.has(t)).sort(); }
+    function pairingsOf(docs) {
+        const pairs = new Map();
+        docs.forEach(d => {
+            const w = flavourWords(d.terms).slice(0, 14);
+            for (let i = 0; i < w.length; i++) for (let j = i + 1; j < w.length; j++) { const k = w[i] + '+' + w[j]; pairs.set(k, (pairs.get(k) || 0) + 1); }
+        });
+        return pairs;
+    }
+    // 0 (no help) to 1: how much of a recipe's flavour pairings the books use often. Needs a few books'
+    // worth of text before it says anything.
+    function pairingScore(index, recipe) {
+        const kb = knowledge(index);
+        if (kb.docs.length < 15 || !recipe) return 0;
+        const w = flavourWords(new Set(terms(`${recipe.name || ''} ${(recipe.ingredients || []).join(' ')}`))).slice(0, 12);
+        let seen = 0, total = 0;
+        for (let i = 0; i < w.length; i++) for (let j = i + 1; j < w.length; j++) { total++; if ((kb.pairs.get(w[i] + '+' + w[j]) || 0) >= 2) seen++; }
+        return total >= 3 ? seen / total : 0;
+    }
+
     function allRecipes(index) {
         const out = [];
         Object.keys((index && index.files) || {}).forEach(p => (index.files[p].recipes || []).forEach(r => out.push(r)));
         return out;
     }
 
-    const api = { parseRecipeText, recipesFromFile, refresh, allRecipes, kindOf, isReadme };
+    const api = { parseRecipeText, recipesFromFile, refresh, allRecipes, kindOf, isReadme, passagesFrom, retrieve, pairingScore, terms };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishLibrary = api;
 })(typeof window !== 'undefined' ? window : globalThis);

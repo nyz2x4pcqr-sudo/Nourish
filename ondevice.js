@@ -478,7 +478,12 @@ function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
     const protein = Math.round((Number(s.protein_target) || 100) * share);
     return `${conversation ? conversation + '\n\n' : ''}${dish ? `Write the full recipe for "${dish}", the ${type}` : `Make the ${type}`} for Day ${d + 1}${typeof dayName === 'function' ? ` (${dayName(d)})` : ''}` +
         `${cuisine && !dish ? `. Cuisine: ${cuisine}` : ''}. Aim for about ${kcal} kcal and ${protein} g protein per serving.` +
-        `${recent && recent.length ? ` Make it different from: ${recent.join(', ')}.` : ''}${extra ? ' ' + extra : ''} Return only the JSON for this one recipe.`;
+        `${recent && recent.length ? ` Make it different from: ${recent.join(', ')}.` : ''}${extra ? ' ' + extra : ''}${guidanceFor({ type, d, cuisine, dish })} Return only the JSON for this one recipe.`;
+}
+// What the app adds to every meal request (app.js mealGuidance): time limits for the slot, what the
+// person has shown they like, notes from their cookbooks. Empty when there's nothing to add.
+function guidanceFor(meal) {
+    try { const g = typeof mealGuidance === 'function' ? mealGuidance(meal) : ''; return g ? ' ' + g : ''; } catch (e) { return ''; }
 }
 
 // The model call for a plan on this phone: forced into the meal format.

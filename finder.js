@@ -256,7 +256,8 @@
 
         // 1. The person's own recipe library and recipes already read on earlier plans (instant).
         if (o.library && enabled('library')) {
-            try { (await o.library()).forEach(r => add(Object.assign({ preferred: true }, r), { id: 'library', name: r.source_name || 'Your recipe library' })); } catch (e) { ctx.log('Library: ' + e.message); }
+            // On equal terms with every other source (no head start): the books mainly teach (pairingScore).
+            try { (await o.library()).forEach(r => add(Object.assign({}, r), { id: 'library', name: r.source_name || 'Your recipe library' })); } catch (e) { ctx.log('Library: ' + e.message); }
         }
         const recipeCache = ctx.cache.get(CACHE.recipes) || {};
         Object.keys(recipeCache).forEach(url => {
@@ -372,26 +373,31 @@
         return { pools, stats: ctx.stats };
     }
 
+    // How much a recipe's source counts for or against it (lower is better). Every source is on
+    // equal terms except: the sites the person listed first, sites' own nutrition, TheMealDB (less
+    // tested) and, for any source, pairings the person's cookbooks use (o.pairingScore).
+    function sourceCost(r, o) {
+        const priority = (o.settings && o.settings.source_priority) ? String(o.settings.source_priority).split(',') : [];
+        let p = 0;
+        if (o.pairingScore) { try { p -= Math.min(1, o.pairingScore(r) || 0) * 0.2; } catch (e) { /* no books */ } }
+        const i = priority.indexOf(r.source_id);
+        if (i >= 0) p -= (priority.length - i) * 0.05;
+        if (r.nutrition_basis === 'source') p -= 0.1;
+        if (r.source_id === 'themealdb') p += 0.3;   // no nutrition of its own, and less tested
+        return p;
+    }
+
     // Finds recipes and plans the week. Returns { days, missing, report, stats, targets }.
     async function planFromSources(o) {
         const { pools, stats } = await findRecipes(o);
-        const priority = (o.settings && o.settings.source_priority) ? String(o.settings.source_priority).split(',') : [];
-        const sourcePenalty = r => {
-            let p = 0;
-            if (r.preferred || r.source_id === 'library') p -= 0.6;
-            const i = priority.indexOf(r.source_id);
-            if (i >= 0) p -= (priority.length - i) * 0.05;
-            if (r.nutrition_basis === 'source') p -= 0.1;
-            if (r.source_id === 'themealdb') p += 0.3;   // no nutrition of its own, and less tested
-            return p;
-        };
+        const sourcePenalty = r => sourceCost(r, o);
         const exclude = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
         const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude });
         plan.days.forEach(d => PL.MEALS.forEach(m => { if (d[m]) { delete d[m]._fit; delete d[m].sameAs; delete d[m].preferred; } }));
         return Object.assign(plan, { stats, pools });
     }
 
-    const api = { findRecipes, planFromSources, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
+    const api = { findRecipes, planFromSources, sourceCost, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishFinder = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -106,3 +106,48 @@ test("Nourish's own Read me notes in the folders aren't read as recipes", async 
     assert.deepEqual(res.index.listed.map(f => f.path), ['My Recipes/soup.txt']);
     assert.ok(L.isReadme('Recipe Books/Read me.txt') && !L.isReadme('My Recipes/readme pancakes.txt'));
 });
+
+const BOOK = `Roasting
+
+A leg of lamb wants rosemary and garlic pushed into small cuts all over, plenty of salt, and a hot oven to start. Rest it for twenty minutes before carving so the juices settle.
+
+Fish
+
+Salmon and lemon belong together. Season the fillet with salt, sear it skin side down in a hot pan with a little olive oil, and finish with lemon juice, dill and a spoon of butter.
+
+Lemon and garlic lift almost any fish. A splash of white wine vinegar works when there is no lemon. Dill, parsley and chives are the classic herbs for salmon and trout.
+
+Breakfast
+
+Eggs scrambled slowly over low heat with butter stay soft. Add chives and a pinch of salt at the end, and serve on toast.
+
+A thank-you to everyone who helped with this book, and to my family for their patience over the years.`;
+
+test('cookbooks become short cooking passages, and the most relevant few are found per meal', () => {
+    const passages = L.passagesFrom(BOOK);
+    assert.ok(passages.length >= 3, passages.length);
+    assert.ok(!passages.some(p => /thank-you/.test(p)), 'a passage that is not about food was kept');
+    const index = { at: 1, files: { 'Recipe Books/book.pdf': { passages, recipes: [] } } };
+    const fish = L.retrieve(index, 'dinner salmon lemon', 2);
+    assert.ok(fish.length >= 1 && /salmon/i.test(fish[0].text), JSON.stringify(fish));
+    const brk = L.retrieve(index, 'breakfast eggs toast', 2);
+    assert.ok(/scrambled/i.test(brk[0].text));
+    assert.deepEqual(L.retrieve(index, 'quantum physics', 3), []);
+});
+
+test("cookbook pairings nudge recipes from any source; with no books there's no effect", () => {
+    const F = require('../finder.js');
+    const site = { name: 'Lemon Garlic Salmon', ingredients: ['1 lb salmon', '2 cloves garlic', '1 lemon', '1 tbsp butter', '1 tsp dill'], source_id: 'budgetbytes' };
+    const lib = Object.assign({}, site, { source_id: 'library' });
+    // Equal terms: the same recipe costs the same whether it came from the library or a site.
+    assert.equal(F.sourceCost(lib, { settings: {} }), F.sourceCost(site, { settings: {} }));
+    const passages = [];
+    for (let i = 0; i < 20; i++) passages.push(`Salmon with lemon, garlic, dill and butter, number ${i}: sear the salmon in a hot pan, add the garlic and butter, finish with lemon juice and dill and salt.`);
+    const index = { at: 2, files: { 'Recipe Books/fish.pdf': { passages, recipes: [] } } };
+    const score = L.pairingScore(index, site);
+    assert.ok(score > 0.5, score);
+    assert.equal(L.pairingScore(index, { name: 'Plain Toast', ingredients: ['1 slice bread'] }), 0);
+    const o = { settings: {}, pairingScore: r => L.pairingScore(index, r) };
+    assert.ok(F.sourceCost(site, o) < F.sourceCost(site, { settings: {} }));
+    assert.equal(F.sourceCost(lib, o), F.sourceCost(site, o));
+});

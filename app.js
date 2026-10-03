@@ -2881,12 +2881,41 @@ function applyEdits(parsed) {
     return { replacedPlan: false, changes: done };
 }
 
+// === WHAT GOES WITH EVERY AI MEAL REQUEST ===
+// Called by mealAsk (ondevice.js) for every meal the AI writes or rewrites, on every AI.
+function mealGuidance({ type, d, cuisine, dish }) {
+    const parts = [];
+    const notes = cookbookNotes([type, cuisine, dish, prefs.likes].filter(Boolean).join(' '));
+    if (notes) parts.push(notes);
+    return parts.join(' ');
+}
+
 // === YOUR RECIPE LIBRARY ===
 // Files in the Nourish folders (Recipe Books, My Recipes) on this phone or the PC, read in the
-// background in small batches whenever they change (library.js), and used as a preferred source.
+// background in small batches whenever they change (library.js). Their recipes compete on equal
+// terms with every other source; their text is cooking knowledge for the AI (cookbookNotes).
 const LIBRARY_KEY = 'nourish_library_index';
 const libraryState = { count: 0, files: 0, folder: '', where: null, busy: false, error: '', notes: [] };
-function libraryIndex() { return loadJSON(LIBRARY_KEY, { files: {} }); }
+let libraryIndexCache = null;
+function libraryIndex() { if (!libraryIndexCache) libraryIndexCache = loadJSON(LIBRARY_KEY, { files: {} }); return libraryIndexCache; }
+// Saved on this device. Cookbook passages can be big: if the phone's storage for the app is full,
+// fewer passages per file are kept (the recipes always are).
+function saveLibraryIndex(index) {
+    libraryIndexCache = index;
+    for (const keep of [Infinity, 100, 30, 0]) {
+        const copy = keep === Infinity ? index : Object.assign({}, index, { files: Object.fromEntries(Object.entries(index.files || {}).map(([p, e]) => [p, Object.assign({}, e, { passages: (e.passages || []).slice(0, keep) })])) });
+        try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(copy)); if (keep !== Infinity) nlog('library', `Storage is nearly full: keeping ${keep} cooking passages per file`, null, 'warn'); return; } catch (e) { /* try smaller */ }
+    }
+}
+// Notes from the person's cookbooks for the AI writing or adapting a meal: the 2–3 passages most
+// related to it (pairings, seasoning, technique), short so the prompt stays small on a phone.
+function cookbookNotes(question, k) {
+    if (!libraryState.count && !Object.values(libraryIndex().files || {}).some(e => e.passages && e.passages.length)) return '';
+    const found = NourishLibrary.retrieve(libraryIndex(), question, k || (settings.active_provider === 'local' ? 2 : 3));
+    if (!found.length) return '';
+    return 'Ideas from their own cookbooks (use for pairings, seasoning and technique; do not copy): '
+        + found.map((f, i) => `(${i + 1}) ${f.text.replace(/\s+/g, ' ').slice(0, settings.active_provider === 'local' ? 260 : 420)}`).join(' ');
+}
 function libraryRecipes() { return NourishLibrary.allRecipes(libraryIndex()); }
 function librarySummary(index) {
     const files = Object.keys(index.files || {});
@@ -2909,8 +2938,8 @@ async function indexLibrary({ quiet = true } = {}) {
             readText: html => { try { return NourishImport.readableText(new DOMParser().parseFromString(html, 'text/html')); } catch (e) { return ''; } },
             sleep: ms => new Promise(ok => setTimeout(ok, ms)),
         };
-        const res = await NourishLibrary.refresh(libraryIndex(), io, { batch: 2, pause: 500, maxFiles: 20 });
-        store(LIBRARY_KEY, res.index);
+        const res = await NourishLibrary.refresh(JSON.parse(JSON.stringify(libraryIndex())), io, { batch: 2, pause: 500, maxFiles: 20 });
+        saveLibraryIndex(res.index);
         librarySummary(res.index);
         if (res.changed) nlog('library', `Recipe library: ${libraryState.count} recipes from ${libraryState.files} files (${res.read} read now${res.pending ? `, ${res.pending} more next time` : ''})`, res.errors.length ? res.errors : null);
         if (res.pending) setTimeout(() => indexLibrary(), 20000);   // big folders: the rest a little later
@@ -3064,6 +3093,7 @@ function finderOptions(likes, hates) {
         readRecipe: (html, url) => { try { return NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } },
         api: (path, body) => api(path, { method: 'POST', timeoutMs: 45000, body }),
         library: () => libraryRecipes(),
+        pairingScore: r => NourishLibrary.pairingScore(libraryIndex(), r),
         cache: { get: k => loadJSON(k, null), set: (k, v) => store(k, v) },
         log: m => nlog('plan', m),
     };
