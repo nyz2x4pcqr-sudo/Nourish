@@ -8,8 +8,13 @@ const IN_PHONE_APP = /\bNourishApp\//.test(navigator.userAgent);
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
-const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
-const MEAL_ICONS = { breakfast: 'i-sunrise', lunch: 'i-sun', dinner: 'i-moon' };
+const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', 'snack-1': 'Snack', 'snack-2': 'Snack', 'snack-3': 'Snack' };
+const MEAL_ICONS = { breakfast: 'i-sunrise', lunch: 'i-sun', dinner: 'i-moon', 'snack-1': 'i-leaf', 'snack-2': 'i-leaf', 'snack-3': 'i-leaf' };
+const isSnackSlot = t => /^snack-\d$/.test(t);
+// A plan day's meal in a slot: breakfast, lunch, dinner, or snack-1… (day.snacks).
+function slotMeal(day, t) { return !day ? null : isSnackSlot(t) ? (day.snacks || [])[Number(t.slice(6)) - 1] || null : day[t] || null; }
+// Every [slot, meal] of a day, in order: breakfast, lunch, dinner, then snacks.
+function daySlots(day) { return NourishLog.slotsOf(day); }
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const PROVIDERS = { local: 'On this phone', lmstudio: 'LM Studio (local)', ollama: 'Ollama (local)', claude: 'Claude', openai: 'OpenAI' };
 // Phone-only mode (see ondevice.js) offers on-device AI and cloud AIs; on a PC, the PC's own AIs.
@@ -49,6 +54,9 @@ const SETTINGS_DEFAULTS = {
     week_start: 'monday',
     units: '',   // 'imperial' or 'metric'; empty: from the phone's region
     show_nutrition: 'on',
+    // meals (Profile → Meals each day)
+    meal_slots: 'breakfast,lunch,dinner',
+    snacks_per_day: '0',
     reduce_motion: 'off',
     // AI
     active_provider: 'lmstudio',
@@ -108,6 +116,7 @@ let daysData = [];
 let selectedDay = 0;
 let grocery = { checked: [], custom: [] };     // checked: item texts; custom: [{ text, checked }]
 let cookbook = { recipes: [] };                // saved recipes (see COOKBOOK)
+let foodLog = { days: {}, recents: [], favorites: [] };   // what was eaten (foodlog.js), per day
 let chatHistory = [];                          // [{ role: 'user' | 'assistant', content, card? }]
 let chatBusy = false;
 let chatBusyLabel = '';
@@ -287,6 +296,7 @@ function loadLocalState() {
 
     chatHistory = cleanChat(loadJSON('nourish_chat', []));
     cookbook = cleanCookbook(loadJSON('nourish_cookbook', null));
+    foodLog = NourishLog.clean(loadJSON('nourish_log', null));
 }
 
 function persistLocal(section) {
@@ -302,6 +312,7 @@ function persistLocal(section) {
     else if (section === 'grocery') store('nourish_grocery', grocery);
     else if (section === 'chat') store('nourish_chat', chatHistory);
     else if (section === 'cookbook') store('nourish_cookbook', cookbook);
+    else if (section === 'log') store('nourish_log', foodLog);
 }
 
 function cleanGrocery(g) {
@@ -324,7 +335,7 @@ function cleanChat(list) {
 // Settings, preferences, the plan, the grocery list, the chat and the cookbook are kept on the PC so every device
 // (browser, iPhone app, Android app) shows the same thing. Each section has a revision number:
 // a device that has a newer change sends it; a device that's behind takes the PC's copy.
-const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat', 'cookbook'];
+const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat', 'cookbook', 'log'];
 const syncMeta = Object.assign(
     Object.fromEntries(SECTIONS.map(s => [s, { rev: 0, dirty: false, ver: 0 }])),
     loadJSON('nourish_sync', {}));
@@ -363,6 +374,7 @@ function sectionValue(section) {
     if (section === 'plan') return daysData;
     if (section === 'grocery') return grocery;
     if (section === 'cookbook') return cookbook;
+    if (section === 'log') return foodLog;
     return chatHistory.map(m => (m.card ? { role: m.role, content: m.content, card: m.card } : { role: m.role, content: m.content }));
 }
 
@@ -372,6 +384,7 @@ function hasLocalData(section) {
     if (section === 'plan') return daysData.length > 0;
     if (section === 'grocery') return grocery.checked.length > 0 || grocery.custom.length > 0;
     if (section === 'cookbook') return cookbook.recipes.length > 0;
+    if (section === 'log') return Object.keys(foodLog.days).length > 0 || foodLog.favorites.length > 0;
     return chatHistory.length > 0;
 }
 
@@ -406,6 +419,8 @@ function applyRemote(section, value) {
         chatHistory = cleanChat(value);
     } else if (section === 'cookbook') {
         cookbook = cleanCookbook(value);
+    } else if (section === 'log') {
+        foodLog = NourishLog.clean(value);
     }
     persistLocal(section);
     return true;
@@ -1080,6 +1095,22 @@ function settingsChoice(label, current, options, onpick) {
     return h('div', { class: 'settings-row settings-row-stack' }, h('span', { class: 'settings-label', text: label }), row);
 }
 
+// A switch for one of breakfast, lunch and dinner in new plans (at least one stays on).
+function mealSlotToggle(meal) {
+    const list = () => String(settings.meal_slots || 'breakfast,lunch,dinner').split(',').filter(Boolean);
+    const isOn = () => list().includes(meal);
+    return h('button', {
+        type: 'button', class: 'settings-row settings-nav switch-row', role: 'switch', 'aria-checked': String(isOn()),
+        onclick: e => {
+            const next = isOn() ? list().filter(m => m !== meal) : list().concat([meal]);
+            if (!next.length) { showToast('Keep at least one meal'); return; }
+            setSetting('meal_slots', MEAL_TYPES.filter(m => next.includes(m)).join(','), { quiet: true });
+            e.currentTarget.setAttribute('aria-checked', String(isOn()));
+            e.currentTarget.querySelector('.switch').setAttribute('aria-checked', String(isOn()));
+        },
+    }, h('span', { class: 'settings-label', text: MEAL_LABELS[meal] }), h('span', { class: 'switch', 'aria-checked': String(isOn()), 'aria-hidden': 'true' }));
+}
+
 function settingsButton(text, onclick, cls = '') {
     return h('button', { type: 'button', class: `settings-row settings-button ${cls}`, onclick }, text);
 }
@@ -1317,6 +1348,9 @@ const SETTINGS_RENDERERS = {
                 settingsRow('Avoid', textInput(() => prefs.hates, v => { setPref('hates', v); showToast('Saved ✓', false); }, { placeholder: 'e.g. mushrooms' })),
                 settingsRow('Cuisines', settingsInput('cuisines', { placeholder: 'e.g. Mexican, Thai' })),
             ], 'Allergies are never included by the AI and are filtered out of recipe searches.'),
+            ...settingsGroup('Meals each day', MEAL_TYPES.map(mealSlotToggle).concat([
+                settingsRow('Snacks', settingsSelect('snacks_per_day', { 0: 'None', 1: '1 a day', 2: '2 a day', 3: '3 a day' }), { hint: 'Small snacks inside your calories' }),
+            ]), 'New plans use these. Your calories are shared out over the meals you keep, and each snack takes about a tenth of the day.'),
             ...settingsGroup('Cooking', [
                 settingsRow('Max cook time', settingsSelect('max_cook_time', { '': 'Any', 15: '15 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour' })),
                 settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6']), { hint: 'Recipes are written for this many people' }),
@@ -1657,11 +1691,12 @@ function initSheets() {
     $('cookbookBtn').addEventListener('click', showCookbook);
     $('cookbookBackdrop').addEventListener('click', closeCookbook);
     $('recipeEditBackdrop').addEventListener('click', closeRecipeEditor);
+    $('foodSheetBackdrop').addEventListener('click', closeFoodSheet);
     $('slotBackdrop').addEventListener('click', closeSlotPicker);
     document.addEventListener('keydown', e => {
         if (e.key !== 'Escape') return;
         // The top sheet first.
-        for (const [id, close] of [['slotSheet', closeSlotPicker], ['recipeEditSheet', closeRecipeEditor], ['recipeSheet', closeRecipeSheet], ['importSheet', closeImportSheet], ['cookbookSheet', closeCookbook], ['generateSheet', closeGenerateSheet]]) {
+        for (const [id, close] of [['foodSheet', closeFoodSheet], ['slotSheet', closeSlotPicker], ['recipeEditSheet', closeRecipeEditor], ['recipeSheet', closeRecipeSheet], ['importSheet', closeImportSheet], ['cookbookSheet', closeCookbook], ['generateSheet', closeGenerateSheet]]) {
             if ($(id).classList.contains('active')) { close(); return; }
         }
     });
@@ -1741,8 +1776,9 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
             h('button', { type: 'button', class: 'btn btn-primary', onclick: () => showSlotPicker(meal.name, mealType, (d, t) => { placeInPlan(meal, d, t); closeRecipeSheet(); closeCookbook(); showToast(`Added "${meal.name}" to ${dayName(d)}`, false); }) }, icon('i-calendar'), 'Add to plan'),
             h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => openRecipeEditor(meal, { mode: 'edit', mealType, cookbookId }) }, icon('i-edit'), 'Edit'),
             h('button', { type: 'button', class: 'btn btn-secondary danger', onclick: () => { removeFromCookbook(cookbookId); closeRecipeSheet(); } }, icon('i-trash'), 'Remove')) : null,
+        dayIndex != null && !cookbookId ? eatenControl(dayIndex, mealType) : null,
         cookbookId ? null : h('div', { class: 'recipe-actions' },
-            dayIndex != null ? h('button', {
+            dayIndex != null && !isSnackSlot(mealType) ? h('button', {
                 type: 'button', class: 'btn btn-secondary', disabled: !!planJob,
                 onclick: () => { closeRecipeSheet(); swapMeal(dayIndex, mealType); },
             }, icon('i-swap'), 'Swap meal') : null,
@@ -1846,6 +1882,15 @@ function nutritionNotes(meal) {
     return notes;
 }
 
+// "Did you eat this?" on a planned meal: Not yet / Eaten / Skipped.
+function eatenControl(dayIndex, mealType) {
+    const status = logEntry(dayIndex).meals[mealType] || '';
+    const pick = v => () => { setMealStatus(dayIndex, mealType, v || null); openRecipeSheet(mealType, slotMeal(daysData[dayIndex], mealType), dayIndex); };
+    return h('div', { class: 'segmented eaten-control', role: 'radiogroup', 'aria-label': 'Did you eat this?' },
+        [['', 'Not yet'], ['eaten', 'Eaten'], ['skipped', 'Skipped']].map(([v, label]) =>
+            h('button', { type: 'button', role: 'radio', class: 'segment-btn' + (status === v ? ' active' : ''), 'aria-checked': String(status === v), onclick: pick(v) }, label)));
+}
+
 function closeRecipeSheet() {
     $('recipeSheet').classList.remove('active');
 }
@@ -1867,7 +1912,7 @@ function formatMinutes(min) {
     return Number.isFinite(min) && min > 0 ? `${Math.round(min)} min` : '— min';
 }
 function sumNutrient(day, key) {
-    return MEAL_TYPES.reduce((sum, t) => sum + ((day[t] && day[t].nutrition && day[t].nutrition[key]) || 0), 0);
+    return daySlots(day).reduce((sum, [, m]) => sum + ((m.nutrition && m.nutrition[key]) || 0), 0);
 }
 function hasNutrition(day) {
     return MEAL_TYPES.some(t => day[t] && day[t].nutrition && Number.isFinite(day[t].nutrition.calories));
@@ -1993,10 +2038,12 @@ function updateTodayScreen() {
     }, h('span', { class: 'd-name', text: isToday(idx) ? 'Today' : dayName(idx, true) }), h('span', { class: 'd-num', text: idx + 1 }))));
 
     let summary = null;
+    const entry = logEntry(selectedDay);
+    const dayTotals = NourishLog.totals(day, entry);
     if (on('show_nutrition')) {
         const calTarget = Number(settings.calorie_target) || 2400;
-        const known = hasNutrition(day);
-        const totalCal = sumNutrient(day, 'calories');
+        const known = hasNutrition(day) || entry.items.length > 0;
+        const totalCal = dayTotals.planned.calories;
         const r = 56;
         const circumference = 2 * Math.PI * r;
         const fraction = known && calTarget > 0 ? Math.min(totalCal / calTarget, 1) : 0;
@@ -2019,8 +2066,8 @@ function updateTodayScreen() {
                 h('div', { class: 'ring-center' },
                     h('div', { class: 'ring-value num', id: 'calorieValue', text: known ? formatCalories(totalCal) : '—' }),
                     h('div', { class: 'ring-label', id: 'calorieLabel', text: known ? `of ${calTarget.toLocaleString()} kcal` : 'no nutrition data' }))),
-            h('div', { class: 'macros' }, macros.map(([label, key, max, cls]) => {
-                const total = sumNutrient(day, key);
+            h('div', { class: 'macros' }, macros.filter(([, key]) => todayStatOn(key)).map(([label, key, max, cls]) => {
+                const total = dayTotals.planned[key];
                 const fill = h('div', { class: `macro-fill ${cls}` });
                 requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = Math.min(total / max * 100, 100) + '%'; }));
                 return h('div', {},
@@ -2034,16 +2081,18 @@ function updateTodayScreen() {
         cookingPanel('today'),
         strip,
         summary,
+        on('show_nutrition') ? dayStatus(selectedDay, day, dayTotals) : null,
         h('h2', { class: 'section-title' }, title, h('small', { text: `Day ${selectedDay + 1}` })),
-        h('div', { class: 'meal-cards', id: 'mealCards' }, MEAL_TYPES.filter(t => day[t]).map(t => mealCard(t, day[t], selectedDay))));
+        h('div', { class: 'meal-cards', id: 'mealCards' }, daySlots(day).map(([t, meal]) => mealCard(t, meal, selectedDay, entry.meals[t]))),
+        extrasSection(selectedDay, entry));
     const active = strip.querySelector('.day-pill.active');
     if (active && active.scrollIntoView) requestAnimationFrame(() => {
         strip.scrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
     });
 }
 
-function mealCard(type, meal, dayIndex) {
-    return h('button', { type: 'button', class: 'meal-card', onclick: () => openRecipeSheet(type, meal, dayIndex) },
+function mealCard(type, meal, dayIndex, status) {
+    const card = h('button', { type: 'button', class: 'meal-card' + (status ? ` ${status}` : ''), onclick: () => openRecipeSheet(type, meal, dayIndex) },
         h('div', { class: `meal-art art-${type}` }, icon(MEAL_ICONS[type])),
         h('div', { class: 'meal-content' },
             h('div', { class: 'meal-type', text: MEAL_LABELS[type] }),
@@ -2051,8 +2100,268 @@ function mealCard(type, meal, dayIndex) {
             h('div', { class: 'meal-badges' },
                 h('span', { class: 'chip' }, icon('i-clock'), formatMinutes(meal.time_minutes)),
                 on('show_nutrition') ? h('span', { class: 'chip' }, icon('i-flame'), `${formatCalories(meal.nutrition && meal.nutrition.calories)} kcal`) : null,
+                status === 'eaten' ? h('span', { class: 'chip ok' }, icon('i-check'), 'Eaten') : status === 'skipped' ? h('span', { class: 'chip', text: 'Skipped' }) : null,
                 meal.incomplete ? h('span', { class: 'chip warn', text: 'May be incomplete' }) : null)),
         icon('i-chevron', 'chev'));
+    // Tap the circle: eaten → skipped → not yet.
+    const next = status === 'eaten' ? 'skipped' : status === 'skipped' ? null : 'eaten';
+    const label = status === 'eaten' ? 'Eaten. Tap to mark skipped' : status === 'skipped' ? 'Skipped. Tap to clear' : 'Mark as eaten';
+    return h('div', { class: 'meal-row' }, card,
+        h('button', { type: 'button', class: `eat-btn${status ? ' ' + status : ''}`, 'aria-label': `${MEAL_LABELS[type]}: ${label}`, title: label,
+            onclick: () => setMealStatus(dayIndex, type, next) }, icon(status === 'skipped' ? 'i-close' : 'i-check')));
+}
+
+// === FOOD LOG ===
+// What was eaten: planned meals marked eaten or skipped, and anything extra (foodlog.js). Kept per
+// date, so a plan day maps to this week's date for that weekday.
+function dateOfDay(idx) {
+    const now = new Date();
+    const todayIdx = ((now.getDay() + 6) % 7 - dayBase() + 7) % 7;
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    d.setDate(d.getDate() + (idx - todayIdx));
+    return d;
+}
+function logKey(idx) { return NourishLog.dayKey(dateOfDay(idx)); }
+function logEntry(idx) { return foodLog.days[logKey(idx)] || { items: [], meals: {} }; }
+function todayStatOn(key) { return String(settings.today_stats || 'protein_g,carbs_g,fat_g').split(',').includes(key); }
+
+function setMealStatus(dayIndex, type, status) {
+    NourishLog.setMeal(foodLog, logKey(dayIndex), type, status);
+    changed('log');
+    updateTodayScreen();
+    if (status) showToast(status === 'eaten' ? 'Marked as eaten' : 'Marked as skipped', false);
+}
+
+// What's left today, in plain words, and a calm note (with an offer, never a change) when over.
+function dayStatus(idx, day, t) {
+    const target = Number(settings.calorie_target) || 2400;
+    const over = Math.round(t.planned.calories - target);
+    const parts = [];
+    if (t.tracking) {
+        // Left = the target minus everything in the day (eaten, still planned, and extras).
+        const toCome = Math.round(t.planned.calories - t.eaten.calories);
+        const left = Math.round(target - t.planned.calories);
+        parts.push(h('p', { class: 'day-status' },
+            h('span', {}, 'Eaten so far ', h('b', { class: 'num', text: `${formatCalories(t.eaten.calories)} kcal` })),
+            toCome > 0 ? h('span', { class: 'dot', 'aria-hidden': 'true', text: '·' }) : null,
+            toCome > 0 ? h('span', {}, h('b', { class: 'num', text: `${formatCalories(toCome)} kcal` }), ' still planned') : null,
+            left > 0 ? h('span', { class: 'dot', 'aria-hidden': 'true', text: '·' }) : null,
+            left > 0 ? h('span', {}, h('b', { class: 'num', text: `${formatCalories(left)} kcal` }), ' free for extras') : null));
+    }
+    parts.unshift(h('button', { type: 'button', class: 'quick-add', onclick: () => openFoodSheet(idx) }, icon('i-plus'),
+        h('span', {}, h('b', { text: 'Add food' }), h('span', { text: 'A snack, a drink or anything extra' }))));
+    if (over > target * 0.05 && t.extras.calories > 0) {
+        const openToday = daySlots(day).filter(([s]) => !logEntry(idx).meals[s]);
+        const tomorrow = idx + 1 < daysData.length ? idx + 1 : null;
+        parts.push(h('div', { class: 'calm-note', role: 'note' },
+            h('div', { class: 'calm-note-title', text: `About ${formatCalories(over)} kcal over your ${target.toLocaleString()} today` }),
+            h('p', { text: "That's fine. One day doesn't undo a week. If you like, Nourish can make some meals a little lighter (smaller portions, less oil and sugar; seasoning stays)." }),
+            h('div', { class: 'calm-note-actions' },
+                openToday.length ? h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => offerLighten([idx], over, openToday.map(([s]) => s)) }, 'Lighten the rest of today') : null,
+                tomorrow != null ? h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => offerLighten([tomorrow], over, null) }, `Lighten ${dayName(tomorrow)}`) : null)));
+    }
+    return parts.length ? h('div', { class: 'day-status-wrap' }, parts) : null;
+}
+
+// Asks first, then makes the chosen meals smaller to take off `kcal` in all.
+function offerLighten(dayIdxs, kcal, slots) {
+    const d = dayIdxs[0];
+    const day = daysData[d];
+    const which = (slots || daySlots(day).map(([s]) => s)).filter(s => slotMeal(day, s) && !logEntry(d).meals[s]);
+    if (!which.length) { showToast('There are no meals left to lighten that day.'); return; }
+    const total = which.reduce((sum, s) => sum + ((slotMeal(day, s).nutrition || {}).calories || 0), 0);
+    const cut = Math.min(kcal, total * 0.35);   // never more than about a third
+    const names = which.map(s => slotMeal(day, s).name).join(', ');
+    if (!confirm(`Make ${isToday(d) ? "the rest of today's" : dayName(d) + "'s"} meals about ${formatCalories(cut)} kcal lighter?\n\n${names}\n\nPortions get a little smaller and oil and sugar are cut first. You can always generate a new plan.`)) return;
+    which.forEach(s => {
+        const meal = slotMeal(day, s);
+        const n = meal.nutrition && meal.nutrition.calories;
+        if (!n) return;
+        const lighter = NourishPlanner.lighten(meal, cut * n / total, servingsWanted());
+        if (isSnackSlot(s)) day.snacks[Number(s.slice(6)) - 1] = lighter; else day[s] = lighter;
+    });
+    changed('plan');
+    updateTodayScreen();
+    updatePlanScreen();
+    updateGroceryScreen();
+    showToast(`Done: ${which.length} meal${which.length > 1 ? 's' : ''} made lighter`, false);
+}
+
+function extrasSection(idx, entry) {
+    const items = entry.items || [];
+    const total = items.reduce((sum, x) => sum + x.nutrition.calories, 0);
+    return h('section', { class: 'extras' },
+        h('h2', { class: 'section-title' }, 'Snacks and extras',
+            h('button', { type: 'button', class: 'btn btn-secondary btn-small add-food-btn', onclick: () => openFoodSheet(idx) }, icon('i-plus'), 'Add')),
+        items.length
+            ? h('div', { class: 'log-list' }, items.map(it => h('button', { type: 'button', class: 'log-item', onclick: () => openFoodSheet(idx, it) },
+                h('span', { class: 'log-item-body' },
+                    h('span', { class: 'log-item-name', text: it.name }),
+                    h('span', { class: 'log-item-amount', text: `${formatAmountLabel(it)}${it.estimate ? ' · estimate' : ''}` })),
+                h('span', { class: 'log-item-kcal num', text: `${formatCalories(it.nutrition.calories)} kcal` }),
+                icon('i-chevron', 'chev'))).concat(items.length > 1 ? [h('div', { class: 'log-total' }, h('span', { text: 'Extras today' }), h('span', { class: 'num', text: `${formatCalories(total)} kcal` }))] : []))
+            : h('button', { type: 'button', class: 'log-empty', onclick: () => openFoodSheet(idx) }, icon('i-plus'),
+                h('span', {}, h('b', { text: 'Had a snack or a drink?' }), ' Add anything you ate or drank that isn’t in the plan.')));
+}
+function formatAmountLabel(it) {
+    const n = NourishUnits.formatQty ? NourishUnits.formatQty(it.amount) : String(it.amount);
+    return `${n} ${it.unit}`;
+}
+
+// === ADD FOOD ===
+// Type it in plain words, search, pick a recent or favorite, or scan a barcode. Every amount can be
+// changed before it's saved. Numbers come from the USDA table or Open Food Facts, and say "estimate".
+let foodDraft = null;   // { idx, items: [], editId }
+function openFoodSheet(idx, editItem = null) {
+    foodDraft = { idx, items: editItem ? [Object.assign({}, editItem)] : [], editId: editItem ? editItem.id : null, busy: '', note: '' };
+    renderFoodSheet();
+    $('foodSheet').classList.add('active');
+    if (!editItem) setTimeout(() => { const i = $('foodText'); if (i) i.focus(); }, 350);
+}
+function closeFoodSheet() { $('foodSheet').classList.remove('active'); foodDraft = null; }
+
+async function addFoodFromText() {
+    const text = $('foodText').value.trim();
+    if (!text) return;
+    const found = NourishLog.parse(text);
+    foodDraft.note = '';
+    for (const it of found) {
+        if (!it.unmatched) { foodDraft.items.push(it); continue; }
+        // Not in the food table: ask Open Food Facts (online), else let the person type the calories.
+        foodDraft.busy = `Looking up "${it.text}"…`;
+        renderFoodSheet();
+        const online = await lookupFoodOnline(it.text).catch(() => null);
+        foodDraft.items.push(online || Object.assign(NourishLog.manual(it.text, 0), { needsCalories: true }));
+    }
+    foodDraft.busy = '';
+    $('foodText').value = '';
+    renderFoodSheet();
+}
+async function lookupFoodOnline(name) {
+    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(name)}&search_simple=1&action=process&json=1&page_size=5&fields=product_name,brands,nutriments,serving_quantity,serving_size,code`;
+    const res = await fetchForImport(url, { browser: false });
+    if (!res || res.status >= 400) return null;
+    const data = JSON.parse(res.body || '{}');
+    for (const p of data.products || []) { const it = NourishLog.fromOpenFoodFacts(p); if (it) return it; }
+    return null;
+}
+async function lookupBarcode(code) {
+    code = String(code || '').replace(/\D/g, '');
+    if (code.length < 6) { showToast('That barcode number looks too short.'); return; }
+    foodDraft.busy = 'Looking up the barcode…';
+    renderFoodSheet();
+    try {
+        const res = await fetchForImport(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,brands,nutriments,serving_quantity,serving_size,code`, { browser: false });
+        const data = res && res.status < 400 ? JSON.parse(res.body || '{}') : {};
+        const it = data && data.product ? NourishLog.fromOpenFoodFacts(data.product, code) : null;
+        if (it) foodDraft.items.push(it);
+        else foodDraft.note = "That product isn't in Open Food Facts yet. Type what it was instead.";
+    } catch (e) {
+        foodDraft.note = "Couldn't look up the barcode. Check your internet connection, or type what it was.";
+    }
+    foodDraft.busy = '';
+    renderFoodSheet();
+}
+// A photo of a barcode (or the camera, where the browser can read barcodes itself).
+async function scanBarcode(file) {
+    try {
+        let code = null;
+        if (typeof BarcodeDetector !== 'undefined') {
+            const bmp = await createImageBitmap(file);
+            const found = await new BarcodeDetector().detect(bmp);
+            code = found && found[0] && found[0].rawValue;
+        } else if (canReadTextOnPhone()) {
+            const image = await imageForReading(file);
+            const r = await nativeCall('barcode', { image: image.data }, { timeoutMs: 30000 });
+            code = r && r.code;
+        }
+        if (!code) { foodDraft.note = "No barcode found in that photo. Try again closer, or type the number under the barcode."; renderFoodSheet(); return; }
+        await lookupBarcode(code);
+    } catch (e) {
+        foodDraft.note = "Couldn't read that photo. Try again, or type the number under the barcode.";
+        renderFoodSheet();
+    }
+}
+
+function renderFoodSheet() {
+    const d = foodDraft;
+    if (!d) return;
+    const editing = !!d.editId;
+    const total = d.items.reduce((sum, x) => sum + (x.nutrition.calories || 0), 0);
+    const stepFor = it => (it.amount >= 4 ? 1 : it.unit === 'g' || it.unit === 'ml' ? 25 : 0.5);
+    const row = (it, i) => h('div', { class: 'food-row' },
+        h('div', { class: 'food-row-top' },
+            h('div', { class: 'food-row-name' }, h('b', { text: it.name }),
+                h('span', { class: 'food-row-src', text: it.source === 'you' ? 'your numbers' : `${it.source || 'USDA'}${it.estimate ? ' · estimate' : ''}` })),
+            h('button', { type: 'button', class: `icon-btn fav-btn${NourishLog.isFavorite(foodLog, it) ? ' on' : ''}`, 'aria-label': 'Favorite', onclick: () => { NourishLog.toggleFavorite(foodLog, it); changed('log'); renderFoodSheet(); } }, icon('i-heart')),
+            h('button', { type: 'button', class: 'icon-btn', 'aria-label': `Remove ${it.name}`, onclick: () => { d.items.splice(i, 1); renderFoodSheet(); } }, icon('i-trash'))),
+        it.needsCalories
+            ? h('label', { class: 'food-kcal-input' }, h('span', { text: "Not in the food list. Calories, if you know them:" }),
+                h('input', { type: 'number', inputmode: 'numeric', min: '0', class: 'settings-input num', value: it.nutrition.calories || '', oninput: e => { d.items[i] = Object.assign(NourishLog.manual(it.name, e.target.value), { needsCalories: true }); updateFoodTotal(); } }))
+            : h('div', { class: 'food-row-amount' },
+                h('div', { class: 'stepper' },
+                    h('button', { type: 'button', 'aria-label': 'Less', onclick: () => { d.items[i] = NourishLog.setAmount(it, Math.max(stepFor(it) === 0.5 ? 0.25 : stepFor(it), it.amount - stepFor(it))); renderFoodSheet(); } }, '−'),
+                    h('input', { type: 'number', inputmode: 'decimal', min: '0', step: 'any', class: 'num', value: String(Math.round(it.amount * 100) / 100), 'aria-label': 'Amount',
+                        onchange: e => { d.items[i] = NourishLog.setAmount(it, e.target.value); renderFoodSheet(); } }),
+                    h('button', { type: 'button', 'aria-label': 'More', onclick: () => { d.items[i] = NourishLog.setAmount(it, it.amount + stepFor(it)); renderFoodSheet(); } }, '+')),
+                h('span', { class: 'food-unit', text: it.unit }),
+                h('span', { class: 'food-row-kcal num', text: `${formatCalories(it.nutrition.calories)} kcal` })),
+        it.needsCalories ? null : h('div', { class: 'food-row-macros num', text: `P ${Math.round(it.nutrition.protein_g)} g · C ${Math.round(it.nutrition.carbs_g)} g · F ${Math.round(it.nutrition.fat_g)} g${it.grams ? ` · ${Math.round(it.grams)} g` : ''}` }));
+    const chips = (list, label) => list.length ? h('div', { class: 'food-chips-wrap' }, h('div', { class: 'label', text: label }),
+        h('div', { class: 'food-chips' }, list.slice(0, 12).map(it => h('button', { type: 'button', class: 'filter-chip', onclick: () => { d.items.push(Object.assign({}, it)); renderFoodSheet(); } }, `${it.name} · ${formatCalories(it.nutrition.calories)}`)))) : null;
+    const results = d.search ? NourishLog.search(d.search) : [];
+    setChildren($('foodSheetContent'),
+        h('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
+        h('div', { class: 'sheet-header' },
+            h('div', {}, h('div', { class: 'eyebrow', text: isToday(d.idx) ? 'Today' : dayName(d.idx) }), h('h2', { class: 'title', text: editing ? 'Edit food' : 'Add food' })),
+            h('button', { type: 'button', class: 'icon-btn btn-close', 'aria-label': 'Close', onclick: closeFoodSheet }, icon('i-close'))),
+        h('div', { class: 'sheet-body' },
+            editing ? null : h('div', { class: 'input-group' },
+                h('label', { class: 'label', for: 'foodText', text: 'What did you have?' }),
+                h('div', { class: 'food-input' },
+                    h('input', { id: 'foodText', type: 'text', placeholder: 'e.g. 2 slices of pizza and a coffee', autocomplete: 'off', enterkeyhint: 'done',
+                        onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); addFoodFromText(); } } }),
+                    h('button', { type: 'button', class: 'btn btn-secondary', onclick: addFoodFromText }, 'Add'))),
+            d.busy ? h('p', { class: 'sheet-hint' }, h('span', { class: 'job-bar-spinner', 'aria-hidden': 'true' }), ' ', d.busy) : null,
+            d.note ? h('p', { class: 'form-error', role: 'alert', text: d.note }) : null,
+            d.items.length ? h('div', { class: 'food-rows' }, d.items.map(row)) : null,
+            editing ? null : h('div', { class: 'input-group' },
+                h('label', { class: 'label', for: 'foodSearch', text: 'Search foods' }),
+                h('input', { id: 'foodSearch', type: 'search', placeholder: 'e.g. banana, yogurt, cola', value: d.search || '', autocomplete: 'off',
+                    oninput: e => { d.search = e.target.value; const pos = e.target.selectionStart; renderFoodSheet(); const el = $('foodSearch'); el.focus(); el.setSelectionRange(pos, pos); } }),
+                results.length ? h('div', { class: 'food-results' }, results.map(it => h('button', { type: 'button', class: 'food-result', onclick: () => { d.items.push(it); d.search = ''; renderFoodSheet(); } },
+                    h('span', { text: it.name }), h('span', { class: 'num', text: `${formatCalories(it.nutrition.calories)} kcal · 1 ${it.unit}` })))) : null),
+            editing ? null : chips(foodLog.favorites, 'Favorites'),
+            editing ? null : chips(foodLog.recents.filter(r => !NourishLog.isFavorite(foodLog, r)), 'Recent'),
+            editing ? null : h('div', { class: 'input-group' },
+                h('div', { class: 'label', text: 'Packaged food' }),
+                h('div', { class: 'food-barcode' },
+                    h('label', { class: 'btn btn-secondary' }, icon('i-image'), 'Photo of the barcode',
+                        h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: e => { const f = e.target.files && e.target.files[0]; if (f) scanBarcode(f); e.target.value = ''; } })),
+                    h('input', { id: 'foodBarcode', type: 'text', inputmode: 'numeric', placeholder: 'or type the barcode number', autocomplete: 'off',
+                        onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); lookupBarcode(e.target.value); } } })),
+                h('p', { class: 'sheet-hint', text: 'Barcodes are looked up in Open Food Facts, a free food database.' })),
+            h('p', { class: 'sheet-hint', text: 'Calories are worked out from USDA food data and typical portions, so they’re estimates. Change the amount if yours was bigger or smaller.' }),
+            h('div', { class: 'food-actions' },
+                editing ? h('button', { type: 'button', class: 'btn btn-secondary danger', onclick: () => { NourishLog.remove(foodLog, logKey(d.idx), d.editId); changed('log'); closeFoodSheet(); updateTodayScreen(); showToast('Removed', false); } }, icon('i-trash'), 'Delete') : null,
+                h('button', { type: 'button', class: 'btn btn-primary', id: 'foodSave', disabled: !d.items.length, onclick: saveFood },
+                    icon('i-check'), editing ? 'Save' : d.items.length ? `Add ${d.items.length > 1 ? d.items.length + ' items' : ''} · ` : 'Add', h('span', { class: 'num', id: 'foodTotal', text: d.items.length ? `${formatCalories(total)} kcal` : '' })))));
+}
+function updateFoodTotal() {
+    const el = $('foodTotal');
+    if (el && foodDraft) el.textContent = `${formatCalories(foodDraft.items.reduce((s, x) => s + (x.nutrition.calories || 0), 0))} kcal`;
+}
+function saveFood() {
+    const d = foodDraft;
+    if (!d || !d.items.length) return;
+    const key = logKey(d.idx);
+    if (d.editId) NourishLog.update(foodLog, key, d.editId, d.items[0]);
+    else d.items.forEach(it => NourishLog.add(foodLog, key, Object.assign({}, it, { needsCalories: undefined })));
+    changed('log');
+    const n = d.items.length;
+    closeFoodSheet();
+    updateTodayScreen();
+    showToast(d.editId ? 'Saved' : `Added ${n} item${n > 1 ? 's' : ''}`, false);
 }
 
 // === PLAN SCREEN ===
@@ -2089,7 +2398,13 @@ function updatePlanScreen() {
                 h('span', { class: `dot art-${t}` }, icon('i-plus')),
                 h('span', { class: 'plan-meal-body' },
                     h('span', { class: 'plan-meal-type', text: MEAL_LABELS[t] }),
-                    h('span', { class: 'plan-meal-name', text: 'Add a recipe from a link' })))))));
+                    h('span', { class: 'plan-meal-name', text: 'Add a recipe from a link' }))))
+            .concat((day.snacks || []).map((m, i) => h('button', { type: 'button', class: 'plan-meal', 'data-meal-type': 'snack', onclick: () => openRecipeSheet(`snack-${i + 1}`, m, idx) },
+                h('span', { class: 'dot art-snack' }, icon('i-leaf')),
+                h('span', { class: 'plan-meal-body' },
+                    h('span', { class: 'plan-meal-type', text: 'Snack' }),
+                    h('span', { class: 'plan-meal-name', text: m.name })),
+                h('span', { class: 'plan-meal-meta', text: on('show_nutrition') ? `${formatCalories(m.nutrition && m.nutrition.calories)} kcal` : formatMinutes(m.time_minutes) })))))));
 }
 
 // === GROCERY SCREEN ===
@@ -2103,7 +2418,8 @@ const GROCERY_ORDER = NourishGrocery.CATEGORIES.map(c => c[0]).concat(['Other'])
 
 function groceryItems() {
     const items = {};
-    NourishGrocery.buildList(daysData, MEAL_TYPES, unitSystem()).forEach(row => {
+    const withSnacks = daysData.map(d => Object.assign({}, d, Object.fromEntries((d.snacks || []).map((m, i) => [`snack-${i + 1}`, m]))));
+    NourishGrocery.buildList(withSnacks, MEAL_TYPES.concat(['snack-1', 'snack-2', 'snack-3']), unitSystem()).forEach(row => {
         if (!items[row.category]) items[row.category] = [];
         items[row.category].push(row);
     });
@@ -2339,8 +2655,13 @@ function safeSource(m) {
 function normalizePlan(data, strict = true) {
     const days = (data && Array.isArray(data.days) ? data.days : Array.isArray(data) ? data : [])
         .filter(d => d && typeof d === 'object')
-        .map(d => Object.fromEntries(MEAL_TYPES.map(t => [t, normalizeMeal(d[t])])))
-        .filter(d => MEAL_TYPES.some(t => d[t]))
+        .map(d => {
+            const out = Object.fromEntries(MEAL_TYPES.map(t => [t, normalizeMeal(d[t])]));
+            const snacks = (Array.isArray(d.snacks) ? d.snacks : []).map(normalizeMeal).filter(Boolean).slice(0, 3);
+            if (snacks.length) out.snacks = snacks;
+            return out;
+        })
+        .filter(d => MEAL_TYPES.some(t => d[t]) || (d.snacks && d.snacks.length))
         .slice(0, 7);
     if (strict && !days.length) throw new Error("The response didn't contain any meals. Try again, or try another model.");
     return days;
@@ -2349,6 +2670,15 @@ function normalizePlan(data, strict = true) {
 function applyPlan(raw, { navigate = true } = {}) {
     reportCaps = true;
     try { daysData = normalizePlan(raw); } finally { reportCaps = false; }
+    // Snacks (Profile → Meals each day): plans the AI wrote get them here too.
+    if (NourishPlanner.snacksOf(settings)) {
+        const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
+        daysData.forEach((d, i) => {
+            if (d.snacks && d.snacks.length) return;
+            NourishPlanner.addSnacks(d, settings, i, servingsWanted(), exclude);
+            if (d.snacks) d.snacks = d.snacks.map(normalizeMeal).filter(Boolean);
+        });
+    }
     selectedDay = todayIndex();
     grocery.checked = [];
     changed('plan');

@@ -65,7 +65,23 @@ public class MainActivity extends Activity implements NativeBridge.Host {
         s.setUserAgentString(s.getUserAgentString() + " NourishApp/" + appVersion() + " (Android)");
 
         bridge = new NativeBridge(this, web, this);
-        web.setWebChromeClient(new WebChromeClient());  // enables alert()/confirm() dialogs
+        // alert()/confirm() dialogs, and the system picker for <input type="file"> (recipe screenshots,
+        // barcode photos).
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, android.webkit.ValueCallback<android.net.Uri[]> callback, FileChooserParams params) {
+                if (filePicked != null) filePicked.onReceiveValue(null);
+                filePicked = callback;
+                try {
+                    startActivityForResult(params.createIntent(), PICK_PAGE_FILE);
+                } catch (Exception e) {
+                    filePicked = null;
+                    callback.onReceiveValue(null);
+                    return false;
+                }
+                return true;
+            }
+        });
         web.setWebViewClient(new Client());
         web.addJavascriptInterface(bridge, "NourishAndroid");
 
@@ -125,6 +141,8 @@ public class MainActivity extends Activity implements NativeBridge.Host {
     }
 
     private static final int PICK_LIBRARY_FILES = 41;
+    private static final int PICK_PAGE_FILE = 42;
+    private android.webkit.ValueCallback<android.net.Uri[]> filePicked;
     private java.util.function.IntConsumer libraryPicked;
 
     @Override
@@ -150,6 +168,11 @@ public class MainActivity extends Activity implements NativeBridge.Host {
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_PAGE_FILE) {
+            if (filePicked != null) filePicked.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+            filePicked = null;
+            return;
+        }
         if (requestCode != PICK_LIBRARY_FILES || libraryPicked == null) return;
         final java.util.function.IntConsumer done = libraryPicked;
         libraryPicked = null;

@@ -45,7 +45,7 @@ SPOONACULAR_URL = os.getenv("SPOONACULAR_URL", "https://api.spoonacular.com").rs
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", Path(__file__).resolve().parent.parent))
 # Only these files are served. Never mount the repo root as a static directory:
 # it would expose backend/.env and .git to anyone on the network.
-FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "styles.css", "font-fraunces.woff2", "font-figtree.woff2",
+FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "foodlog.js", "styles.css", "font-fraunces.woff2", "font-figtree.woff2",
                   "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"}
 
 @asynccontextmanager

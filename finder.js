@@ -236,7 +236,8 @@
     async function findRecipes(o) {
         const ctx = makeContext(o);
         const days = o.days || 7;
-        const want = { breakfast: days + 6, lunch: days + 6, dinner: days + 6 };
+        const mealsOn = PL.mealsOf(o.settings || {});
+        const want = Object.fromEntries(['breakfast', 'lunch', 'dinner'].map(m => [m, mealsOn.indexOf(m) >= 0 ? days + 6 : 0]));
         const limits = Object.assign({}, LIMITS, o.limits || {});
         const enabled = o.enabled || (() => true);
         const found = [];
@@ -302,6 +303,7 @@
         let si = 0;
         for (let round = 0; round < 8 && tasks.length < limits.searches * 2; round++) {
             ['breakfast', 'lunch', 'dinner', 'dinner'].forEach((meal, k) => {
+                if (!want[meal]) return;
                 const q = queries[meal][(round * 2 + (k === 3 ? 1 : 0)) % queries[meal].length];
                 if (sites.length) tasks.push({ meal, q, site: sites[si++ % sites.length] });
             });
@@ -383,7 +385,8 @@
             if (r.source_id === 'themealdb') p += 0.3;   // no nutrition of its own, and less tested
             return p;
         };
-        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [] });
+        const exclude = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
+        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude });
         plan.days.forEach(d => PL.MEALS.forEach(m => { if (d[m]) { delete d[m]._fit; delete d[m].sameAs; delete d[m].preferred; } }));
         return Object.assign(plan, { stats, pools });
     }

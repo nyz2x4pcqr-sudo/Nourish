@@ -9,6 +9,7 @@
 // Pure functions (no network): the sources (sources.js) find recipes, this file plans with them.
 (function (root) {
     'use strict';
+    const MEALS = ['breakfast', 'lunch', 'dinner'];
 
     const req = n => (typeof require === 'function' ? require(n) : null);
     const N = root.NourishNutrition || req('./nutrition.js');
@@ -213,14 +214,27 @@
 
     // === CALORIE SPLIT ===
     const SPLITS = { dinner: [25, 30, 45], even: [33, 33, 34], breakfast: [40, 30, 30] };
+    const SNACK_SHARE = 0.1;   // each snack: about a tenth of the day
+    // Which main meals a day has (Settings: "Meals each day"); all three unless some are switched off.
+    function mealsOf(settings) {
+        const list = String((settings && settings.meal_slots) || 'breakfast,lunch,dinner').split(',').map(x => x.trim()).filter(m => MEALS.indexOf(m) >= 0);
+        return list.length ? MEALS.filter(m => list.indexOf(m) >= 0) : MEALS.slice();
+    }
+    function snacksOf(settings) { return Math.max(0, Math.min(3, Math.round(Number(settings && settings.snacks_per_day) || 0))); }
+    // Shares of the day's calories for breakfast, lunch and dinner (0 for a meal switched off), after
+    // any snacks take theirs.
     function splitOf(settings) {
         const s = settings || {};
+        let v = (SPLITS[s.calorie_split] || SPLITS.dinner).slice();
         if (s.calorie_split === 'custom') {
-            const v = [s.split_breakfast, s.split_lunch, s.split_dinner].map(Number);
-            const sum = v.reduce((a, b) => a + (b > 0 ? b : 0), 0);
-            if (sum > 0 && v.every(x => x >= 5)) return v.map(x => x / sum);
+            const c = [s.split_breakfast, s.split_lunch, s.split_dinner].map(Number);
+            if (c.reduce((a, b) => a + (b > 0 ? b : 0), 0) > 0 && c.every(x => x >= 5)) v = c;
         }
-        return (SPLITS[s.calorie_split] || SPLITS.dinner).map(x => x / 100);
+        const on = mealsOf(s);
+        v = v.map((x, i) => (on.indexOf(MEALS[i]) >= 0 ? x : 0));
+        const sum = v.reduce((a, b) => a + b, 0) || 1;
+        const mains = 1 - snacksOf(s) * SNACK_SHARE;
+        return v.map(x => x / sum * mains);
     }
     function targetsOf(settings) {
         const kcal = Number(settings.calorie_target) || 2000;
@@ -228,7 +242,6 @@
     }
 
     // === PLANNING ===
-    const MEALS = ['breakfast', 'lunch', 'dinner'];
     // How well a recipe fits a slot: lower is better. Infinity = can't be used.
     function slotCost(r, kcalTarget, ctx) {
         const n = r.nutrition;
@@ -255,9 +268,10 @@
     // Picks recipes for each day and sizes the portions. pools: { breakfast: [recipes], … } (already
     // checked: allowed, seasoned, nutrition settled). Returns { days: [{ breakfast, lunch, dinner }],
     // missing: [{ day, meal, kcal }], report: [{ day, kcal, protein, carbs, fat }] }.
-    function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [] }) {
+    function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [], exclude }) {
         const targets = targetsOf(settings);
         const split = splitOf(settings);
+        const on = m => split[MEALS.indexOf(m)] > 0;
         const used = new Set(already.map(n => normName(n)));
         const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, cuisineCount: {} };
         const out = [];
@@ -267,6 +281,7 @@
             const top = {};
             MEALS.forEach((m, i) => {
                 const kcal = targets.kcal * split[i];
+                if (!on(m)) { top[m] = []; return; }
                 top[m] = (pools[m] || []).filter(r => !used.has(normName(r.name)) && !(r.sameAs && r.sameAs.some(x => used.has(x))))
                     .map(r => ({ r, cost: slotCost(r, kcal, ctx) })).filter(x => isFinite(x.cost))
                     .sort((a, b) => a.cost - b.cost).slice(0, 8);
@@ -283,7 +298,7 @@
                 const vegs = rs.map(mainVeg).filter(Boolean);
                 if (new Set(vegs).size < vegs.length) return;
                 const cuis = rs.map(cuisineOf).filter(c => c !== 'other');
-                let cost = pick.reduce((s, x) => s + (x ? x.cost : 50), 0);
+                let cost = pick.reduce((s, x, i) => s + (x ? x.cost : on(MEALS[i]) ? 50 : 0), 0);
                 // The whole day's protein and fat once each meal is sized to its share of calories.
                 let p = 0, f = 0, share = 0;
                 pick.forEach((x, i) => { if (!x) return; const k = targets.kcal * split[i] / x.r.nutrition.calories; p += x.r.nutrition.protein_g * k; f += x.r.nutrition.fat_g * k; share += split[i]; });
@@ -297,6 +312,7 @@
             const day = {};
             MEALS.forEach((m, i) => {
                 const chosen = best && best.pick[i];
+                if (!on(m)) return;
                 if (!chosen) { missing.push({ day: d, meal: m, kcal: Math.round(targets.kcal * split[i]) }); return; }
                 const r = JSON.parse(JSON.stringify(chosen.r));
                 const kcal = targets.kcal * split[i];
@@ -306,18 +322,20 @@
                 const c = cuisineOf(r);
                 ctx.cuisineCount[c] = (ctx.cuisineCount[c] || 0) + 1;
             });
-            fineTune(day, targets.kcal, people);
+            addSnacks(day, settings, d, people, exclude);
+            fineTune(day, targets.kcal, people, MEALS.filter(on).length);
             out.push(day);
             report.push(dayTotals(day));
         }
         return { days: out, missing, report, targets, split };
     }
     // Rounding amounts moves calories a little: nudge portions until the day is within 5%.
-    function fineTune(day, kcal, people) {
+    // need: how many main meals a complete day has (days with a gap aren't nudged).
+    function fineTune(day, kcal, people, need = 3) {
         for (let pass = 0; pass < 4; pass++) {
             const t = dayTotals(day).kcal;
             const meals = MEALS.filter(m => day[m] && day[m].nutrition && day[m].nutrition.calories > 0);
-            if (!t || meals.length < 3 || Math.abs(t - kcal) / kcal <= 0.035) return;
+            if (!t || !meals.length || meals.length < need || Math.abs(t - kcal) / kcal <= 0.035) return;
             // The biggest meal that can still move in the needed direction (portions stay 0.5×–2×).
             const portion = r => (r.scaled ? r.scaled.portion : 1);
             const up = kcal > t;
@@ -330,6 +348,20 @@
             day[big] = Object.assign(scaleRecipe(base, f, people), { scaled: r.scaled ? Object.assign({}, r.scaled, { portion: Math.round(portion(r) * f * 100) / 100 }) : { from_servings: people, portion: Math.round(f * 100) / 100 } });
         }
     }
+    // One meal made about `kcal` lighter: oil and sugar first, then a smaller portion (never below
+    // 60% of what it was). Seasoning stays.
+    function lighten(meal, kcal, people) {
+        const r = JSON.parse(JSON.stringify(meal));
+        const n = r.nutrition && r.nutrition.calories;
+        if (!n || !(kcal > 0)) return r;
+        trimAndRecount(r, kcal);
+        const want = Math.max(n * 0.6, n - kcal);
+        const f = Math.min(1, want / r.nutrition.calories);
+        const prev = meal.scaled ? meal.scaled.portion : 1;
+        const out = scaleRecipe(Object.assign({}, r, { servings: people || r.servings || 1 }), f, people || r.servings || 1);
+        out.scaled = { from_servings: (meal.scaled && meal.scaled.from_servings) || r.servings || 1, portion: Math.round(prev * f * 100) / 100 };
+        return out;
+    }
     // Sizes the portions of a day that was made another way (by the AI, or edited) so it lands on the
     // calorie target with the chosen split: oil and sugar are cut before portions, never seasoning.
     function fitDay(day, settings, people) {
@@ -338,7 +370,7 @@
         const out = Object.assign({}, day);
         MEALS.forEach((m, i) => {
             const r = out[m];
-            if (!r || !r.nutrition || !(r.nutrition.calories > 0) || !(r.ingredients || []).length) return;
+            if (!r || !r.nutrition || !(r.nutrition.calories > 0) || !(r.ingredients || []).length || !(split[i] > 0)) return;
             const kcal = targets.kcal * split[i];
             let copy = JSON.parse(JSON.stringify(r));
             if (kcal / copy.nutrition.calories < 0.85) trimAndRecount(copy, copy.nutrition.calories - kcal / 0.85);
@@ -346,13 +378,56 @@
             if (Math.abs(f - 1) <= 0.05 && !copy.trimmed) return;
             out[m] = scaleRecipe(copy, Math.max(0.5, Math.min(2, f)), people || Number(copy.servings) || 1);
         });
-        fineTune(out, targets.kcal, people || 1);
+        fineTune(out, targets.kcal, people || 1, mealsOf(settings).length);
         return out;
     }
     function dayTotals(day) {
         const t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-        MEALS.forEach(m => { const n = day[m] && day[m].nutrition; if (n) { t.kcal += n.calories; t.protein += n.protein_g; t.carbs += n.carbs_g; t.fat += n.fat_g; } });
+        const add = r => { const n = r && r.nutrition; if (n) { t.kcal += n.calories; t.protein += n.protein_g; t.carbs += n.carbs_g; t.fat += n.fat_g; } };
+        MEALS.forEach(m => add(day[m]));
+        (Array.isArray(day.snacks) ? day.snacks : []).forEach(add);
         return t;
+    }
+
+    // === SNACKS ===
+    // Simple snacks, worked out from their ingredients like everything else, sized to a tenth of the day.
+    const SNACKS = [
+        ['Greek Yogurt with Berries', ['3/4 cup greek yogurt', '1/2 cup berries', '1 tsp honey'], 'Spoon the yogurt into a bowl and top with the berries and honey.'],
+        ['Apple with Peanut Butter', ['1 apple', '1 tbsp peanut butter'], 'Slice the apple and dip the slices in the peanut butter.'],
+        ['Hummus and Carrot Sticks', ['1/4 cup hummus', '2 carrots'], 'Cut the carrots into sticks and serve with the hummus.'],
+        ['A Handful of Almonds', ['1 oz almonds'], 'Measure out the almonds.'],
+        ['Cottage Cheese and Pineapple', ['1/2 cup cottage cheese', '1/2 cup pineapple'], 'Top the cottage cheese with the pineapple.'],
+        ['Hard-Boiled Eggs', ['2 eggs', '1 pinch salt', '1 pinch black pepper'], 'Boil the eggs for 10 minutes, cool in cold water, peel and season.'],
+        ['Salted Edamame', ['1 cup edamame', '1/4 tsp salt'], 'Steam or microwave the edamame for 3 minutes and sprinkle with salt.'],
+        ['Banana', ['1 banana'], 'Peel and enjoy.'],
+        ['Cheddar and Crackers', ['1 oz cheddar', '1 oz crackers'], 'Slice the cheese and serve with the crackers.'],
+        ['Orange and Pistachios', ['1 orange', '1/2 oz pistachios'], 'Peel the orange and serve with the pistachios.'],
+        ['Rice Cakes with Almond Butter', ['2 rice cakes', '1 tbsp almond butter'], 'Spread the almond butter on the rice cakes.'],
+        ['Trail Mix', ['1/4 cup trail mix'], 'Measure out the trail mix.'],
+    ];
+    function snackRecipe([name, ingredients, step]) {
+        const r = { name, servings: 1, time_minutes: 5, ingredients: ingredients.slice(), steps: [step], snack: true };
+        r.nutrition = N.calculate(r.ingredients, 1).nutrition;
+        r.nutrition_basis = 'calculated';
+        return r;
+    }
+    // Adds the day's snacks (Settings: snacks per day), different each day of the week and never
+    // something the person avoids.
+    function addSnacks(day, settings, d, people = 1, exclude) {
+        const n = snacksOf(settings);
+        delete day.snacks;
+        if (!n) return day;
+        const kcal = targetsOf(settings).kcal * SNACK_SHARE;
+        const ok = SNACKS.map(snackRecipe).filter(r => r.nutrition.calories > 0 && !(exclude && exclude(r)));
+        if (!ok.length) return day;
+        const snacks = [];
+        for (let i = 0; i < n; i++) {
+            const r = ok[(d * n + i) % ok.length];
+            if (snacks.some(x => x.name === r.name)) continue;
+            snacks.push(scaleRecipe(r, Math.max(0.5, Math.min(2, kcal / r.nutrition.calories)), people));
+        }
+        day.snacks = snacks;
+        return day;
     }
     function normName(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\b(the|best|easy|healthy|quick|recipe|my|simple|homemade)\b/g, '').replace(/\s+/g, ' ').trim(); }
 
@@ -386,7 +461,7 @@
         }).join('');
     }
 
-    const api = { fitDay, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
+    const api = { fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

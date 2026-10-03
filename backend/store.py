@@ -12,7 +12,7 @@ import threading
 import time
 from pathlib import Path
 
-SECTIONS = {"settings", "prefs", "plan", "grocery", "chat", "cookbook"}
+SECTIONS = {"settings", "prefs", "plan", "grocery", "chat", "cookbook", "log"}
 SECRET_FIELDS = {"claude_api_key", "openai_api_key", "spoonacular_api_key", "brave_api_key"}
 MAX_SECTION_BYTES = 2 * 1024 * 1024
 DATA_FILE = Path(os.getenv("NOURISH_DATA_FILE", "nourish-data.json"))

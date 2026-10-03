@@ -47,7 +47,7 @@
         variants.push(variants[2].split(' ').map(singular).join(' '));
         for (const [phrase, key] of index()) {
             const re = new RegExp('(^|[^a-z])' + phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z])');
-            if (variants.some(v => re.test(v))) return { key, food: FOODS[key] };
+            if (variants.some(v => re.test(v))) return { key, food: FOODS[key], phrase };
         }
         return null;
     }

@@ -21,4 +21,16 @@ enum TextReader {
         let lines = found.compactMap { $0.topCandidates(1).first?.string }
         return ["text": lines.joined(separator: "\n"), "lines": lines.count, "width": cg.width, "height": cg.height]
     }
+
+    /// The number on a product barcode (EAN, UPC) in a photo, read on the phone (for the food log).
+    static func barcode(base64: String) throws -> [String: Any] {
+        guard let data = Data(base64Encoded: base64), let image = UIImage(data: data), let cg = image.cgImage else {
+            throw NSError(domain: "Nourish", code: 1, userInfo: [NSLocalizedDescriptionKey: "That picture couldn't be opened."])
+        }
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.ean13, .ean8, .upce, .code128, .itf14]
+        try VNImageRequestHandler(cgImage: cg, orientation: .up, options: [:]).perform([request])
+        let code = (request.results ?? []).compactMap { $0.payloadStringValue }.first { !$0.isEmpty }
+        return ["code": code ?? ""]
+    }
 }

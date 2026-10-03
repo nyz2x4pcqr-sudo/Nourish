@@ -23,6 +23,7 @@ on:
       - "sources.js"
       - "finder.js"
       - "library.js"
+      - "foodlog.js"
       - "font-*.woff2"
       - "icon-*.png"
       - "apple-touch-icon.png"

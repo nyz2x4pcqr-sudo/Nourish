@@ -127,6 +127,7 @@ final class NativeBridge: NSObject {
             let result = try TextReader.read(base64: a["image"] as? String ?? "")
             log("Read \(result["lines"] ?? 0) lines of text from a \(result["width"] ?? 0)×\(result["height"] ?? 0) picture in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
             return result
+        case "barcode": return try TextReader.barcode(base64: a["image"] as? String ?? "")
         case "library":
             switch a["op"] as? String ?? "" {
             case "list": return RecipeLibrary.list()

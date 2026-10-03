@@ -4,7 +4,7 @@
 set -eux
 cd "$(dirname "$0")/../ios"
 rm -rf webapp && mkdir -p webapp
-for f in index.html styles.css app.js ondevice.js json-repair.js grocery.js units.js recipes.js importer.js nutrition-data.js nutrition.js prefs.js planner.js sources.js finder.js library.js font-fraunces.woff2 font-figtree.woff2 manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png; do
+for f in index.html styles.css app.js ondevice.js json-repair.js grocery.js units.js recipes.js importer.js nutrition-data.js nutrition.js prefs.js planner.js sources.js finder.js library.js foodlog.js font-fraunces.woff2 font-figtree.woff2 manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png; do
   cp "../../$f" webapp/
 done
 LLAMA_COMMIT=$(grep -oE 'set\(LLAMA_COMMIT [0-9a-f]+' ../android/app/src/main/cpp/CMakeLists.txt | awk '{print $2}')

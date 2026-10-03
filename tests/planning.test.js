@@ -154,3 +154,21 @@ test('breads, snack bars and sauces are not meals', () => {
         assert.deepEqual([f.breakfast, f.lunch, f.dinner], [false, false, false], name);
     });
 });
+
+test('optional snacks fit inside the day, and meals can be switched off', () => {
+    const res = PL.planWeek({ pools, settings: { calorie_target: 1800, protein_target: 110, snacks_per_day: '2' }, days: 3, people: 1 });
+    res.days.forEach((day, i) => {
+        assert.equal(day.snacks.length, 2);
+        assert.notEqual(day.snacks[0].name, day.snacks[1].name);
+        near(PL.dayTotals(day).kcal, 1800, 0.05);
+        day.snacks.forEach(s => near(s.nutrition.calories, 180, 0.35));
+    });
+    assert.notEqual(res.days[0].snacks[0].name, res.days[1].snacks[0].name, 'the same snack every day');
+    const noNuts = PL.planWeek({ pools, settings: { calorie_target: 1800, snacks_per_day: '3' }, days: 4, exclude: require('../prefs.js').excluder({ avoid: 'nuts', allergies: 'peanuts', diet: '' }) });
+    noNuts.days.forEach(d => d.snacks.forEach(s => assert.ok(!/almond|peanut|pistachio|trail mix/i.test(s.name + s.ingredients.join(' ')), s.name)));
+    const twoMeals = PL.planWeek({ pools, settings: { calorie_target: 1600, meal_slots: 'lunch,dinner' }, days: 2 });
+    twoMeals.days.forEach(day => { assert.equal(day.breakfast, undefined); near(PL.dayTotals(day).kcal, 1600, 0.05); });
+    assert.ok(!twoMeals.missing.some(m => m.meal === 'breakfast'));
+    assert.deepEqual(PL.splitOf({ meal_slots: 'lunch,dinner' }).map(x => Math.round(x * 100)), [0, 40, 60]);
+    assert.deepEqual(PL.splitOf({ snacks_per_day: '1' }).map(x => Math.round(x * 1000)), [225, 270, 405]);
+});

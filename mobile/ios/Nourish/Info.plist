@@ -37,6 +37,10 @@
     <!-- The recipe library folders (Documents) show in the Files app: On My iPhone → Nourish. -->
     <key>UIFileSharingEnabled</key><true/>
     <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+    <key>NSCameraUsageDescription</key>
+    <string>Nourish uses the camera when you take a photo of a barcode or a recipe. Photos stay on your iPhone.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Nourish reads a barcode or recipe from a photo you choose. Photos stay on your iPhone.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Nourish looks for the Nourish app running on your PC on this Wi-Fi network.</string>
 </dict>

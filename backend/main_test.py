@@ -85,7 +85,7 @@ class ApiTest(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("<title>", r.text)
-        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js"):
+        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "foodlog.js"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 200, f)
         for f in (".env", "README.md", "main.py", "nourish.log", "..%2Fbackend%2F.env"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 404, f)
@@ -485,6 +485,12 @@ class StateTest(unittest.TestCase):
         self.assertEqual(self.put("cookbook", book).status_code, 200)
         main.store.reset_for_tests(self.path)  # like restarting the server
         self.assertEqual(self.client.get("/api/state").json()["cookbook"]["value"], book)
+
+    def test_food_log_section_is_kept(self):
+        log = {"days": {"2026-10-03": {"items": [{"name": "Banana", "nutrition": {"calories": 105}}], "meals": {"lunch": "eaten"}}}, "recents": [], "favorites": []}
+        self.assertEqual(self.put("log", log).status_code, 200)
+        main.store.reset_for_tests(self.path)  # like restarting the server
+        self.assertEqual(self.client.get("/api/state").json()["log"]["value"], log)
 
     def test_rejects_bad_input(self):
         self.assertEqual(self.put("passwords", {}).status_code, 400)
