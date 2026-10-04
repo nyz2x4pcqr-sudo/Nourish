@@ -886,6 +886,12 @@
     // Finds recipes and plans the week. Returns { days, missing, report, stats, targets }.
     async function planFromSources(o) {
         const { pools, stats, adaptable } = await findRecipes(o);
+        // Luxury or hard-to-find ingredients (wagyu, caviar, truffle…) are left out unless the budget
+        // is "No limit"; on "Budget", pricier ones too (Settings → Advanced → Budget).
+        const budget = (o.settings && o.settings.budget) || 'normal';
+        const offBudget = [];
+        PL.MEALS.forEach(m => { pools[m] = (pools[m] || []).filter(r => { const why = PL.budgetProblem(r, budget); if (why && offBudget.length < 30) offBudget.push(`${r.name}: ${why}`); return !why; }); });
+        if (offBudget.length) stats.budget = offBudget;
         const sourcePenalty = r => sourceCost(r, o);
         const exclude = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
         const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal, builtin_mode: 'backup' }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste, favorites: o.favorites, snackExtras: o.snackExtras ? o.snackExtras() : [] });

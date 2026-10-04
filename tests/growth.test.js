@@ -43,8 +43,8 @@ test('the background refresh reads the next page of results when the first is al
 });
 
 test('Nourish recipes are a backup: with enough web recipes, a plan uses none; "Mix in" uses some; "Off" none at all', () => {
-    // A pool of web recipes for every meal (from the built-in set, relabelled as one website each).
-    const web = m => B.forMeal(m).map((r, i) => Object.assign(JSON.parse(JSON.stringify(r)), { source_id: `site${i % 6}`, builtin: undefined, name: r.name }));
+    // A pool of web recipes for every meal (from the built-in set, relabelled as eight websites: at most 3 meals a week come from any one source, so 8 sites cover 21 meals).
+    const web = m => B.forMeal(m).map((r, i) => Object.assign(JSON.parse(JSON.stringify(r)), { source_id: `site${i % 8}`, builtin: undefined, name: r.name }));
     const own = m => B.forMeal(m).slice(0, 30).map(r => Object.assign(JSON.parse(JSON.stringify(r)), { name: 'Nourish ' + r.name }));
     const pools = Object.fromEntries(['breakfast', 'lunch', 'dinner'].map(m => [m, web(m).concat(own(m))]));
     const count = mode => PL.planWeek({ pools, settings: { calorie_target: 1800, protein_target: 110, builtin_mode: mode }, days: 7 })

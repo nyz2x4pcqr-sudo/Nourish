@@ -359,7 +359,7 @@ probe "localStorage.removeItem('nourish_plan_progress'); const t0 = Date.now();
   return JSON.stringify({ finished, seconds: Math.round((Date.now() - t0) / 1000), days: daysData.map(d => ({ kcal: Math.round(NourishPlanner.dayTotals(d).kcal),
     meals: MEAL_TYPES.map(t => d[t] ? d[t].name + ' (' + (d[t].builtin ? 'Nourish recipe' : d[t].source_name || (d[t].library_path ? 'library' : 'AI')) + ')' : '-') })), log: lines,
     share: (() => { const all = daysData.flatMap(d => MEAL_TYPES.map(t => d[t]).filter(Boolean)); return { meals: all.length, builtin: all.filter(m => m.builtin).length, web: all.filter(m => !m.builtin && /^https?:/.test(m.source_url || '')).length }; })(),
-    library: libraryStats() });" 560
+    split: planSourceSplit(daysData), library: libraryStats() });" 560
 python3 - "$PROBE" <<'PY' || echo "(timing step skipped: $?)"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
@@ -368,6 +368,8 @@ print("\n".join(v["log"]))
 for i, d in enumerate(v["days"]): print(f"Day {i + 1}: {d['kcal']} kcal |", " | ".join(d["meals"]))
 print(f"AUTOMATIC 7-DAY PLAN ON THE SIMULATOR: {v['seconds']} s" + ("" if v["finished"] else " (stopped at the 8-minute limit; see the 'Found ... recipes in ... s' line for the search time)"))
 sh = v["share"]; print(f"SHARE OF THE PLAN: {sh['web']} of {sh['meals']} meals from recipe websites, {sh['builtin']} Nourish recipes, {sh['meals'] - sh['web'] - sh['builtin']} other (library/AI)")
+sp = v["split"]; print(f"SPLIT: web {sp['web']}, books {sp['books']}, Nourish recipes {sp['builtin']}, AI {sp['ai']} | per source: {sp['perSource']}")
+print("MOST FROM ONE SOURCE:", max(sp["perSource"].values()) if sp["perSource"] else 0)
 lib = v["library"]; print(f"WEB LIBRARY AFTER ONE PLAN: {lib['total']} recipes (breakfast {lib['perMeal']['breakfast']}, lunch {lib['perMeal']['lunch']}, dinner {lib['perMeal']['dinner']})")
 PY
 

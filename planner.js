@@ -522,6 +522,45 @@
 
     // === PLANNING ===
     // How well a recipe fits a slot: lower is better. Infinity = can't be used.
+    // === WHERE A RECIPE COMES FROM, WHAT IT COSTS, AND WHETHER IT SUITS THE GOAL ===
+    // One source = one book, one site, or Nourish's own recipes: at most `source_cap` meals a week
+    // from any one of them (Settings → Advanced), so a barbecue book can't fill 5 of 21 meals.
+    function sourceKey(r) {
+        if (!r) return 'other';
+        if (r.from_book) return `book:${r.book_id || r.book || r.source_name || '?'}`;
+        if (r.source_id) return r.source_id;
+        try { return new URL(r.source_url).hostname.replace(/^www\./, ''); } catch (e) { return r.ai ? 'ai' : 'other'; }
+    }
+    // Luxury or hard-to-find ingredients: left out unless the budget is "No limit".
+    const LUXURY = /\b(wagyu|kobe|a5\b|caviar|truffles?(?! (cake|brownies?|balls?))|truffle oil|foie gras|beluga|osetra|uni\b|sea urchin|abalone|langoustines?|king crab|lobster|iberico|ib[eé]rico|jam[oó]n ib|gold leaf|bluefin|toro|matsutake|morels?|white asparagus|dry[- ]aged)\b/i;
+    // Pricier everyday ingredients: fine on "Normal", avoided when the budget is "Budget".
+    const PRICEY = /\b(rib[- ]?eye|filet mignon|beef tenderloin|fillet steak|sirloin|porterhouse|t-bone|tomahawk|rack of lamb|lamb rack|lamb chops?|scallops?|crab(meat)?|halibut|sea bass|swordfish|tuna steaks?|duck breast|veal|venison|pine nuts|saffron|prosciutto|burrata|pancetta|smoked salmon|salmon fillets?|prawns?|shrimp|macadamia|manchego|gruy[eè]re|parmigiano)\b/i;
+    function budgetProblem(r, budget) {
+        if (budget === 'any') return '';
+        const text = `${r.name || ''} ${(r.ingredients || []).join(' ')}`;
+        const lux = text.match(LUXURY);
+        if (lux) return `a luxury or hard-to-find ingredient (${lux[0].toLowerCase()})`;
+        if (budget === 'budget') { const p = text.match(PRICEY); if (p) return `a pricier ingredient (${p[0].toLowerCase()})`; }
+        return '';
+    }
+    // Very fatty cuts and rich dishes: a poor fit when the goal is to lose weight.
+    const FATTY_CUTS = /\b(rib[- ]?eye|pork belly|short ribs?|brisket|prime rib|tomahawk|wagyu|lamb shoulder|duck confit|confit|chorizo|bacon[- ]wrapped|marbled|foie gras|deep[- ]fried|fried chicken|carnitas|pulled pork|pork shoulder|sausages?|salami|pepperoni|cheeseburger|mac and cheese|alfredo|carbonara)\b/i;
+    const LEAN = /\b(chicken breast|turkey|white fish|cod|haddock|tilapia|pollock|hake|shrimp|prawns?|tofu|tempeh|lentils?|chickpeas?|beans|egg whites?|cottage cheese|greek yogh?urt|seitan)\b/i;
+    // Extra cost of a recipe for the goal: for "Lose weight", leaner and lighter dishes first. A rich
+    // dish that only fits by shrinking its portion a lot is the wrong dish, not a small portion.
+    function goalCost(r, f, goal) {
+        if (goal !== 'Cut') return 0;
+        const n = r.nutrition || {};
+        let c = 0;
+        if (f < 0.85) c += (0.85 - f) * 8;    // a ⅔ portion of a heavy dish costs about 1.5
+        const fatShare = n.calories > 0 ? (Number(n.fat_g) || 0) * 9 / n.calories : 0;
+        if (fatShare > 0.42) c += (fatShare - 0.42) * 6;
+        const text = `${r.name || ''} ${(r.ingredients || []).slice(0, 6).join(' ')}`;
+        if (FATTY_CUTS.test(r.name || '') || FATTY_CUTS.test(text)) c += 1.2;
+        else if (LEAN.test(text)) c -= 0.25;
+        return c;
+    }
+
     function slotCost(r, kcalTarget, ctx) {
         const n = r.nutrition;
         if (!n || !(n.calories > 0)) return Infinity;
@@ -540,6 +579,7 @@
         cost += Math.max(0, (pTarget - p) / pTarget) * 1.5 + Math.max(0, (fat - fTarget) / fTarget) * 1.5;
         cost -= Math.min(2, P.likeScore(r, ctx.likes)) * 0.5;
         if (ctx.goal === 'Cut' && r.healthy) cost -= 0.3;
+        cost += goalCost(r, f, ctx.goal);
         if (r.nutrition_unmatched) cost += 0.2;
         // Highly rated on its own site (with enough ratings to mean something) comes first.
         if (r.rating && r.rating.count >= 5) cost -= Math.max(-0.4, Math.min(0.4, (r.rating.value - 4.2) * 0.5));
@@ -552,7 +592,7 @@
         // library fits about as well.
         if (r.source_id === 'builtin' && ctx.builtinMode === 'backup') cost += 3;
         // A mix of sources: each meal already taken from the same place counts a little against it.
-        if (r.source_id !== 'builtin' || ctx.builtinMode !== 'backup') cost += ((ctx.sourceCount && ctx.sourceCount[r.source_id || 'other']) || 0) * 0.08;
+        if (r.source_id !== 'builtin' || ctx.builtinMode !== 'backup') cost += ((ctx.sourceCount && ctx.sourceCount[sourceKey(r)]) || 0) * 0.15;
         return cost;
     }
 
@@ -575,6 +615,8 @@
         const recent = dishList(already);        // recent plans: avoided
         const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {}, sourceCount: {}, builtinMode: settings.builtin_mode || 'mix' };
         const rejected = {};   // why recipes didn't fit a slot (for the log)
+        const cap = Math.max(1, Number(settings.source_cap) || 3);
+        const overCap = r => (ctx.sourceCount[sourceKey(r)] || 0) >= cap;
         // The real calories of a recipe at each realistic portion (amounts rounded as written), so
         // meals are chosen for how close the day can really get, not for a number on paper.
         const portionKcal = new Map();
@@ -609,6 +651,10 @@
                     .filter(r => !isFav(r) || favUsed < ((favorites && favorites.cap) || 0))
                     .filter(r => { const why = slotProblem(r, m, limits); if (why) rejected[`${m}: ${r.name}`] = why; return !why; })
                     .map(r => ({ r, cost: slotCost(r, kcal, ctx) + slotPenalty(r, m, limits) })).filter(x => isFinite(x.cost));
+                // No source past its weekly share, unless nothing else fits this slot at all.
+                const shared = fits.filter(x => !overCap(x.r));
+                if (shared.length) { fits.filter(x => overCap(x.r)).forEach(x => { rejected[`${m}: ${x.r.name}`] = `already ${cap} meals from ${x.r.book || x.r.source_name || sourceKey(x.r)} this week`; }); fits.length = 0; shared.forEach(x => fits.push(x)); }
+                else fits.forEach(x => { x.cost += 2; });
                 // Recent plans' dishes only when nothing new fits (favourites are always welcome).
                 const fresh = fits.filter(x => isFav(x.r) || !recent.has(x.r.name));
                 top[m] = (fresh.length ? fresh : fits.map(x => ({ r: x.r, cost: x.cost + 1 }))).sort((a, b) => a.cost - b.cost).slice(0, 8);
@@ -641,6 +687,9 @@
                     cost += Math.max(0, (pT * 0.9 - p) / pT) * 4 + Math.max(0, (f - fT * 1.1) / fT) * 4;
                 }
                 if (new Set(cuis).size < cuis.length) cost += 0.6;
+                // Two meals of one day from the same source, or a day that would take it past its share.
+                const keys = rs.map(sourceKey);
+                keys.forEach((k, i) => { if (keys.indexOf(k) !== i && k !== 'builtin') cost += 0.8; if ((ctx.sourceCount[k] || 0) + keys.filter(x => x === k).length > cap && k !== 'builtin') cost += 3; });
                 // How close the day can really get once portions are realistic: 5% off costs about 0.5.
                 const picks = pick.map((x, i) => (x ? { r: x.r, want: targets.kcal * split[i] } : null)).filter(Boolean);
                 const wanted = picks.reduce((t, x) => t + x.want, 0);
@@ -661,7 +710,7 @@
                 if (isFav(r)) favUsed++;
                 const c = cuisineOf(r);
                 ctx.cuisineCount[c] = (ctx.cuisineCount[c] || 0) + 1;
-                ctx.sourceCount[r.source_id || 'other'] = (ctx.sourceCount[r.source_id || 'other'] || 0) + 1;
+                ctx.sourceCount[sourceKey(r)] = (ctx.sourceCount[sourceKey(r)] || 0) + 1;
             });
             addSnacks(day, settings, d, people, exclude, snackExtras);
             const snackKcal = (day.snacks || []).reduce((t, x) => t + x.nutrition.calories, 0);
@@ -918,7 +967,7 @@
         }).join('');
     }
 
-    const api = { stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

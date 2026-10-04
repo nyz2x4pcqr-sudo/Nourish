@@ -128,6 +128,8 @@ const SETTINGS_DEFAULTS = {
 SETTINGS_DEFAULTS.sched_weekend = 'off';
 SETTINGS_DEFAULTS.sched_asked = '';   // 'yes' once the quick questions were answered or skipped
 SETTINGS_DEFAULTS.allow_leftovers = 'off';
+SETTINGS_DEFAULTS.source_cap = 3;            // at most this many meals a week from one book, one site or Nourish's own recipes
+SETTINGS_DEFAULTS.budget = 'normal';         // 'budget' (cheaper ingredients), 'normal' (no luxury ingredients), 'any' (no limit)
 SETTINGS_DEFAULTS.builtin_mode = 'backup';     // Nourish's own recipes: 'backup' (only when no web recipe fits), 'mix' (equal terms), 'off'   // 'on': a dinner can come back as the next day's lunch
 const settings = Object.assign({}, SETTINGS_DEFAULTS);
 let prefs = { goal: 'Maintain', source: 'aiChef', likes: '', hates: '' };
@@ -1764,6 +1766,8 @@ const SETTINGS_RENDERERS = {
             ...bySource.slice(0, 30).map(([name, n]) => infoRow(name, `${n} recipe${n === 1 ? '' : 's'}`)),
             settingsButton(libraryRefreshing ? 'Refreshing recipes…' : 'Refresh recipes now', () => refreshRecipeLibrary({ manual: true }), 'settings-button-primary'),
             settingsRow('Nourish recipes', settingsSelect('builtin_mode', { backup: 'Backup only', mix: 'Mix in', off: 'Off' })),
+            settingsRow('Most meals a week from one source', settingsSelect('source_cap', { 2: '2', 3: '3 (recommended)', 4: '4', 5: '5', 7: '7', 21: 'No limit' }), { hint: 'one book, one site, or Nourish\'s own recipes' }),
+            settingsRow('Budget', settingsSelect('budget', { budget: 'Budget', normal: 'Normal', any: 'No limit' }), { hint: 'Normal leaves out luxury ingredients like wagyu, caviar and truffle' }),
         ];
         const off = new Set(String(settings.sources_off || '').split(',').filter(Boolean));
         const toggle = id => {
@@ -4112,6 +4116,21 @@ setInterval(() => { refreshRecipeLibrary(); }, 30 * 60e3);
 setTimeout(() => { refreshRecipeLibrary(); }, 120e3);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(() => refreshRecipeLibrary(), 5e3); });
 
+// How many of a plan's meals came from websites, the person's books and files, Nourish's own
+// recipes and the AI, and how many from each source (at most 3 a week from one, by default).
+function planSourceSplit(days) {
+    const out = { web: 0, books: 0, builtin: 0, ai: 0, perSource: {} };
+    (days || []).forEach(d => MEAL_TYPES.forEach(t => {
+        const m = d && d[t];
+        if (!m) return;
+        const kind = m.from_book || m.library_path ? 'books' : m.builtin || m.source_id === 'builtin' ? 'builtin' : m.source_url ? 'web' : 'ai';
+        out[kind]++;
+        const name = m.from_book ? `book: ${m.book || m.source_name}` : kind === 'web' ? (m.source_name || NourishImport.hostOf(m.source_url)) : kind === 'builtin' ? 'Nourish recipes' : kind === 'books' ? (m.source_name || 'your files') : 'the AI';
+        out.perSource[name] = (out.perSource[name] || 0) + 1;
+    }));
+    return out;
+}
+
 async function runSmartPlan(likes, hates) {
     const started = Date.now();
     localPlanCancelled = false;
@@ -4145,6 +4164,9 @@ async function runSmartPlan(likes, hates) {
         const inPool = new Set(MEAL_TYPES.flatMap(m => (plan.pools[m] || []).filter(r => r.from_book).map(r => r.book_recipe_id || r.name))).size;
         const chosen = daysData.flatMap(d => MEAL_TYPES.map(t => d[t]).filter(x => x && x.from_book));
         nlog('plan', `Book recipes: ${inPool} in the pool (of ${recipeDBReady ? recipeDB.forPlanning().length : 0} ready in your books), ${chosen.length} chosen${chosen.length ? `: ${chosen.map(m => `${m.name} (${m.book})`).join(', ')}` : ''}`);
+        const split = planSourceSplit(daysData);
+        nlog('plan', `Where the meals came from: ${split.web} from recipe websites, ${split.books} from your books and files, ${split.builtin} Nourish recipes${split.ai ? `, ${split.ai} written by the AI` : ''}`, split.perSource);
+        if (st.budget) nlog('plan', `Left out for the budget (${settings.budget || 'normal'}): ${st.budget.length} recipe${st.budget.length === 1 ? '' : 's'}`, st.budget);
         nlog('plan', `Plan ready in ${Math.round((Date.now() - started) / 100) / 10} s`, days.map((d, i) => `Day ${i + 1}: ${Math.round(NourishPlanner.dayTotals(d).kcal)} kcal`));
         showJobBar(null);
     } catch (err) {
