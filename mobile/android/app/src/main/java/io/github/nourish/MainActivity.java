@@ -263,6 +263,7 @@ public class MainActivity extends Activity implements NativeBridge.Host {
      */
     private void runSelfTest(String modelFile, String grammarFile) {
         final String downloadUrl = getIntent().getStringExtra("selftest_download_url");
+        bridge.selfTestRunning = true;
         new Thread(() -> {
             try {
                 if (downloadUrl != null) {
@@ -287,6 +288,8 @@ public class MainActivity extends Activity implements NativeBridge.Host {
                 Log.i(TAG, "NOURISH_SELFTEST_OK " + o);
             } catch (Throwable t) {
                 Log.e(TAG, "NOURISH_SELFTEST_FAIL " + t);
+            } finally {
+                bridge.selfTestRunning = false;
             }
         }).start();
     }

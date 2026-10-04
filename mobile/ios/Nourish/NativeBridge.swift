@@ -196,8 +196,9 @@ final class NativeBridge: NSObject {
         _ = ready.wait(timeout: .now() + 2)
         monitor.cancel()
         lock.lock(); let path = current; lock.unlock()
-        guard let p = path else { return ["known": false] }
-        return ["known": true, "online": p.status == .satisfied,
+        Self.aiRunsLock.lock(); let aiBusy = Self.aiRuns > 0; Self.aiRunsLock.unlock()
+        guard let p = path else { return ["known": false, "aiBusy": aiBusy] }
+        return ["known": true, "aiBusy": aiBusy, "online": p.status == .satisfied,
                 "wifi": p.usesInterfaceType(.wifi) || p.usesInterfaceType(.wiredEthernet),
                 "expensive": p.isExpensive, "constrained": p.isConstrained]
     }
@@ -443,7 +444,12 @@ final class NativeBridge: NSObject {
     /// the answer is stopped and reported as `suspended`, and the page asks again once Nourish is back.
     /// The graphics chip can't be used in the background at all; a GPU failure there (code -3) is
     /// also reported as `suspended`. A GPU failure on screen is retried once on the processor.
+    /// How many AI runs are going (the background recipe refresh waits while the AI works).
+    private static var aiRuns = 0
+    private static let aiRunsLock = NSLock()
     private func generate(_ a: [String: Any]) throws -> [String: Any] {
+        Self.aiRunsLock.lock(); Self.aiRuns += 1; Self.aiRunsLock.unlock()
+        defer { Self.aiRunsLock.lock(); Self.aiRuns -= 1; Self.aiRunsLock.unlock() }
         let model = Self.modelsDir.appendingPathComponent(try Self.safeName(a["model"] as? String))
         guard FileManager.default.fileExists(atPath: model.path) else { throw BridgeError(message: "That model isn't downloaded on this phone.") }
         let messages: [(role: String, content: String)] = (a["messages"] as? [[String: Any]] ?? []).map {

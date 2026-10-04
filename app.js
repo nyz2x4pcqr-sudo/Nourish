@@ -3937,9 +3937,15 @@ function finderOptions(likes, hates) {
 // whose recipes were all in the library already, so there was nothing new to read.
 const LIBRARY_REFRESH_KEY = 'nourish_library_refreshed';
 let libraryRefreshing = false;
+// The phone's AI is writing (a plan, a description, the build self-test): background work waits.
+let phoneAIBusy = false;
 async function onWifi() {
     if (isLocalMode() && nativeAvailable()) {
-        try { const n = await nativeCall('network', {}, { timeoutMs: 5000 }); return !!(n && n.known && n.online && n.wifi && !n.expensive && !n.constrained); } catch (e) { return false; }
+        try {
+            const n = await nativeCall('network', {}, { timeoutMs: 5000 });
+            phoneAIBusy = !!(n && n.aiBusy);
+            return !!(n && n.known && n.online && n.wifi && !n.expensive && !n.constrained);
+        } catch (e) { return false; }
     }
     const c = navigator.connection;
     return !(c && (c.saveData || c.type === 'cellular'));
@@ -3964,7 +3970,14 @@ async function refreshRecipeLibrary({ manual = false } = {}) {
     try {
         if (planJob || settings.plan_source === 'ai') { if (manual) showToast('Wait for the plan to finish first'); return; }
         if (!manual && (document.hidden || Number(load(LIBRARY_REFRESH_KEY, 0)) > Date.now() - 3 * 3600e3)) return;
-        if (!manual && !(await onWifi())) {
+        const wifi = manual || await onWifi();
+        // Never at the same time as the phone's AI: on a phone both compete for the same processor.
+        if (!manual && phoneAIBusy) {
+            if (!libraryRefreshNoted) nlog('sources', 'Recipe library: waiting until the phone\'s AI has finished', null, 'info');
+            libraryRefreshNoted = true;
+            return;
+        }
+        if (!manual && !wifi) {
             // Said once a session in the log (it's checked again later), so a library that doesn't grow can be explained.
             if (!libraryRefreshNoted) nlog('sources', 'Recipe library: waiting for Wi-Fi to look for new recipes', null, 'info');
             libraryRefreshNoted = true;
@@ -3995,7 +4008,7 @@ async function refreshRecipeLibrary({ manual = false } = {}) {
 // so with short visits the library never grew.
 let libraryRefreshNoted = false;
 setInterval(() => { refreshRecipeLibrary(); }, 30 * 60e3);
-setTimeout(() => { refreshRecipeLibrary(); }, 20e3);
+setTimeout(() => { refreshRecipeLibrary(); }, 120e3);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(() => refreshRecipeLibrary(), 5e3); });
 
 async function runSmartPlan(likes, hates) {

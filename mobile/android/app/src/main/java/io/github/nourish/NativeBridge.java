@@ -64,6 +64,8 @@ final class NativeBridge {
     private long engine = 0;
     private String loadedKey = null;
     private volatile boolean generating = false;
+    /** The build self-test is running the AI (MainActivity.runSelfTest): background work waits. */
+    volatile boolean selfTestRunning = false;
     private volatile boolean cancelRequested = false;
 
     NativeBridge(Context context, WebView web, Host host) {
@@ -190,6 +192,8 @@ final class NativeBridge {
         o.put("online", c != null && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET));
         o.put("wifi", c != null && (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)));
         o.put("expensive", cm != null && cm.isActiveNetworkMetered());
+        // The phone's AI is working: the app's background recipe refresh waits, so it doesn't slow it down.
+        o.put("aiBusy", generating || selfTestRunning);
         return o;
     }
 
