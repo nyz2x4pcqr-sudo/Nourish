@@ -151,7 +151,7 @@ final class NativeBridge: NSObject {
             case "read": return try RecipeLibrary.read(a["path"] as? String ?? "")
             case "range": return try RecipeLibrary.range(a["path"] as? String ?? "", offset: (a["offset"] as? NSNumber)?.intValue ?? 0, length: (a["length"] as? NSNumber)?.intValue ?? 0)
             case "open": return RecipeLibrary.open()
-            case "add": return try RecipeLibrary.pick()
+            case "add": return try RecipeLibrary.pick { [weak self] p in self?.event("libraryAdd", p) }
             case "where": return RecipeLibrary.location()
             default: throw BridgeError(message: "Unknown recipe library request.")
             }

@@ -86,7 +86,9 @@ enum RecipeLibrary {
 
     /// The system file picker (a second way in): the chosen files are copied into My Recipes,
     /// or Recipe Books for PDFs bigger than 3 MB (most likely books). Blocks until the person is done.
-    static func pick() throws -> [String: Any] {
+    /// `progress` is told how the copying goes ({ state: "copying", done, total, name } then "done"),
+    /// so the app can show it: big books take a while, and this never blocks the app's screen.
+    static func pick(progress: @escaping ([String: Any]) -> Void = { _ in }) throws -> [String: Any] {
         setUp()
         let done = DispatchSemaphore(value: 0)
         var picked: [URL] = []
@@ -105,7 +107,9 @@ enum RecipeLibrary {
         let fm = FileManager.default
         var added: [String] = []
         var rejected: [String] = []
-        for url in picked {
+        if !picked.isEmpty { progress(["state": "copying", "done": 0, "total": picked.count, "name": picked[0].lastPathComponent]) }
+        for (i, url) in picked.enumerated() {
+            defer { progress(["state": i + 1 == picked.count ? "done" : "copying", "done": i + 1, "total": picked.count, "name": i + 1 < picked.count ? picked[i + 1].lastPathComponent : ""]) }
             let kind = kinds[url.pathExtension.lowercased()]
             // Kindle books can't be read (see books.js KINDLE_NOTE): not copied, and the app says why.
             guard kind != nil, kind != "kindle" else { rejected.append(url.lastPathComponent); continue }
@@ -143,6 +147,7 @@ enum RecipeLibrary {
         setUp()
         var files: [[String: Any]] = []
         let fm = FileManager.default
+        let base = LibraryPaths.canonical(root)
         for name in folders {
             let dir = root.appendingPathComponent(name, isDirectory: true)
             guard let walker = fm.enumerator(at: dir, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
@@ -150,7 +155,8 @@ enum RecipeLibrary {
             for case let url as URL in walker {
                 guard kinds[url.pathExtension.lowercased()] != nil, url.lastPathComponent != readmeName,
                       let v = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]), v.isRegularFile == true else { continue }
-                let rel = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                // Both paths in one spelling first (/var vs /private/var), see LibraryPaths.
+                guard let rel = LibraryPaths.relative(LibraryPaths.canonical(url), to: base) else { continue }
                 files.append(["path": rel, "folder": name, "size": v.fileSize ?? 0, "mtime": Int(v.contentModificationDate?.timeIntervalSince1970 ?? 0)])
                 if files.count >= 2000 { break }
             }
@@ -164,10 +170,11 @@ enum RecipeLibrary {
     }
 
     private static func resolve(_ rel: String) throws -> URL {
-        let base = root.standardizedFileURL.path
-        let url = root.appendingPathComponent(rel).standardizedFileURL
-        guard url.path.hasPrefix(base + "/"), FileManager.default.fileExists(atPath: url.path) else {
-            throw LibraryError(message: "That file isn't in the recipe library.")
+        guard let clean = LibraryPaths.clean(rel, folders: folders) else { throw LibraryError(message: "That file isn't in the recipe library.") }
+        let url = root.appendingPathComponent(clean)
+        guard LibraryPaths.relative(LibraryPaths.canonical(url), to: LibraryPaths.canonical(root)) != nil,
+              FileManager.default.fileExists(atPath: url.path) else {
+            throw LibraryError(message: "That file isn't in the recipe library (\(clean)).")
         }
         return url
     }

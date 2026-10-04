@@ -131,6 +131,9 @@ jobs:
           python-version: "3.12"
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Recipe folder path tests (the /private/var case)
+        working-directory: mobile/ios
+        run: swiftc Nourish/LibraryPaths.swift Tests/main.swift -o "$RUNNER_TEMP/pathtests" && "$RUNNER_TEMP/pathtests"
       - name: Restore llama.cpp for iOS
         id: llama-cache
         uses: actions/cache/restore@v4
