@@ -14,7 +14,7 @@
     // Words that describe how an ingredient is cut or prepared, not what it is.
     const PREP = /\b(chopped|finely|roughly|coarsely|thinly|thickly|diced|minced|sliced|grated|shredded|crushed|peeled|seeded|deseeded|cored|trimmed|halved|quartered|cubed|julienned|torn|packed|loosely|lightly|heaping|level|rounded|softened|melted|room temperature|cold|warm|hot|cooked|uncooked|raw|fresh|freshly|frozen|thawed|drained|rinsed|and rinsed|divided|optional|to taste|for serving|for garnish|garnish|plus more|or more|as needed|about|approximately|large|medium|small|extra|boneless|skinless|skin-on|bone-in|organic|good quality|low[- ]sodium|reduced[- ]sodium|unsalted|salted|whole|ground|dried|toasted|roasted|fat[- ]free|lean|of|the|a|an)\b/g;
     // Herbs, spices and seasonings: almost no calories, so a missing amount doesn't matter.
-    const FREE = /\b(salt|pepper|cumin|paprika|chili powder|chilli|cayenne|flakes|turmeric|coriander|cinnamon|oregano|basil|thyme|rosemary|parsley|cilantro|dill|mint|chives|bay lea|garlic powder|onion powder|nutmeg|cloves|cardamom|allspice|star anise|anise|cinnamon sticks?|seasoning|spice|herbs?|zest|vanilla|water|ice|cooking spray|nonstick spray|baking soda|bicarbonate of soda|baking powder|yeast|stevia|splenda|truvia|sweetener|sucralose|erythritol|monk fruit|mrs dash|msg|food colou?ring|liquid smoke|bitters)\b/;
+    const FREE = /\b(salt|pepper|cumin|paprika|chili powder|chilli|cayenne|flakes|turmeric|coriander|cinnamon|oregano|basil|thyme|rosemary|parsley|cilantro|dill|mint|chives|bay lea(?:f|ves)|garlic powder|onion powder|nutmeg|cloves|cardamom|allspice|star anise|anise|cinnamon sticks?|seasoning|spice|herbs?|zest|vanilla|water|ice|cooking spray|nonstick spray|baking soda|bicarbonate of soda|baking powder|yeast|stevia|splenda|truvia|sweetener|sucralose|erythritol|monk fruit|mrs dash|msg|food colou?ring|liquid smoke|bitters)\b/;
 
     // Everyday names the USDA table doesn't have, read as the closest food it does.
     const EXTRA = {
@@ -32,17 +32,17 @@
     // Common foods the USDA extract doesn't carry (per 100 g: kcal, protein, carbs, fat; USDA SR
     // Legacy values or a product's label), added when missing. British names map onto them below.
     const SUPPLEMENT = {
-        rutabaga: { n: [37, 1.1, 8.6, 0.2], a: ['swede', 'swedes'], u: [[386, 'medium'], [140, 'cup']] },
-        turnip: { n: [28, 0.9, 6.4, 0.1], a: ['turnips'], u: [[122, 'medium'], [130, 'cup']] },
-        'vegetable spread': { n: [535, 0.2, 0.7, 59], a: ['margarine', 'buttery spread', 'light spread', 'spread', 'smart balance', 'flora'], u: [[14, 'tbsp'], [5, 'tsp']] },
-        buttermilk: { n: [40, 3.3, 4.8, 0.9], a: [], u: [[245, 'cup']] },
-        'swiss chard': { n: [19, 1.8, 3.7, 0.2], a: ['chard', 'rainbow chard'], u: [[36, 'cup'], [48, 'leaf']] },
-        molasses: { n: [290, 0, 74.7, 0.1], a: ['black treacle', 'treacle'], u: [[20, 'tbsp']] },
-        'golden syrup': { n: [325, 0, 81, 0], a: ['cane syrup'], u: [[21, 'tbsp']] },
-        quark: { n: [72, 12, 4, 0.2], a: [], u: [[225, 'cup']] },
-        'yeast extract': { n: [260, 39, 24, 0.5], a: ['marmite', 'vegemite'], u: [[5, 'tsp']] },
-        'creme fraiche': { n: [292, 2.4, 2.8, 30], a: ['crème fraîche'], u: [[15, 'tbsp']] },
-        'double cream': { n: [340, 2.8, 2.7, 36], a: ['heavy cream', 'whipping cream'], u: [[15, 'tbsp'], [238, 'cup']] },
+        rutabaga: { n: [37, 1.1, 8.6, 0.2, 2.3, 0, 43, 305, 20], a: ['swede', 'swedes'], u: [[386, 'medium'], [140, 'cup']] },
+        turnip: { n: [28, 0.9, 6.4, 0.1, 1.8, 0, 30, 191, 11], a: ['turnips'], u: [[122, 'medium'], [130, 'cup']] },
+        'vegetable spread': { n: [535, 0.2, 0.7, 59, 0, 0, 7, 30, 1], a: ['margarine', 'buttery spread', 'light spread', 'spread', 'smart balance', 'flora'], u: [[14, 'tbsp'], [5, 'tsp']] },
+        buttermilk: { n: [40, 3.3, 4.8, 0.9, 0, 0, 116, 151, 11], a: [], u: [[245, 'cup']] },
+        'swiss chard': { n: [19, 1.8, 3.7, 0.2, 1.6, 0, 51, 379, 81], a: ['chard', 'rainbow chard'], u: [[36, 'cup'], [48, 'leaf']] },
+        molasses: { n: [290, 0, 74.7, 0.1, 0, 0, 205, 1464, 242], a: ['black treacle', 'treacle'], u: [[20, 'tbsp']] },
+        'golden syrup': { n: [325, 0, 81, 0, 0, 0, 10, 20, 2], a: ['cane syrup'], u: [[21, 'tbsp']] },
+        quark: { n: [72, 12, 4, 0.2, 0, 0, 90, 140, 10], a: [], u: [[225, 'cup']] },
+        'yeast extract': { n: [260, 39, 24, 0.5, 3.5, 0, 70, 2600, 180], a: ['marmite', 'vegemite'], u: [[5, 'tsp']] },
+        'creme fraiche': { n: [292, 2.4, 2.8, 30, 0, 0.3, 75, 100, 8], a: ['crème fraîche'], u: [[15, 'tbsp']] },
+        'double cream': { n: [340, 2.8, 2.7, 36, 0, 1.6, 66, 95, 7], a: ['heavy cream', 'whipping cream'], u: [[15, 'tbsp'], [238, 'cup']] },
     };
     Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });
 
@@ -203,7 +203,7 @@
             else if (unit === 'fillet') grams = qty * (portionGrams(food, ['fillet']) || 150);
             else if (unit === 'piece') grams = qty * eachGrams(food, m.key, m.phrase);
             else if (!unit && /^\s*[\d.\/½¼¾]+\s+leaves?\b/i.test(raw)) grams = qty * (/lettuce|cabbage|chard|kale|spinach|collard/.test(m.key) ? 10 : 0.5);   // 8 lettuce leaves, 6 basil leaves
-            else if (!unit && FREE.test(clean(words)) && /\b(sticks?|star anise|anise|pods?|cloves|bay lea|leaves|sprigs?|whole)\b/.test(clean(raw))) grams = qty * 1.5;   // 2 cinnamon sticks, 3 star anise
+            else if (!unit && FREE.test(clean(words)) && /\b(sticks?|star anise|anise|pods?|cloves|bay lea(?:f|ves)|leaves|sprigs?|whole)\b/.test(clean(raw))) grams = qty * 1.5;   // 2 cinnamon sticks, 3 star anise
             else grams = qty * eachGrams(food, m.key, m.phrase);
         } else {
             // No amount ("salt to taste", "cooking spray"): seasonings count as nothing; anything else
@@ -235,7 +235,10 @@
     // whether the result is approximate.
     function calculate(ingredients, servings) {
         const per = Math.max(1, Number(servings) || 1);
-        const total = { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
+        const total = { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 };
+        // Vitamin D (µg), calcium, potassium and magnesium (mg), for the week's check (planner.js).
+        const micros = { vitd: 0, ca: 0, k: 0, mg: 0 };
+        let grams = 0;
         const unmatched = [];
         const lines = [];
         const assumed = [];
@@ -246,13 +249,20 @@
             const n = r.key ? FOODS[r.key].n : [0, 0, 0, 0];
             const f = r.grams / 100;
             total.calories += n[0] * f; total.protein_g += n[1] * f; total.carbs_g += n[2] * f; total.fat_g += n[3] * f;
+            total.fiber_g += (n[4] || 0) * f;
+            micros.vitd += (n[5] || 0) * f; micros.ca += (n[6] || 0) * f; micros.k += (n[7] || 0) * f; micros.mg += (n[8] || 0) * f;
+            grams += r.grams;
             // Per line, per serving: the breakdown people can check.
             lines.push({ line, key: r.key, grams: Math.round(r.grams), kcal: Math.round(n[0] * f / per), assumed: r.assumed || undefined });
             if (r.assumed) assumed.push({ line: String(line), amount: r.assumed });
         });
         const round = v => Math.round(v / per);
+        const r1 = v => Math.round(v / per * 10) / 10;
         return {
-            nutrition: { calories: round(total.calories), protein_g: round(total.protein_g), carbs_g: round(total.carbs_g), fat_g: round(total.fat_g) },
+            nutrition: { calories: round(total.calories), protein_g: round(total.protein_g), carbs_g: round(total.carbs_g), fat_g: round(total.fat_g), fiber_g: r1(total.fiber_g),
+                micros: { vitd: r1(micros.vitd), ca: round(micros.ca), k: round(micros.k), mg: round(micros.mg) } },
+            // Calories per gram of the dish (its "calorie density"): lower fills you up for fewer calories.
+            density: grams > 0 ? Math.round(total.calories / grams * 100) / 100 : null,
             unmatched, lines, assumed, approximate: unmatched.length > 0,
         };
     }
@@ -269,7 +279,9 @@
         let keepOwn = false;
         if (own && calc.calories > 0) keepOwn = Math.abs(own.calories - calc.calories) / calc.calories <= 0.15;
         else if (own && !c.lines.length) keepOwn = true;   // nothing matched at all: the source's numbers are all we have
-        recipe.nutrition = keepOwn ? { calories: Math.round(own.calories), protein_g: own.protein_g != null ? Math.round(own.protein_g) : calc.protein_g, carbs_g: own.carbs_g != null ? Math.round(own.carbs_g) : calc.carbs_g, fat_g: own.fat_g != null ? Math.round(own.fat_g) : calc.fat_g } : calc;
+        recipe.nutrition = keepOwn ? { calories: Math.round(own.calories), protein_g: own.protein_g != null ? Math.round(own.protein_g) : calc.protein_g, carbs_g: own.carbs_g != null ? Math.round(own.carbs_g) : calc.carbs_g, fat_g: own.fat_g != null ? Math.round(own.fat_g) : calc.fat_g,
+            fiber_g: calc.fiber_g, micros: calc.micros } : calc;
+        recipe.kcal_per_g = c.density || undefined;
         recipe.nutrition_basis = keepOwn ? 'source' : 'calculated';
         recipe.nutrition_unmatched = c.unmatched.length ? c.unmatched.slice(0, 12) : undefined;
         recipe.nutrition_assumed = c.assumed.length ? c.assumed.slice(0, 12) : undefined;

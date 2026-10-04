@@ -458,6 +458,10 @@
         const change = key => (key === 'calories' ? kcalRatio : ratio(key)) * Math.min(1, seen) + factor * Math.max(0, 1 - Math.min(1, seen));
         const val = key => Math.round((Number(n[key]) || 0) * change(key));
         out.nutrition = { calories: val('calories'), protein_g: val('protein_g'), carbs_g: val('carbs_g'), fat_g: val('fat_g') };
+        // Fiber, vitamins and minerals follow the amounts too.
+        const nowCalc = after;
+        if (before.fiber_g != null || n.fiber_g != null) out.nutrition.fiber_g = Math.round((before.fiber_g > 0 ? (Number(n.fiber_g != null ? n.fiber_g : before.fiber_g) || 0) * nowCalc.fiber_g / before.fiber_g : (nowCalc.fiber_g || 0)) * 10) / 10;
+        if (nowCalc.micros) out.nutrition.micros = nowCalc.micros;
         return out;
     }
 
@@ -539,7 +543,7 @@
         const fat = Math.round(kcal * fatShare / 9);
         const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
         const perMeal = byWeight ? Math.min(MEAL_PROTEIN.max, Math.max(MEAL_PROTEIN.min, Math.round(kg * 0.4))) : 30;
-        return { kcal, protein, carbs, fat, fiber: FIBER_TARGET, byWeight, perMeal, mealProtein: MEAL_PROTEIN };
+        return { kcal, protein, carbs, fat, fiber: FIBER_TARGET, byWeight, perMeal, mealProtein: MEAL_PROTEIN, pref };
     }
 
     // === PLANNING ===
@@ -602,6 +606,18 @@
         cost -= Math.min(2, P.likeScore(r, ctx.likes)) * 0.5;
         if (ctx.goal === 'Cut' && r.healthy) cost -= 0.3;
         cost += goalCost(r, f, ctx.goal);
+        // Fiber: about 30 g a day shared over the meals; meals that bring it come first.
+        const fiberWant = (ctx.targets.fiber || 30) * share;
+        if (n.fiber_g != null) cost += Math.max(0, (fiberWant - n.fiber_g * f) / fiberWant) * 0.6;
+        // Calorie density: lunch and dinner under about 1.5 kcal per gram fill you up for fewer
+        // calories (more so when losing weight).
+        if (ctx.meal !== 'breakfast' && r.kcal_per_g > 1.5) cost += (r.kcal_per_g - 1.5) * (ctx.goal === 'Cut' ? 1.6 : 0.8);
+        // Lower-carb: carbs over the meal's share count against a recipe (fat is already checked).
+        if (ctx.targets.pref === 'lower-carb' && ctx.targets.carbs > 0) cost += Math.max(0, (n.carbs_g * f - ctx.targets.carbs * share * 1.1) / (ctx.targets.carbs * share)) * 1.5;
+        // Whole ingredients first.
+        cost += Math.min(0.6, ((`${(r.ingredients || []).join(' ')}`).match(PROCESSED) || []).length * 0.15);
+        // Fatty fish about once a week: favoured until the week has some.
+        if (ctx.wantFish && isFattyFish(r)) cost -= 1.2;
         if (r.nutrition_unmatched) cost += 0.2;
         // Highly rated on its own site (with enough ratings to mean something) comes first.
         if (r.rating && r.rating.count >= 5) cost -= Math.max(-0.4, Math.min(0.4, (r.rating.value - 4.2) * 0.5));
@@ -672,7 +688,7 @@
                 const fits = (pools[m] || []).filter(r => !used.has(r.name))
                     .filter(r => !isFav(r) || favUsed < ((favorites && favorites.cap) || 0))
                     .filter(r => { const why = slotProblem(r, m, limits); if (why) rejected[`${m}: ${r.name}`] = why; return !why; })
-                    .map(r => ({ r, cost: slotCost(r, kcal, ctx) + slotPenalty(r, m, limits) })).filter(x => isFinite(x.cost));
+                    .map(r => { ctx.meal = m; ctx.wantFish = !ctx.hadFish && d >= Math.min(days - 1, 3) && m !== 'breakfast' && !(ctx.fishTried >= 3); return { r, cost: slotCost(r, kcal, ctx) + slotPenalty(r, m, limits) }; }).filter(x => isFinite(x.cost));
                 // No source past its weekly share, unless nothing else fits this slot at all.
                 const shared = fits.filter(x => !overCap(x.r));
                 if (shared.length) { fits.filter(x => overCap(x.r)).forEach(x => { rejected[`${m}: ${x.r.name}`] = `already ${cap} meals from ${x.r.book || x.r.source_name || sourceKey(x.r)} this week`; }); fits.length = 0; shared.forEach(x => fits.push(x)); }
@@ -733,6 +749,7 @@
                 const c = cuisineOf(r);
                 ctx.cuisineCount[c] = (ctx.cuisineCount[c] || 0) + 1;
                 ctx.sourceCount[sourceKey(r)] = (ctx.sourceCount[sourceKey(r)] || 0) + 1;
+                if (isFattyFish(r)) { ctx.hadFish = true; ctx.fishDay = ctx.fishDay || `day ${d + 1} ${m}: ${r.name}`; }
             });
             addSnacks(day, settings, d, people, exclude, snackExtras);
             const snackKcal = (day.snacks || []).reduce((t, x) => t + x.nutrition.calories, 0);
@@ -742,7 +759,7 @@
             out.push(day);
             report.push(dayTotals(day));
         }
-        return { days: out, missing, report, targets, split, rejected };
+        return { days: out, missing, report, targets, split, rejected, fattyFish: ctx.fishDay || '' };
     }
     // One meal made about `kcal` lighter: oil and sugar first, then a smaller portion (never below
     // 60% of what it was). Seasoning stays.
@@ -825,8 +842,13 @@
         return { days: out, changes };
     }
     function dayTotals(day) {
-        const t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-        const add = r => { const n = r && r.nutrition; if (n) { t.kcal += n.calories; t.protein += n.protein_g; t.carbs += n.carbs_g; t.fat += n.fat_g; } };
+        const t = { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, micros: { vitd: 0, ca: 0, k: 0, mg: 0 } };
+        const add = r => {
+            const n = r && r.nutrition;
+            if (!n) return;
+            t.kcal += n.calories; t.protein += n.protein_g; t.carbs += n.carbs_g; t.fat += n.fat_g; t.fiber += Number(n.fiber_g) || 0;
+            if (n.micros) Object.keys(t.micros).forEach(k => { t.micros[k] += Number(n.micros[k]) || 0; });
+        };
         MEALS.forEach(m => add(day[m]));
         (Array.isArray(day.snacks) ? day.snacks : []).forEach(add);
         return t;
@@ -838,9 +860,9 @@
     // more eggs or egg whites, a lunch or dinner lean chicken, tofu or tuna. Anything the person
     // avoids, is allergic to or doesn't eat (diet) is never used. `need`: grams of protein per person.
     const BOOSTERS = {
-        sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 14, 'Serve with the cottage cheese on the side.']],
-        savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 14, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.']],
-        main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 2.5, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 7, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.']],
+        sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.']],
+        savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.']],
+        main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 4.9, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 5.4, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.']],
     };
     const SWEET_BREAKFAST_DISH = /\b(smoothie|shake|oat|oats|oatmeal|porridge|granola|muesli|bircher|chia|yogh?urt|parfait|pancakes?|waffles?|crepes?|muffins?|fruit|acai|bowl|toast with (jam|honey|nut))\b/i;
     function boostProtein(meal, need, mealType, people = 1, exclude) {
@@ -910,6 +932,119 @@
             }
         });
         return { day: cur, notes };
+    }
+
+    // === FIBER, FATS, FISH, VITAMINS AND MINERALS ===
+    // Fiber: at least 30 g a day. A day short of it gets a high-fiber food added where it fits:
+    // chia seeds or raspberries at breakfast, a side of broccoli or chickpeas at lunch or dinner.
+    const FIBER_BOOSTERS = {
+        breakfast: [['2 tbsp chia seeds', 'Stir in the chia seeds.'], ['1/2 cup raspberries', 'Top with the raspberries.']],
+        main: [['1 cup broccoli', 'Steam the broccoli for 4 minutes and serve on the side.'], ['1/2 cup chickpeas', 'Warm the chickpeas and stir them in or serve alongside.'], ['1 cup spinach', 'Wilt the spinach into the dish at the end.']],
+    };
+    function addFood(meal, perPersonLine, step, people, key) {
+        const n = Math.max(1, Number(meal.servings) || people || 1);
+        const item = U ? U.splitIngredient(perPersonLine) : null;
+        const line = item && item.qty != null && n > 1 ? `${U.formatQty(item.qty * n)}${item.unit ? ' ' + item.unit : ''} ${item.text}`.replace(/\b(cup|tbsp)\b(?= )/, u => (item.qty * n > 1 && u === 'cup' ? 'cups' : u)) : perPersonLine;
+        const add = N.calculate([line], n);
+        const out = JSON.parse(JSON.stringify(meal));
+        out.ingredients = (out.ingredients || []).concat(line);
+        out.steps = (out.steps || []).concat(step);
+        const nu = out.nutrition || {};
+        ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(k => { nu[k] = Math.round((Number(nu[k]) || 0) + (add.nutrition[k] || 0)); });
+        nu.fiber_g = Math.round(((Number(nu.fiber_g) || 0) + (add.nutrition.fiber_g || 0)) * 10) / 10;
+        if (add.nutrition.micros) { nu.micros = nu.micros || { vitd: 0, ca: 0, k: 0, mg: 0 }; Object.keys(add.nutrition.micros).forEach(k => { nu.micros[k] = Math.round(((Number(nu.micros[k]) || 0) + add.nutrition.micros[k]) * 10) / 10; }); }
+        out.nutrition = nu;
+        out[key] = (out[key] || []).concat(line);
+        return out;
+    }
+    function balanceFiber(day, settings, people = 1, exclude) {
+        const T = targetsOf(settings || {});
+        const notes = [];
+        let cur = day;
+        for (let i = 0; i < 3 && dayTotals(cur).fiber < T.fiber - 0.5; i++) {
+            // The meal with the least fiber that can take one more addition.
+            const m = MEALS.filter(x => cur[x] && cur[x].nutrition && !cur[x].leftover && (cur[x].fiber_added || []).length < 1)
+                .sort((a, b) => (Number(cur[a].nutrition.fiber_g) || 0) - (Number(cur[b].nutrition.fiber_g) || 0))[0];
+            if (!m) break;
+            const opts = FIBER_BOOSTERS[m === 'breakfast' ? 'breakfast' : 'main'].filter(([line]) => !(exclude && exclude({ name: line, ingredients: [line] })) && !(cur[m].ingredients || []).some(l => l.toLowerCase().includes(line.split(' ').slice(-1)[0])));
+            if (!opts.length) break;
+            const before = dayTotals(cur).fiber;
+            cur = Object.assign({}, cur, { [m]: addFood(cur[m], opts[0][0], opts[0][1], people, 'fiber_added') });
+            notes.push(`${m} "${cur[m].name}": the day had ${Math.round(before)} g fiber (aim: at least ${T.fiber} g); added ${opts[0][0]}`);
+        }
+        return { day: cur, notes };
+    }
+    // Oil instead of butter or lard for cooking, where the dish allows it (not baking, pastry, a
+    // butter sauce, mash or toast). Same amount; the steps say oil too.
+    const SOLID_FAT = /\b(unsalted butter|salted butter|butter|lard|shortening|bacon fat|bacon grease|dripping|beef dripping)\b/i;
+    const NEEDS_BUTTER = /\b(cakes?|cookies?|biscuits?|scones?|pastry|pastries|pies?|tarts?|crusts?|muffins?|brownies?|croissants?|shortbread|frosting|buttercream|beurre|hollandaise|b[eé]arnaise|roux|b[eé]chamel|mash(ed)?|toast|grilled cheese|pancakes?|waffles?|crumble|crumbs|butter chicken|ghee|garlic butter|brown butter|compound butter|dumplings?|biscuit|cornbread|bread)\b/i;
+    function fatSwap(meal) {
+        if (!meal || NEEDS_BUTTER.test(meal.name || '')) return meal;
+        const steps = (meal.steps || []).join(' ');
+        if (/\b(cream (the )?butter|cold butter|softened butter|cut in the butter|rub (in )?the butter|knob of butter to finish|finish with (a )?(knob of )?butter|brush(ed)? with (melted )?butter)\b/i.test(steps) || NEEDS_BUTTER.test(steps)) return meal;
+        const idx = (meal.ingredients || []).findIndex(l => SOLID_FAT.test(l) && !/\b(peanut|almond|cashew|nut|apple|cocoa|shea) butter\b/i.test(l));
+        if (idx < 0) return meal;
+        const old = meal.ingredients[idx];
+        const line = old.replace(SOLID_FAT, 'olive oil');
+        const before = N.calculate([old], meal.servings || 1).nutrition, after = N.calculate([line], meal.servings || 1).nutrition;
+        const out = JSON.parse(JSON.stringify(meal));
+        out.ingredients[idx] = line;
+        out.steps = (out.steps || []).map(st => st.replace(/\b(melt(ed)? (the )?|heat (the )?)(butter|lard|shortening)\b/gi, (m, a) => `${/melt/i.test(a) ? 'heat the ' : a}olive oil`).replace(/\bthe (butter|lard|shortening)\b/gi, 'the olive oil'));
+        const nu = out.nutrition || {};
+        ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(k => { nu[k] = Math.max(0, Math.round((Number(nu[k]) || 0) - (before[k] || 0) + (after[k] || 0))); });
+        out.fat_swapped = `Olive oil instead of ${old.match(SOLID_FAT)[0].toLowerCase()} for cooking (better fats; same amount).`;
+        return out;
+    }
+    const FATTY_FISH = /\b(salmon|mackerel|sardines?|trout|herring|anchov(?:y|ies)|arctic char|sablefish|black cod|kippers?|pilchards?)\b/i;
+    const isFattyFish = r => !!r && FATTY_FISH.test(`${r.name || ''} ${(r.ingredients || []).slice(0, 6).join(' ')}`);
+    // Ultra-processed shortcuts: whole ingredients come first (protein powder is fine as a tool).
+    const PROCESSED = /\b(cake mix|boxed|instant (mashed|noodles|ramen|rice)|cream of (mushroom|chicken|celery) soup|processed cheese|american cheese|velveeta|cheez|hot dogs?|chicken nuggets|fish sticks|frozen (pizza|meal|dinner)|canned soup|ready[- ]made|store[- ]bought (sauce|dough)|bouillon powder|margarine|cool whip|whipped topping|spam|luncheon meat|imitation crab|potato chips|corn chips|soda)\b/gi;
+    // The week's vitamin D (µg), calcium, potassium and magnesium (mg) a day, against everyday adult
+    // targets; a nutrient under 70% of its target is "low".
+    const MICRO_TARGETS = { vitd: 15, ca: 1000, k: 3400, mg: 400 };
+    const MICRO_NAMES = { vitd: 'vitamin D', ca: 'calcium', k: 'potassium', mg: 'magnesium' };
+    const MICRO_UNITS = { vitd: 'µg', ca: 'mg', k: 'mg', mg: 'mg' };
+    const MICRO_FOODS = { vitd: 'oily fish (salmon, sardines, trout), eggs and fortified milk', ca: 'yogurt, milk, cheese, tofu and leafy greens', k: 'beans, potatoes, bananas, spinach and yogurt', mg: 'nuts, seeds, beans, whole grains and leafy greens' };
+    function weekMicros(days) {
+        const sum = { vitd: 0, ca: 0, k: 0, mg: 0 };
+        let n = 0;
+        (days || []).forEach(d => { if (!d) return; n++; const t = dayTotals(d); Object.keys(sum).forEach(k => { sum[k] += t.micros[k]; }); });
+        const avg = {};
+        Object.keys(sum).forEach(k => { avg[k] = n ? Math.round(sum[k] / n * 10) / 10 : 0; });
+        const low = Object.keys(MICRO_TARGETS).filter(k => n && avg[k] < MICRO_TARGETS[k] * 0.7);
+        return { avg, low, targets: MICRO_TARGETS, names: MICRO_NAMES, units: MICRO_UNITS, foods: MICRO_FOODS };
+    }
+    // One swap per low nutrient: the meal with least of it is replaced by a recipe from the pools
+    // for the same slot that has much more of it, about the same calories, fits the slot and isn't
+    // already in the plan. Returns { days, notes, flags } (flags: what's still low, in plain words).
+    function fixMicros(days, { pools = {}, settings = {}, people = 1, exclude, weekday } = {}) {
+        let out = days.slice();
+        const notes = [];
+        const used = dishList(out.flatMap(d => MEALS.map(m => d && d[m] && d[m].name).filter(Boolean)));
+        weekMicros(out).low.forEach(k => {
+            const per = r => ((r.nutrition && r.nutrition.micros && Number(r.nutrition.micros[k])) || 0) / Math.max(1, (r.nutrition && r.nutrition.calories) || 1);
+            let best = null;
+            out.forEach((d, i) => MEALS.forEach(m => {
+                const cur = d && d[m];
+                if (!cur || !cur.nutrition || cur.leftover) return;
+                const limits = slotLimits(settings, m, weekday ? weekday(i) : null);
+                (pools[m] || []).forEach(r => {
+                    if (!r || !r.nutrition || used.has(r.name) || (exclude && exclude(r)) || slotProblem(r, m, limits)) return;
+                    const f = cur.nutrition.calories / r.nutrition.calories;
+                    if (f < 0.75 || f > 1.33) return;
+                    const gain = (per(r) - per(cur)) * cur.nutrition.calories;
+                    if (gain > 0 && (!best || gain > best.gain)) best = { gain, i, m, r };
+                });
+            }));
+            if (!best || best.gain < MICRO_TARGETS[k] * 0.1) return;
+            const old = out[best.i][best.m];
+            out[best.i] = fitDay(Object.assign({}, out[best.i], { [best.m]: JSON.parse(JSON.stringify(best.r)) }), settings, people);
+            used.add(best.r.name);
+            notes.push(`The week was low in ${MICRO_NAMES[k]}: day ${best.i + 1} ${best.m} "${old.name}" swapped for "${best.r.name}" (about ${Math.round(best.gain)} ${MICRO_UNITS[k]} more)`);
+        });
+        const after = weekMicros(out);
+        const flags = after.low.map(k => `Low in ${MICRO_NAMES[k]} this week (about ${after.avg[k]} ${MICRO_UNITS[k]} a day; aim for ${MICRO_TARGETS[k]}). ${MICRO_FOODS[k].charAt(0).toUpperCase() + MICRO_FOODS[k].slice(1)} help.`);
+        return { days: out, notes, flags, micros: after };
     }
 
     // === SNACKS ===
@@ -1071,7 +1206,7 @@
         }).join('');
     }
 
-    const api = { boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -137,6 +137,10 @@ SETTINGS_DEFAULTS.builtin_mode = 'backup';     // Nourish's own recipes: 'backup
 const settings = Object.assign({}, SETTINGS_DEFAULTS);
 let prefs = { goal: 'Maintain', source: 'aiChef', likes: '', hates: '' };
 let daysData = [];
+// The week's nutrition flags shown on the Plan screen (checkWeek), and the last plan's recipe pools.
+let planFlags = [];
+try { planFlags = JSON.parse(localStorage.getItem('nourish_plan_flags') || '[]') || []; } catch (e) { planFlags = []; }
+let lastPlanPools = null;
 let selectedDay = 0;
 let grocery = { checked: [], custom: [] };     // checked: item texts; custom: [{ text, checked }]
 let cookbook = { recipes: [] };                // saved recipes (see COOKBOOK)
@@ -1756,6 +1760,7 @@ const SETTINGS_RENDERERS = {
                 settingsRow('Love', textInput(() => prefs.likes, v => { setPref('likes', v); showToast('Saved ✓', false); }, { placeholder: 'e.g. chicken, pasta' })),
                 settingsRow('Avoid', textInput(() => prefs.hates, v => { setPref('hates', v); showToast('Saved ✓', false); }, { placeholder: 'e.g. mushrooms' })),
                 settingsRow('Cuisines', settingsInput('cuisines', { placeholder: 'e.g. Mexican, Thai' })),
+                settingsToggle('fat_swap', 'Oil instead of butter', { hint: 'Olive oil for cooking where the dish allows (not baking or butter sauces)' }),
             ], 'Allergies are never included by the AI and are filtered out of recipe searches.'),
             ...settingsGroup('Meals each day', MEAL_TYPES.map(mealSlotToggle).concat([
                 settingsRow('Snacks', settingsSelect('snacks_per_day', { 0: 'None', 1: '1 a day', 2: '2 a day', 3: '3 a day' }), { hint: 'Small snacks inside your calories' }),
@@ -3012,7 +3017,10 @@ function updatePlanScreen() {
                 h('button', { type: 'button', class: 'btn btn-primary', onclick: showGenerateSheet }, icon('i-sparkle'), 'Generate Meal Plan'))));
         return;
     }
-    setChildren(container, cooking, ...daysData.map((day, idx) => h('section', { class: `card plan-day${isToday(idx) ? ' is-today' : ''}` },
+    const flagCard = planFlags && planFlags.length ? h('section', { class: 'card plan-flags' },
+        h('div', { class: 'eyebrow', text: 'This week' }),
+        ...planFlags.map(f => h('p', { class: 'recipe-note', text: f }))) : null;
+    setChildren(container, cooking, typeof weekCard === 'function' ? weekCard() : null, flagCard, ...daysData.map((day, idx) => h('section', { class: `card plan-day${isToday(idx) ? ' is-today' : ''}` },
         h('div', { class: 'plan-day-head' },
             h('div', {},
                 h('div', { class: 'eyebrow', text: `Day ${idx + 1}${isToday(idx) ? ' · Today' : ''}` }),
@@ -3381,14 +3389,51 @@ function applyPlan(raw, { navigate = true } = {}) {
 function nutritionExcluder() { return NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }); }
 function dayRules(day, i) {
     if (!day) return day;
-    const res = NourishPlanner.balanceProtein(day, plannerSettings(dayTargetsFor(i)), servingsWanted(), nutritionExcluder());
-    res.notes.forEach(n => nlog('plan', `${dayName(i)}: ${n}`));
-    MEAL_TYPES.forEach(t => { if (res.day[t]) res.day[t] = normalizeMeal(res.day[t]); });
-    return res.day;
+    const P = NourishPlanner;
+    const s = plannerSettings(dayTargetsFor(i));
+    const people = servingsWanted();
+    const ex = nutritionExcluder();
+    let cur = Object.assign({}, day);
+    // Oil instead of butter or lard for cooking, where the dish allows it (Settings → Profile).
+    if (settings.fat_swap !== 'off') MEAL_TYPES.forEach(t => {
+        const m = cur[t];
+        const swapped = m && !m.fat_swapped ? P.fatSwap(m) : m;
+        if (swapped !== m) { cur[t] = swapped; nlog('plan', `${dayName(i)} ${t} "${m.name}": ${swapped.fat_swapped}`); }
+    });
+    const fiber = P.balanceFiber(cur, s, people, ex);
+    fiber.notes.forEach(n => nlog('plan', `${dayName(i)}: ${n}`));
+    const protein = P.balanceProtein(fiber.day, s, people, ex);
+    protein.notes.forEach(n => nlog('plan', `${dayName(i)}: ${n}`));
+    cur = protein.day;
+    MEAL_TYPES.forEach(t => { if (cur[t]) cur[t] = normalizeMeal(cur[t]); });
+    return cur;
+}
+// The week's own checks: fatty fish about once a week, and vitamin D, calcium, potassium and
+// magnesium (a meal swapped in when the pools have a better one, otherwise a plain flag on the
+// Plan screen). Logged either way.
+function checkWeek(days) {
+    const P = NourishPlanner;
+    const fish = days.findIndex(d => d && MEAL_TYPES.some(t => P.isFattyFish(d[t])));
+    const flags = [];
+    if (fish >= 0) nlog('plan', `Fatty fish this week: ${dayName(fish)} (${MEAL_TYPES.map(t => days[fish][t]).filter(m => P.isFattyFish(m)).map(m => m.name).join(', ')})`);
+    else {
+        const noFish = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet })({ name: 'salmon', ingredients: ['1 salmon fillet'] });
+        nlog('plan', noFish ? 'No fatty fish this week (your diet, allergies or dislikes leave it out)' : 'No fatty fish fitted this week', null, noFish ? 'info' : 'warn');
+        if (!noFish) flags.push('No oily fish this week. Salmon, trout, mackerel or sardines about once a week are good for your heart.');
+    }
+    const fixed = P.fixMicros(days, { pools: lastPlanPools || {}, settings: plannerSettings(), people: servingsWanted(), exclude: nutritionExcluder(), weekday: d => (dayBase() + d) % 7 });
+    fixed.notes.forEach(n => nlog('plan', n));
+    fixed.days.forEach((d, i) => { if (d !== days[i]) days[i] = dayRules(d, i); });
+    const m = fixed.micros;
+    nlog('plan', `Vitamins and minerals a day this week: ${Object.keys(m.avg).map(k => `${m.names[k]} ${m.avg[k]} ${m.units[k]} (aim ${m.targets[k]})`).join(', ')}`, fixed.flags.length ? fixed.flags : null);
+    const totals = days.filter(Boolean).map(d => P.dayTotals(d));
+    if (totals.length) nlog('plan', `Protein and fiber a day: ${totals.map((t, i) => `${dayName(i, true)} ${Math.round(t.protein)} g / ${Math.round(t.fiber)} g`).join(', ')} (targets ${proteinTarget()} g protein, 30 g fiber)`);
+    planFlags = flags.concat(fixed.flags);
+    try { localStorage.setItem('nourish_plan_flags', JSON.stringify(planFlags)); } catch (e) { /* full */ }
 }
 function applyNutritionRules(days) {
     days.forEach((d, i) => { days[i] = dayRules(d, i); });
-    if (typeof checkWeek === 'function') checkWeek(days);
+    checkWeek(days);
 }
 // Per-day calorie target overrides (Weekly mode: big days and the days around them); {} in Daily mode.
 function dayTargetsFor(i) { return typeof weekDayKcal === 'function' && weekDayKcal(i) ? { calorie_target: weekDayKcal(i) } : {}; }
@@ -4201,6 +4246,7 @@ async function runSmartPlan(likes, hates) {
         let days = plan.days.map(d => NourishPlanner.fitDay(d, planSettings, servingsWanted()));
         // The last check, with or without an AI: every day within 10% of the calorie target.
         const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (plan.pools[m] || []).concat(typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off' ? NourishBuiltins.forMeal(m) : [])]));
+        lastPlanPools = plan.pools;
         const kept = NourishPlanner.keepToTargets(days, { pools, settings: planSettings, people: servingsWanted(),
             exclude: NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }), weekday: d => (dayBase() + d) % 7, already: recentPlanDishes() });
         days = kept.days;
