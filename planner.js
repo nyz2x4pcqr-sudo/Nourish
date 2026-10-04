@@ -545,7 +545,7 @@
     // already: dishes from recent plans (the last 14 days, favourites left out): avoided, and only
     // used when a slot has nothing else. Nothing is ever used twice in one plan (sameDish), except a
     // dinner eaten again as the next day's lunch when Settings → "Allow leftovers" is on.
-    function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [], exclude, weekday, taste, favorites }) {
+    function planWeek({ pools, settings, likes, days = 7, people = 1, sourcePenalty, already = [], exclude, weekday, taste, favorites, snackExtras }) {
         // Favourites (recipes they loved) come back, but at most `cap` times a week.
         const favList = dishList(((favorites && favorites.recipes) || []).map(r => r.name));
         const isFav = r => favList.names().length > 0 && favList.has(r.name);
@@ -646,7 +646,7 @@
                 ctx.cuisineCount[c] = (ctx.cuisineCount[c] || 0) + 1;
                 ctx.sourceCount[r.source_id || 'other'] = (ctx.sourceCount[r.source_id || 'other'] || 0) + 1;
             });
-            addSnacks(day, settings, d, people, exclude);
+            addSnacks(day, settings, d, people, exclude, snackExtras);
             const snackKcal = (day.snacks || []).reduce((t, x) => t + x.nutrition.calories, 0);
             // A day with a gap is sized to its own meals' shares only (the AI fills the gap later).
             const target = items.length === MEALS.filter(on).length ? targets.kcal - snackKcal : items.reduce((t, it) => t + it.want, 0);
@@ -768,12 +768,14 @@
     }
     // Adds the day's snacks (Settings: snacks per day), different each day of the week and never
     // something the person avoids.
-    function addSnacks(day, settings, d, people = 1, exclude) {
+    // extra: more snack candidates (sides, drinks and desserts from the person's books), on equal terms.
+    function addSnacks(day, settings, d, people = 1, exclude, extra = []) {
         const n = snacksOf(settings);
         delete day.snacks;
         if (!n) return day;
         const kcal = targetsOf(settings).kcal * SNACK_SHARE;
-        const ok = SNACKS.map(snackRecipe).filter(r => r.nutrition.calories > 0 && !(exclude && exclude(r)));
+        const ok = SNACKS.map(snackRecipe).concat((extra || []).filter(r => r && r.nutrition && r.nutrition.calories >= 60 && r.nutrition.calories <= 450))
+            .filter(r => r.nutrition.calories > 0 && !(exclude && exclude(r)));
         if (!ok.length) return day;
         const snacks = [];
         for (let i = 0; i < n; i++) {

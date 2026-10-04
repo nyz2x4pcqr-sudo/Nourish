@@ -1053,7 +1053,28 @@ function chatSystemPrompt() {
         'Help the person shape meals that suit them: ask a short follow-up question when something important is unclear, ' +
         'suggest specific dishes, and keep answers readable (short paragraphs or bullet lists). Do not output JSON. ' +
         actions + ' You are not a doctor; for medical conditions suggest they check with a professional.\n\n' +
-        'About them:\n' + profileText() + '\n\n' + planSummary();
+        'About them:\n' + profileText() + '\n\n' + planSummary() + chatBooksContext();
+}
+// Their recipe books in the chat: which are loaded, and the recipes that match what they just asked
+// (searched in the recipe database), so the chef answers from their books and never says it can't see them.
+function chatBooksContext() {
+    if (!recipeDBReady || !recipeDB.count()) return '';
+    const phone = settings.active_provider === 'local';
+    const books = recipeDB.books();
+    const lastUser = [...chatHistory].reverse().find(m => m.role === 'user');
+    const q = lastUser ? String(lastUser.content) : '';
+    const found = q ? recipeDB.search(q, phone ? 3 : 6) : [];
+    const recipe = (r, full) => `"${r.name}" (${r.book}${r.chapter ? `, ${r.chapter}` : ''}${r.nutrition && r.nutrition.calories ? `, about ${Math.round(r.nutrition.calories)} kcal a serving` : ''})` +
+        (full ? `: ingredients ${r.ingredients.slice(0, 14).join('; ')}. Steps: ${r.steps.slice(0, 8).join(' ')}` : '');
+    let text = `\n\nTheir recipe books are loaded in the app and you can use them (${recipeDB.count()} recipes): ` +
+        books.slice(0, 12).map(b => `"${b.title}"${b.author ? ` by ${b.author}` : ''} (${b.count || 0} recipes)`).join(', ') + '.';
+    if (found.length) text += ` Recipes from their books that match what they asked: ` + found.map((r, i) => recipe(r, i < (phone ? 1 : 2))).join(' | ') + '. Say which book a recipe is from.';
+    else if (/\b(book|books|cookbook|cookbooks|epub|pdf)\b/i.test(q)) {
+        const sample = recipeDB.all().filter(r => !r.duplicate_of).slice(0, phone ? 8 : 20).map(r => `${r.name} (${r.book})`);
+        text += ` Some of their book recipes: ${sample.join(', ')}.`;
+    }
+    const notes = q ? cookbookNotes(q, phone ? 1 : 2) : '';
+    return text + (notes ? `\n${notes}` : '');
 }
 
 // Claude needs strictly alternating user/assistant turns that start with the user.
@@ -3284,7 +3305,7 @@ function applyPlan(raw, { navigate = true } = {}) {
         const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
         daysData.forEach((d, i) => {
             if (d.snacks && d.snacks.length) return;
-            NourishPlanner.addSnacks(d, settings, i, servingsWanted(), exclude);
+            NourishPlanner.addSnacks(d, settings, i, servingsWanted(), exclude, bookSnacks());
             if (d.snacks) d.snacks = d.snacks.map(normalizeMeal).filter(Boolean);
         });
     }
@@ -3485,6 +3506,8 @@ async function saveBookRecipes(path, e) {
     Object.assign(e, { fp, bookId: book.id, count: book.count, review: book.review, meals: book.meals, duplicates: book.duplicates });
     return book;
 }
+// Drinks, desserts and sides from their books, as snack ideas (complete, reviewed ones only).
+function bookSnacks() { return recipeDBReady ? recipeDB.extras().filter(r => !r.review && r.nutrition && r.nutrition.calories > 0).slice(0, 60) : []; }
 // Recipes the planner can use: complete book meals (equal candidates, never put first).
 function libraryRecipes() { return recipeDBReady ? recipeDB.forPlanning() : NourishLibrary.allRecipes(libraryIndex()); }
 function librarySummary(index) {
@@ -3596,10 +3619,21 @@ async function openLibraryFolder() {
 
 // "Add files": on the phones the system file picker (the files are copied into the library);
 // on the PC (or a browser) a file chooser whose files are sent to the PC's folder.
+// Copying picked files can take a while for big books: the phone reports each file (libraryAdd).
+// (ondevice.js, which has nativeOn, loads after this file: registered once every script has run.)
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof nativeOn !== 'function') return;
+    nativeOn('libraryAdd', ev => {
+        if (!ev) return;
+        if (ev.state === 'copying') showJobBar('busy', `Adding your files: ${ev.done + 1} of ${ev.total}${ev.name ? ` (${String(ev.name).slice(0, 40)})` : ''}…`);
+        else if (ev.state === 'done') showJobBar(null);
+    });
+});
 async function addLibraryFiles() {
     if (isLocalMode()) {
         try {
             const r = await api('/api/library/add', { method: 'POST', body: {} });
+            showJobBar(null);
             if (r && r.rejected && r.rejected.length) showToast(`${r.rejected.join(', ')}: ${NourishBooks.KINDLE_NOTE}`);
             if (r && r.added) { showToast(`Added ${r.added} file${r.added > 1 ? 's' : ''}. Reading ${r.added > 1 ? 'them' : 'it'} now…`, false); indexLibrary({ quiet: false }); }
         } catch (e) {
@@ -3868,6 +3902,7 @@ function finderOptions(likes, hates) {
         readRecipe: (html, url) => { try { return NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } },
         api: (path, body) => api(path, { method: 'POST', timeoutMs: 45000, body }),
         library: () => libraryRecipes(),
+        snackExtras: () => bookSnacks(),
         pairingScore: r => NourishLibrary.pairingScore(libraryIndex(), r),
         weekday: d => (dayBase() + d) % 7,
         taste: tasteScorer(),
@@ -3966,6 +4001,10 @@ async function runSmartPlan(likes, hates) {
                 : 'No recipes could be found right now. Check your internet connection, or download an AI model in Settings so Nourish can write recipes itself.');
         }
         applyPlan({ days });
+        // Book recipes: how many were candidates and how many made it into the plan.
+        const inPool = new Set(MEAL_TYPES.flatMap(m => (plan.pools[m] || []).filter(r => r.from_book).map(r => r.book_recipe_id || r.name))).size;
+        const chosen = daysData.flatMap(d => MEAL_TYPES.map(t => d[t]).filter(x => x && x.from_book));
+        nlog('plan', `Book recipes: ${inPool} in the pool (of ${recipeDBReady ? recipeDB.forPlanning().length : 0} ready in your books), ${chosen.length} chosen${chosen.length ? `: ${chosen.map(m => `${m.name} (${m.book})`).join(', ')}` : ''}`);
         nlog('plan', `Plan ready in ${Math.round((Date.now() - started) / 100) / 10} s`, days.map((d, i) => `Day ${i + 1}: ${Math.round(NourishPlanner.dayTotals(d).kcal)} kcal`));
         showJobBar(null);
     } catch (err) {
@@ -4808,6 +4847,7 @@ function renderCookbook() {
         h('div', { class: 'sheet-header' },
             h('div', {}, h('div', { class: 'eyebrow', text: `${cookbook.recipes.length} saved` }), h('h2', { class: 'title', text: 'Cookbook' })),
             h('div', { class: 'header-actions' },
+                recipeDBReady && recipeDB.books().length ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'My books', title: 'My books', onclick: () => { closeCookbook(); openBook(null); } }, icon('i-book')) : null,
                 h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Add a recipe from a link', onclick: () => showImportSheet() }, icon('i-plus')),
                 h('button', { type: 'button', class: 'icon-btn btn-close', 'aria-label': 'Close', onclick: closeCookbook }, icon('i-close')))),
         h('div', { class: 'sheet-body cookbook-body' },
@@ -4832,6 +4872,20 @@ function renderCookbook() {
                             h('span', { class: 'plan-meal-meta', text: [mealTime(e.recipe).text, on('show_nutrition') && e.recipe.nutrition ? `${formatCalories(e.recipe.nutrition.calories)} kcal` : ''].filter(Boolean).join(' · ') }),
                             h('span', { class: 'cookbook-source' }, icon(e.source === 'imported' ? 'i-link' : 'i-sparkle'), e.source === 'imported' ? (e.recipe.source_name || 'Imported') : 'Made by Nourish')),
                         icon('i-chevron', 'chev'))))));
+    // Recipes from their books match the search too (shown after the saved ones).
+    const body = $('cookbookSearch') && $('cookbookSearch').closest('.cookbook-body');
+    if (body && recipeDBReady && f.q.trim().length > 2) {
+        const fromBooks = recipeDB.search(f.q, 12).filter(r => f.type === 'all' || (r.meal_types || []).includes(f.type));
+        if (fromBooks.length) body.append(h('div', { class: 'cookbook-books' },
+            h('div', { class: 'settings-group-label', text: `From your books (${fromBooks.length})` }),
+            h('div', { class: 'cookbook-list' }, fromBooks.map(r => h('button', { type: 'button', class: 'cookbook-card', onclick: () => openBookRecipe(r) },
+                h('span', { class: `dot art-${bookMealType(r)}` }, icon(MEAL_ICONS[bookMealType(r)])),
+                h('span', { class: 'cookbook-card-body' },
+                    h('span', { class: 'plan-meal-type', text: (r.meal_types || []).map(m => MEAL_LABELS[m]).join(', ') || r.kind }),
+                    h('span', { class: 'plan-meal-name', text: r.name }),
+                    h('span', { class: 'cookbook-source' }, icon('i-book'), `From your book: ${r.book}`)),
+                icon('i-chevron', 'chev'))))));
+    }
     if (hadFocus) { const s = $('cookbookSearch'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
 }
 

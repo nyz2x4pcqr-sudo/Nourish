@@ -95,7 +95,16 @@
             source_id: (source && source.id) || r.source_id || undefined,
             healthy: !!(source && source.healthy) || undefined,
             library_path: r.library_path || undefined,
+            // A recipe from the person's books (recipedb.js) keeps where it came from.
+            from_book: r.from_book || undefined,
+            book: r.book || undefined,
+            author: r.author || undefined,
+            chapter: r.chapter || undefined,
+            page: r.page || undefined,
+            book_id: r.book_id || undefined,
+            book_recipe_id: r.from_book ? (r.book_recipe_id || r.id) : undefined,
         };
+        Object.keys(out).forEach(k => { if (out[k] === undefined) delete out[k]; });
         if (out.ingredients.length < 3 || !out.steps.length) return null;
         return out;
     }
@@ -842,7 +851,7 @@
         const { pools, stats, adaptable } = await findRecipes(o);
         const sourcePenalty = r => sourceCost(r, o);
         const exclude = P.excluder({ avoid: o.avoid || '', allergies: (o.settings && o.settings.allergies) || '', diet: (o.settings && o.settings.diet) || '' });
-        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal, builtin_mode: 'backup' }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste, favorites: o.favorites });
+        const plan = PL.planWeek({ pools, settings: Object.assign({ goal: o.goal, builtin_mode: 'backup' }, o.settings), likes: o.likes, days: o.days || 7, people: o.people || 1, sourcePenalty, already: o.already || [], exclude, weekday: o.weekday, taste: o.taste, favorites: o.favorites, snackExtras: o.snackExtras ? o.snackExtras() : [] });
         plan.days.forEach(d => PL.MEALS.forEach(m => { if (d[m]) { delete d[m]._fit; delete d[m].sameAs; delete d[m].preferred; } }));
         return Object.assign(plan, { stats, pools, adaptable });
     }
