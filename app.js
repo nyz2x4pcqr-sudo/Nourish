@@ -3963,7 +3963,12 @@ async function refreshRecipeLibrary({ manual = false } = {}) {
     try {
         if (planJob || settings.plan_source === 'ai') { if (manual) showToast('Wait for the plan to finish first'); return; }
         if (!manual && (document.hidden || Number(load(LIBRARY_REFRESH_KEY, 0)) > Date.now() - 3 * 3600e3)) return;
-        if (!manual && !(await onWifi())) { nlog('sources', 'Recipe library: not refreshed (not on Wi-Fi)', null, 'debug'); return; }
+        if (!manual && !(await onWifi())) {
+            // Said once a session in the log (it's checked again later), so a library that doesn't grow can be explained.
+            if (!libraryRefreshNoted) nlog('sources', 'Recipe library: waiting for Wi-Fi to look for new recipes', null, 'info');
+            libraryRefreshNoted = true;
+            return;
+        }
         libraryRefreshing = true;
         if (manual) { showJobBar('busy', 'Finding new recipes for your library…'); if (settingsPage === 'advanced') renderSettings(); }
         store(LIBRARY_REFRESH_KEY, String(Date.now()));
@@ -3984,8 +3989,13 @@ async function refreshRecipeLibrary({ manual = false } = {}) {
         if (manual) { showJobBar(null); if (settingsPage === 'advanced') renderSettings(); }
     }
 }
-// Checks every half hour while the app is open (it only refreshes every 3 hours, on Wi-Fi).
+// Checked shortly after the app opens, whenever it comes back to the screen, and every half hour
+// while it's open (it only refreshes every 3 hours, on Wi-Fi). 0.1.10 only checked every half hour,
+// so with short visits the library never grew.
+let libraryRefreshNoted = false;
 setInterval(() => { refreshRecipeLibrary(); }, 30 * 60e3);
+setTimeout(() => { refreshRecipeLibrary(); }, 20e3);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(() => refreshRecipeLibrary(), 5e3); });
 
 async function runSmartPlan(likes, hates) {
     const started = Date.now();

@@ -55,3 +55,46 @@ test('Nourish recipes are a backup: with enough web recipes, a plan uses none; "
     return F.findRecipes({ settings: { builtin_mode: 'off' }, days: 7, enabled: () => true, fetchPage: async () => ({ status: 403 }), readRecipe: () => null, offline: true })
         .then(res => assert.ok(!res.pools.breakfast.concat(res.pools.lunch, res.pools.dinner).some(r => r.source_id === 'builtin')));
 });
+
+test('a plan still tries a few fresh searches when the library already covers every meal (0.1.10 searched nothing)', async () => {
+    const site = { id: 'freshsite', name: 'Fresh Site', domain: 'fresh-recipes.com', status: 'ok', find: ['wp'], search: 'wp' };
+    S.SITES.push(site);
+    const store = {};
+    const cache = { get: k => (k in store ? JSON.parse(store[k]) : null), set: (k, v) => { store[k] = JSON.stringify(v); } };
+    // A library that already holds plenty for every meal.
+    const lib = {};
+    const kinds = [['Breakfast', 'Egg Scramble'], ['Lunch', 'Chicken Salad Bowl'], ['Main Course', 'Beef Stir Fry']];
+    const words = ['Smoky', 'Herby', 'Spicy', 'Lemony', 'Garlicky', 'Gingery', 'Zesty', 'Golden', 'Crispy', 'Saucy', 'Rustic', 'Sunny', 'Bright', 'Cozy', 'Fiery', 'Tangy', 'Savory', 'Toasty', 'Fresh', 'Classic', 'Hearty', 'Simple', 'Quick', 'Easy'];
+    kinds.forEach(([cat, dish], k) => words.forEach((w, i) => {
+        const r = JSON.parse(page(`${w} ${dish}`, cat));
+        if (k === 0) { r.ingredients = ['3 large eggs', '1 slice whole wheat bread', '1/2 avocado', '1 tsp olive oil', '1/4 tsp salt', '1 cup spinach']; r.steps = ['Whisk the eggs with the salt.', 'Scramble them in the oil with the spinach for 3 minutes.', 'Serve with the toast and avocado.']; }
+        const url = `https://fresh-recipes.com/saved-${k}-${i}/`;
+        lib[url] = { at: Date.now(), r: F.tidy(Object.assign(r, { source_url: url, source_name: 'Fresh Site' }), site) };
+    }));
+    store[F.CACHE.recipes] = JSON.stringify(lib);
+    const asked = [];
+    const fetchPage = async url => {
+        const u = new URL(url);
+        if (u.pathname === '/robots.txt') return { status: 404, body: '' };
+        if (u.pathname.endsWith('/categories')) return { status: 200, url, body: '[]' };
+        if (u.pathname === '/wp-json/wp/v2/posts') { asked.push(url); return { status: 200, url, body: '[]' }; }
+        return { status: 404, body: '' };
+    };
+    try {
+        const res = await F.findRecipes({ settings: {}, days: 7, enabled: id => id === site.id, fetchPage, readRecipe: () => null, cache, limits: { seconds: 10 } });
+        assert.ok(res.stats.fromCache >= 60, `library: ${res.stats.fromCache}`);
+        assert.ok(res.stats.searches >= 3 && res.stats.searches <= 6, `searches: ${res.stats.searches}`);
+    } finally { S.SITES.splice(S.SITES.indexOf(site), 1); }
+});
+
+test('TheMealDB: the same searches are asked once, then kept for 3 days', async () => {
+    const store = {};
+    const cache = { get: k => (k in store ? JSON.parse(store[k]) : null), set: (k, v) => { store[k] = JSON.stringify(v); } };
+    let calls = 0;
+    const api = async path => { if (path === '/api/recipes/themealdb') { calls++; return { meals: [] }; } throw new Error('no'); };
+    const o = { settings: {}, days: 7, enabled: id => id === 'themealdb', fetchPage: async () => ({ status: 404, body: '' }), readRecipe: () => null, cache, api, limits: { seconds: 5 } };
+    await F.findRecipes(o);
+    await F.findRecipes(o);
+    await F.findRecipes(o);
+    assert.equal(calls, 1);
+});

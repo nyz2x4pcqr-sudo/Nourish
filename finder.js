@@ -20,7 +20,7 @@
 
     // Gentle and quick: a few requests at a time, caps on searches and pages, and a time limit.
     const LIMITS = { parallel: 4, searches: 36, pages: 72, seconds: 25, cachedRecipes: 1200, perSlot: 21 };
-    const CACHE = { recipes: 'nourish_recipe_cache', searches: 'nourish_search_cache', sitemaps: 'nourish_sitemap_cache', failures: 'nourish_source_failures', categories: 'nourish_site_categories', pages: 'nourish_search_pages', listings: 'nourish_search_listings', robots: 'nourish_site_robots' };
+    const CACHE = { recipes: 'nourish_recipe_cache', searches: 'nourish_search_cache', sitemaps: 'nourish_sitemap_cache', failures: 'nourish_source_failures', categories: 'nourish_site_categories', pages: 'nourish_search_pages', listings: 'nourish_search_listings', robots: 'nourish_site_robots', mealdb: 'nourish_mealdb_cache' };
     const DAY = 24 * 3600 * 1000;
 
     // What to look for, meal by meal (breakfast words for breakfast, and so on). Each plan starts
@@ -657,7 +657,17 @@
             apiJobs.push((async () => {
                 const seed = Math.floor(ctx.now() / DAY);
                 const terms = queriesFor('dinner', o, seed).slice(0, 3).concat(['soup', 'salad']).join(',');
-                const data = await o.api('/api/recipes/themealdb', { query: terms, number: 30 });
+                // The same searches give the same answers: kept for 3 days (0.1.10 asked the same five
+                // searches on every plan).
+                const saved = ctx.cache.get(CACHE.mealdb) || {};
+                let data = saved[terms] && saved[terms].at > ctx.now() - 3 * DAY ? saved[terms].data : null;
+                if (data) ctx.trace(`themealdb: "${terms}" from the last 3 days`);
+                else {
+                    data = await o.api('/api/recipes/themealdb', { query: terms, number: 30 });
+                    const keep = Object.fromEntries(Object.entries(saved).filter(([, v]) => v && v.at > ctx.now() - 3 * DAY).sort((a, b) => b[1].at - a[1].at).slice(0, 3));
+                    keep[terms] = { at: ctx.now(), data: { meals: ((data && data.meals) || []).slice(0, 30) } };
+                    saveCache(ctx, CACHE.mealdb, keep);
+                }
                 let n = 0;
                 ((data && data.meals) || []).forEach(m => { if (n < 12 && add(fromMealDb(m), S.byId('themealdb'))) n++; });
             })().catch(e => { siteFailed(ctx, 'themealdb', e.message, e.blocked); }));
@@ -703,9 +713,15 @@
         // The next search: for the meal that's furthest from enough, the next site in turn that
         // suits it, with a word not tried on that site yet.
         const spent = { breakfast: 0, lunch: 0, dinner: 0 };
+        // A few fresh searches every plan even when the library already has enough (0.1.10 searched
+        // nothing once the library covered every meal, so it never grew): new recipes for variety,
+        // within the plan's few seconds.
+        const freshSearches = o.grow ? 0 : (limits.fresh != null ? limits.fresh : 6);
         const nextTask = () => {
             // Every meal gets its turn, the ones furthest from enough more often.
-            const meals = MEALS.filter(m => short(m) > 0).sort((x, y) => short(y) / (1 + spent[y]) - short(x) / (1 + spent[x]));
+            let meals = MEALS.filter(m => short(m) > 0).sort((x, y) => short(y) / (1 + spent[y]) - short(x) / (1 + spent[x]));
+            let fresh = false;
+            if (!meals.length && searches < freshSearches) { meals = MEALS.filter(m => want(m)).sort((x, y) => spent[x] - spent[y]); fresh = true; }
             for (const meal of meals) {
                 const suited = sites.filter(s => usableSite(s) && siteSuits(s, meal, '') && (sitePages[s.id] || 0) < fairPages);
                 for (let k = 0; k < suited.length; k++) {
@@ -714,7 +730,7 @@
                     const list = siteQueries(site, meal, queries[meal]);
                     const offset = (sites.indexOf(site) * 3) % Math.max(1, list.length);
                     const q = list.slice(offset).concat(list.slice(0, offset)).find(x => !tried.has(`${site.id}|${meal}|${x}`));
-                    if (q) { tried.add(`${site.id}|${meal}|${q}`); spent[meal]++; return { site, meal, q }; }
+                    if (q) { tried.add(`${site.id}|${meal}|${q}`); spent[meal]++; return { site, meal, q, fresh }; }
                 }
             }
             return null;
@@ -770,7 +786,7 @@
                     const good = list.filter(l => goodLink(l, t.site, t.meal, ctx)).map(l => Object.assign({}, l, { url: String(l.url).split('#')[0] })).filter(l => !seenLinks.has(l.url));
                     count(ctx, t.site.id, 'links');
                     for (const l of good.slice(0, o.grow ? 6 : 4)) {
-                        if (ctx.timeUp() || pages >= limits.pages || short(t.meal) <= 0 || !usableSite(t.site) || (sitePages[t.site.id] || 0) >= fairPages) break;
+                        if (ctx.timeUp() || pages >= limits.pages || (short(t.meal) <= 0 && !t.fresh) || !usableSite(t.site) || (sitePages[t.site.id] || 0) >= fairPages) break;
                         seenLinks.add(l.url);
                         await readPage(l, t.site, t.meal);
                     }
