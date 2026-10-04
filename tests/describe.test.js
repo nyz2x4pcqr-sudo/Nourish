@@ -34,10 +34,25 @@ test('a description made in code from the recipe when there is no AI or it fails
     const d = O.describeFromRecipe({ name: 'Lemon Chicken Traybake', time_minutes: 45,
         ingredients: ['8 chicken thighs', '500 g new potatoes, halved', '1 lemon, sliced', '3 garlic cloves', '2 tbsp olive oil', '1 tsp salt'],
         steps: ['Heat the oven to 200C.', 'Toss everything in a roasting tin and roast for 40 minutes.'] });
-    assert.equal(d, 'Chicken thighs, new potatoes and lemon, roasted. About 45 minutes.');
+    assert.equal(d, 'Roasted chicken thighs with new potatoes, lemon and garlic. About 45 minutes.');
     const salad = O.describeFromRecipe({ name: 'Chickpea Salad', ingredients: ['1 can chickpeas', '1 cup cherry tomatoes', '1/2 cucumber', '2 tbsp olive oil', 'salt'], steps: ['Mix everything in a bowl and serve.'] });
-    assert.match(salad, /^Chickpeas, cherry tomatoes and (1\/2 )?cucumber, no cooking needed\./);
+    assert.match(salad, /^Salad made with chickpeas, cherry tomatoes and cucumber\./);
     assert.equal(O.describeFromRecipe({ name: 'Water', ingredients: ['1 cup water'], steps: [] }), '');
+});
+
+test('the made description describes the dish, never the ingredient list (0.1.12: "Gallon water, kosher salt and beef marrow bones, roasted")', () => {
+    const A = require('../tools/audit-recipes.js');
+    const marrow = A.ALL.find(r => /Bone Marrow/.test(r.title));
+    const d = O.describeFromRecipe({ name: marrow.title, ingredients: marrow.ingredients, steps: marrow.steps, servings: 4 });
+    assert.match(d, /^Roasted beef marrow bones with /);
+    assert.doesNotMatch(d, /\b(water|gallon|kosher salt|cup|tablespoons?)\b/i);
+    A.ALL.forEach(r => {
+        const t = O.describeFromRecipe({ name: r.title, ingredients: r.ingredients, steps: r.steps, servings: 4 });
+        assert.match(t, /^[A-Z][^.]+\.( About [\d.]+ (minutes|hours)\.)?$/, `${r.title}: ${t}`);
+        assert.doesNotMatch(t, /\b\d+\s*(cups?|tbsp|tsp|tablespoons?|teaspoons?|pounds?|lbs?|oz|g|gallons?)\b|\bfor (deep[- ])?frying\b/i, `${r.title}: ${t}`);
+    });
+    const fried = A.ALL.find(r => /Fish and Chips/.test(r.title));
+    assert.match(O.describeFromRecipe({ name: fried.title, ingredients: fried.ingredients, steps: fried.steps, servings: 4 }), /^Fried cod fillets with /);
 });
 
 // 0.1.12: descriptions were cut off mid-sentence ("…topped with coarse.") and sometimes invented

@@ -19,13 +19,16 @@
     // === MEAL TYPES ===
     const BREAKFAST = /\b(breakfast|brunch|oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|crepes?|french toast|omelet+e?s?|frittatas?|scrambled?|scramble|eggs? benedict|shakshuka|smoothie|parfait|yogh?urt bowl|chia (seed )?pudding|muffins?|scones?|breakfast burrito|avocado toast|toast|bagels?|hash browns?|huevos|congee|egg (muffin|cup|bite)s?|egg bake|breakfast bowl|overnight|acai|quiche|dutch baby|cr[eê]pe)\b/i;
     const ONLY_BREAKFAST = /\b(oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|french toast|smoothie|parfait|chia (seed )?pudding|muffins?|scones?|overnight|acai|cereal)\b/i;
-    const DESSERT = /\b(cake|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
+    const DESSERT = /\b(cakes?|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
     const NOT_DESSERT = /\b(chia( seed)? pudding|protein pudding|overnight|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry|rice cakes?|crab cakes?|fish cakes?|salmon cakes?|tuna cakes?|potato cakes?|pancakes?)\b/i;
-    const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|pasanda|jalfrezi|rogan josh|goulash|hotpot|cottage pie|shepherd'?s pie|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib)\b/i;
+    const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|pasanda|jalfrezi|rogan josh|goulash|hotpot|cottage pie|shepherd'?s pie|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib|oxtail|pernil|pork shoulder|fried chicken|fish (and|&) chips|beer[- ]battered)\b/i;
     // Fine for dinner, too much for a quick lunch.
     const HEAVY_LUNCH = /\b(baked (pasta|ziti|penne|rigatoni|macaroni|mac|spaghetti|gnocchi)|pasta bake|mac and cheese bake|stuffed shells|manicotti|cannelloni|pot roast|roast (chicken|turkey|lamb|pork|beef|duck)|whole (chicken|fish|turkey)|beef wellington|pie|gratin|moussaka|pastitsio|osso buco|cassoulet|coq au vin|bourguignon|slow cooker|crock ?pot|braised)\b/i;
     const NOT_A_MEAL = /\b(sauce|dressing|dip|marinade|seasoning|spice (mix|blend)|stock|broth|syrup|jam|butter|vinaigrette|gravy|salsa|pesto|chutney|pickle[sd]?|drink|cocktail|mocktail|lemonade|tea|coffee|latte|juice|bread|loaf|rolls|buns|crackers|croutons|bars|bites|energy balls|protein balls|trail mix|popcorn|chips)$/i;
     const SIDE = /\b(side|sides|side dish|appetizers?|starters?|snacks?)\b/i;
+    // A starter anywhere in the name; a dip or spread when it's the dish itself ("Smooth Hummus", not "Hummus Toast").
+    const STARTER = /\b(bone marrow|marrow bones?|p[âa]t[ée]s?|terrines?|rillettes|crostini|canap[ée]s?|bruschetta)\b/i;
+    const SPREAD = /\b(hummus|houmous|tapenade|tzatziki|baba ganoush|guacamole|dips?|spreads?|coleslaw|slaw)$/i;
     // Parts of a meal, not a meal: eggs marinated or boiled to go with something, "how to cook…".
     const COMPONENT = /\b(marinated|pickled|deviled|devilled|hard[- ]?boiled|soft[- ]?boiled|jammy|soy[- ]sauce|tea|ramen|mayak|onsen|scotch) eggs?\b|\bhow to (cook|make|boil|poach|fry|store|freeze)\b/i;
     // A savoury porridge or congee with meat or fish is a lunch or dinner, not a breakfast.
@@ -58,10 +61,19 @@
         const mealCat = /breakfast|brunch|lunch|dinner|main|entr[eé]e|supper/.test(cat);
         if ((DESSERT.test(name) && !NOT_DESSERT.test(name)) || (/dessert|baking|treat/.test(cat) && !mealCat)) return { breakfast: false, lunch: false, dinner: false, why: 'a dessert' };
         if (COMPONENT.test(name)) return { breakfast: false, lunch: false, dinner: false, why: 'a side or component, not a meal' };
+        // Starters and spreads: bone marrow on toast, pâté, crostini, hummus. Rich, small and mostly fat.
+        const dishName = name.replace(/\s+(with|in|on|over|served with|and a side of)\s+.*$/i, '').trim();
+        if (STARTER.test(name) || (SPREAD.test(dishName) && !/\b(chicken|beef|pork|turkey|tuna|salmon|shrimp|prawns?|tofu|tempeh|eggs?|lentils?|beans|chickpeas|steak|fish|crab)\b/i.test(dishName))) return { breakfast: false, lunch: false, dinner: false, why: 'a starter or spread, not a meal' };
+        // Whatever it's called: a dish whose calories are mostly fat with little protein is a starter,
+        // spread or sauce (bone marrow is 85% fat), never a meal to pad with chicken.
+        const nf = r.nutrition;
+        // Too light to be a meal even at a double portion: a side (green beans, a small salad).
+        if (nf && Number(nf.calories) > 0 && Number(nf.calories) < 150 && Number(nf.protein_g || 0) < 6) return { breakfast: false, lunch: false, dinner: false, why: 'a side: too light to be a meal' };
+        if (nf && Number(nf.calories) > 0 && Number(nf.fat_g) * 9 / Number(nf.calories) > 0.7 && Number(nf.protein_g || 0) * 4 / Number(nf.calories) < 0.12) return { breakfast: false, lunch: false, dinner: false, why: 'mostly fat with little protein: a starter, spread or sauce, not a meal' };
         // "Salmon Tacos with Mango Salsa" is tacos and "Eggs in Spicy Tomato Sauce" is eggs: only the
         // dish itself counts, not what it comes with or in.
         const dish = name.replace(/\s+(with|in|on|over|served with|and a side of)\s+.*$/i, '').trim();
-        if (NOT_A_MEAL.test(dish) || /\b(sauce|drink|beverage|condiment|dressing)\b/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'not a meal' };
+        if ((NOT_A_MEAL.test(dish) && !/\b(fish|chicken|steak) (and|&|n'?) chips$/i.test(dish)) || /\b(sauce|drink|beverage|condiment|dressing)\b/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'not a meal' };
         // A dish that says it's a breakfast and is made with eggs ("Breakfast Enchiladas", "Breakfast
         // Casserole") is a breakfast, whatever else it is.
         const eggBreakfast = /\b(breakfast|brunch)\b/i.test(name) && (/\beggs?\b/.test(ings) || /\beggs?\b/i.test(name));
@@ -93,7 +105,7 @@
     // its steps, ingredients and techniques. Recipes that don't fit a slot are rejected in code.
     const STAPLES = /^(salt|kosher salt|sea salt|black pepper|pepper|ground black pepper|water|ice|cooking spray|oil|olive oil|vegetable oil|canola oil|salt and pepper)$/i;
     const TECHNIQUES = [
-        ['bake', /\b(bake|baked|baking|oven)\b/i, 20], ['roast', /\broast(ed|ing)?\b/i, 30], ['braise', /\b(braise[ds]?|braising)\b/i, 90],
+        ['bake', /\b(bake|baked|baking(?! (powder|soda))|oven)\b/i, 20], ['roast', /\broast(ed|ing)?\b/i, 30], ['braise', /\b(braise[ds]?|braising)\b/i, 90],
         ['slow cook', /\b(slow cook(er)?|crock ?pot|low and slow)\b/i, 240], ['deep-fry', /\bdeep[- ]?fr(y|ied|ying)\b/i, 20], ['fry', /\b(fry|fried|frying|pan-fry)\b/i, 8],
         ['sear', /\bsear(ed|ing)?\b/i, 6], ['sauté', /\bsaut[eé](e?d|ing)?\b/i, 6], ['simmer', /\bsimmer(ed|ing)?\b/i, 15], ['boil', /\b(boil|boiled|boiling)\b/i, 10],
         ['grill', /\b(grill|grilled|grilling|broil)\b/i, 12], ['steam', /\bsteam(ed|ing)?\b/i, 8], ['poach', /\bpoach(ed|ing)?\b/i, 8], ['blend', /\b(blend|blender|puree|purée)\b/i, 2],
@@ -250,7 +262,7 @@
         'lettuce', 'cabbage', 'brussels sprouts', 'bok choy', 'asparagus', 'green beans', 'mushrooms', 'corn', 'potato', 'sweet potato', 'butternut squash', 'beet', 'radish',
         'avocado', 'artichoke', 'leek', 'fennel', 'snow peas', 'peas']);
     function weighed(r) {
-        if (!r._lines) r._lines = N.calculate(r.ingredients || [], r.servings || 1).lines;
+        if (!r._lines) r._lines = N.calculate(r.ingredients || [], r.servings || 1, r.steps).lines;
         return r._lines;
     }
     function heaviest(r, pick) {
@@ -408,7 +420,7 @@
     // up to `kcal` per serving. Seasoning is never touched. Returns the calories saved per serving.
     function trimRich(r, kcal) {
         if (kcal <= 0) return 0;
-        const before = N.calculate(r.ingredients, r.servings).nutrition.calories;
+        const before = N.calculate(r.ingredients, r.servings, r.steps).nutrition.calories;
         r.ingredients = r.ingredients.map(line => {
             if (!(FATTY.test(line) || SWEET.test(line)) || /\b(spray|for greasing)\b/i.test(line)) return line;
             const item = U.splitIngredient(line);
@@ -418,17 +430,17 @@
             return scaleLine(line, 0.5);
         });
         delete r._lines;
-        const after = N.calculate(r.ingredients, r.servings).nutrition.calories;
+        const after = N.calculate(r.ingredients, r.servings, r.steps).nutrition.calories;
         if (before - after > 0) r.trimmed = true;
         return before - after;
     }
     // Cuts oil and sugar, then lowers the recipe's numbers by what the cut saved (worked out from the
     // ingredients, so the source's own numbers stay the base).
     function trimAndRecount(r, kcal) {
-        const before = N.calculate(r.ingredients, r.servings).nutrition;
+        const before = N.calculate(r.ingredients, r.servings, r.steps).nutrition;
         trimRich(r, kcal);
         if (!r.trimmed) return;
-        const after = N.calculate(r.ingredients, r.servings).nutrition;
+        const after = N.calculate(r.ingredients, r.servings, r.steps).nutrition;
         const n = r.nutrition;
         r.nutrition = { calories: Math.max(1, n.calories - (before.calories - after.calories)), protein_g: Math.max(0, n.protein_g - (before.protein_g - after.protein_g)),
             carbs_g: Math.max(0, n.carbs_g - (before.carbs_g - after.carbs_g)), fat_g: Math.max(0, n.fat_g - (before.fat_g - after.fat_g)) };
@@ -446,11 +458,11 @@
         // Honest numbers: worked out again from the amounts as written after scaling (2 eggs, not
         // 1.7), as a change to the recipe's settled numbers (which may be the site's own, checked
         // against our calculation). An amount that can't be scaled ("a handful") falls back on the portion.
-        const n = r.nutrition || N.calculate(r.ingredients, from).nutrition;
+        const n = r.nutrition || N.calculate(r.ingredients, from, r.steps).nutrition;
         let before = baseCalc.get(r);
-        if (!before || before.from !== from || before.list !== r.ingredients) { before = { from, list: r.ingredients, n: N.calculate(r.ingredients, from).nutrition }; baseCalc.set(r, before); }
+        if (!before || before.from !== from || before.list !== r.ingredients) { before = { from, list: r.ingredients, n: N.calculate(r.ingredients, from, r.steps).nutrition }; baseCalc.set(r, before); }
         before = before.n;
-        const after = N.calculate(out.ingredients, people).nutrition;
+        const after = N.calculate(out.ingredients, people, r.steps).nutrition;
         const ratio = key => (before[key] > 0 && after[key] >= 0 ? after[key] / before[key] : factor);
         const kcalRatio = before.calories > 0 && after.calories > 0 ? after.calories / before.calories : factor;
         // Lines the calculator can't see (unmatched) keep scaling with the portion.
@@ -482,7 +494,10 @@
     // recipes as written). Totals are never forced or rounded to the target.
     // items: [{ key, r, want }] (r with settled numbers, want: its kcal share). fixed: kcal already in the day.
     function sizeMeals(items, target, people, fixed = 0) {
-        const choices = items.map(it => portionOptions(it.want / it.r.nutrition.calories).map(p => {
+        // A meal already at a portion (`base`, say ¾) is sized from there, so the portion it ends at is
+        // still a quarter serving (¾ × ¾ would be an uncookable 0.56).
+        const choices = items.map(it => portionOptions((it.base || 1) * it.want / it.r.nutrition.calories).map(abs => {
+            const p = abs / (it.base || 1);
             const out = scaleRecipe(it.r, p, people);
             if (Math.abs(p - 1) < 0.01 && Number(it.r.servings) === people) delete out.scaled;
             return { p, out };
@@ -775,10 +790,12 @@
         if (!n || !(kcal > 0)) return r;
         trimAndRecount(r, kcal);
         const want = Math.max(n * 0.6, n - kcal);
-        const f = Math.min(1, Math.max(0.75, snapPortion(want / r.nutrition.calories)));   // ¾ at the least: still a meal
         const prev = meal.scaled ? meal.scaled.portion : 1;
+        // The new portion is a quarter serving (never an odd 1.31), at least ¾ of what it was: still a meal.
+        const abs = Math.min(prev, Math.max(snapPortion(prev * 0.75), snapPortion(prev * want / r.nutrition.calories)));
+        const f = abs / prev;
         const out = scaleRecipe(Object.assign({}, r, { servings: people || r.servings || 1 }), f, people || r.servings || 1);
-        out.scaled = { from_servings: (meal.scaled && meal.scaled.from_servings) || r.servings || 1, portion: Math.round(prev * f * 100) / 100 };
+        out.scaled = { from_servings: (meal.scaled && meal.scaled.from_servings) || r.servings || 1, portion: abs };
         return out;
     }
     // Sizes the portions of a day that was made another way (by the AI, or edited) so it lands on the
@@ -798,7 +815,7 @@
             // Already sized (amounts are for `people`): work from one serving as it stands.
             if (copy.scaled) copy.servings = people || Number(copy.servings) || 1;
             if (kcal / copy.nutrition.calories < 0.85) trimAndRecount(copy, copy.nutrition.calories - kcal / 0.85);
-            items.push({ key: m, r: copy, want: kcal, prev: r });
+            items.push({ key: m, r: copy, want: kcal, prev: r, base: r.scaled && r.scaled.portion > 0 ? r.scaled.portion : 1 });
         });
         const sized = sizeMeals(items, Math.max(1, targets.kcal - fixed), people || 1);
         items.forEach(it => {
@@ -1099,7 +1116,10 @@
         notes.push(...fiber.notes);
         const protein = balanceProtein(fiber.day, settings, people, exclude);
         notes.push(...protein.notes);
-        return { day: protein.day, notes };
+        // Adding protein can shrink a portion, and the day's fiber with it: checked once more.
+        const again = balanceFiber(protein.day, settings, people, exclude);
+        notes.push(...again.notes);
+        return { day: again.day, notes };
     }
 
     // === SNACKS ===

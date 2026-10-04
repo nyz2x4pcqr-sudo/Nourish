@@ -2467,7 +2467,7 @@ function nutritionPanel(meal) {
 function calorieBreakdown(meal) {
     if (!(meal.ingredients || []).length || typeof NourishNutrition === 'undefined') return null;
     const servings = Math.max(1, Number(meal.servings) || 1);
-    const c = NourishNutrition.calculate(meal.ingredients, servings);
+    const c = NourishNutrition.calculate(meal.ingredients, servings, meal.steps);
     const rows = c.lines.filter(l => l.kcal > 0 || l.assumed).sort((a, b) => b.kcal - a.kcal);
     const check = meal.nutrition_check;
     const shown = meal.nutrition && meal.nutrition.calories;

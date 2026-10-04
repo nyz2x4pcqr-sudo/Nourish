@@ -656,34 +656,63 @@ async function aiDescribe(run, meal) {
     }
     return t;
 }
-// A description made from the recipe itself, for when no AI is set up or it fails: its main
-// ingredients, how it's cooked and how long it takes. "Chicken thighs, new potatoes and lemon,
-// roasted together. About 45 minutes."
-const DESC_STAPLE = /^(salt|pepper|black pepper|water|oil|olive oil|vegetable oil|butter|sugar|flour|cooking spray|garlic|onion|kosher salt|sea salt|ice)$/i;
+// A description made from the recipe itself, for when no AI is set up or it fails: what the dish
+// is (its main food first, by how much of the dish it is, then a few others) and how it's cooked.
+// "Roasted beef marrow bones with crusty bread, parsley and shallots. About 35 minutes." Never the
+// ingredient list: no amounts, no staples (water, salt, oil), nothing that's thrown away (a brine).
+const DESC_STAPLE = /^(salt|pepper|black pepper|white pepper|water|ice|oil|olive oil|extra[- ]virgin olive oil|vegetable oil|canola oil|cooking oil|butter|sugar|flour|all[- ]purpose flour|plain flour|cooking spray|kosher salt|sea salt|coarse sea salt|flaky salt|salt and pepper|baking powder|baking soda|cornstarch|stock|broth|chicken stock|vegetable broth|chicken broth|vinegar)$/i;
+const DESC_UNITS = /^(cups?|tbsps?|tsps?|tablespoons?|teaspoons?|g|grams?|kg|ml|l|litres?|liters?|oz|ounces?|lbs?|pounds?|cans?|tins?|jars?|packets?|packages?|cloves?|pinch(es)?|handfuls?|slices?|thick slices?|bunch(es)?|heads?|sprigs?|stalks?|sticks?|racks?|pieces?|fillets?|gallons?|quarts?|pints?|dash(es)?|large|medium|small|whole|ears?|bags?|knobs?)\b\.?\s*/i;
+const DESC_PROTEIN = /\b(chicken|beef|steak|pork|ribs|lamb|turkey|duck|fish|cod|salmon|tuna|trout|haddock|tilapia|halibut|mackerel|sardines?|shrimp|prawns?|scallops?|mussels|clams|crab|lobster|eggs?|tofu|tempeh|lentils|chickpeas|beans|oxtail|marrow|sausage|bacon|ham|chorizo|meatballs|mince|paneer|halloumi|cottage cheese|greek yogurt)\b/;
+const DESC_DISH = /\b(pancakes|waffles|crepes|omelette|omelet|frittata|shakshuka|scramble|porridge|overnight oats|oatmeal|granola|parfait|smoothie bowl|smoothie|chili|chilli|stew|soup|curry|stir-fry|salad|grain bowls?|bowls?|tacos|burritos?|quesadillas?|enchiladas|wraps?|sandwich(es)?|burgers?|lasagna|lasagne|risotto|paella|pasta|noodles|fried rice|casserole|pie|tart|lassi|dip|hummus|coleslaw|slaw|chimichurri|sauce|cakes?|flan)\b/;
+function descFood(line) {
+    let t = String(line).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/\b(bone-in|skin-on|boneless|skinless|shell-on|head-on|fresh|large|small|medium),\s*/g, '$1 ')
+        .replace(/,.*$/, '').replace(/\b(for|to) (serve|serving|garnish|the brine|frying|deep[- ]frying|fry)\b.*$/, '');
+    t = t.replace(/^[\d\s/.½¼¾⅓⅔⅛-]+/, '').replace(/^x\s+/, '');
+    for (let i = 0; i < 3; i++) t = t.replace(DESC_UNITS, '').replace(/^(of|a|an)\s+/, '');
+    t = t.replace(/^(fresh|freshly|chopped|sliced|diced|minced|grated|shredded|thinly|finely|roughly|boneless|skinless|bone-in|skin-on|shell-on|frozen|cooked|uncooked|dried|ground|large|medium|small|extra|plain|baby|ripe|good|quality|crusty)\s+/g, m => (/^(baby|ground|crusty|dried)\s/.test(m) ? m : ''))
+        .replace(/\b(leaves|florets)\b/, m => (m === 'florets' ? m : '')).replace(/\s+(cloves?|pieces|kernels|pulp)$/, '').replace(/\s+/g, ' ').trim();
+    return t;
+}
 function describeFromRecipe(meal) {
     if (!meal || !meal.name) return '';
-    const names = (meal.ingredients || []).map(l => String(l).toLowerCase()
-        .replace(/\([^)]*\)/g, ' ').replace(/,.*$/, '')
-        .replace(/^[\d\s/.½¼¾⅓⅔-]+/, '')
-        .replace(/^(cups?|tbsp|tsp|tablespoons?|teaspoons?|g|kg|ml|l|oz|lbs?|pounds?|grams?|cans?|tins?|cloves?|pinch|handful|slices?|bunch|large|medium|small|whole)\b\.?\s*/g, '')
-        .replace(/^(of|large|medium|small|fresh|freshly|chopped|sliced|diced|minced)\s+/g, '').trim())
-        .filter(n => n && n.length > 2 && !DESC_STAPLE.test(n));
-    const main = [...new Set(names)].slice(0, 3);
-    if (!main.length) return '';
-    const list = main.length > 1 ? `${main.slice(0, -1).join(', ')} and ${main[main.length - 1]}` : main[0];
+    let lines = [];
+    try { lines = Nutrition.calculate(meal.ingredients || [], meal.servings || 1, meal.steps).lines || []; } catch (e) { lines = []; }
+    const kcalOf = new Map(lines.filter(l => !l.discarded).map(l => [l.line, l.kcal || 0]));
+    let thrown = {};
+    try { thrown = Nutrition.discarded ? Nutrition.discarded(meal.ingredients || [], meal.steps || []) : {}; } catch (e) { thrown = {}; }
+    const seen = new Set();
+    const foods = (meal.ingredients || []).map((l, i) => ({ l, i, name: descFood(l), kcal: kcalOf.get(l) || 0 }))
+        .filter(x => x.name && x.name.length > 2 && !(x.i in thrown) && !DESC_STAPLE.test(x.name) && !(Nutrition.isHeader && Nutrition.isHeader(x.l)) && !/\b(to taste|optional)\b/i.test(x.l))
+        .filter(x => { const k = x.name.replace(/s$/, ''); if (seen.has(k)) return false; seen.add(k); return true; });
+    if (!foods.length) return '';
+    // The main food: the one that's most of the dish (by calories), unless it's a fat or a sauce.
+    // The main food: the protein that's most of the dish (chicken, fish, eggs, beans…), else whatever is.
+    const byKcal = foods.slice().sort((a, b) => b.kcal - a.kcal);
+    const main = byKcal.find(x => DESC_PROTEIN.test(x.name)) || byKcal.find(x => !/\b(oil|butter|cream|cheese|sauce|mayo|mayonnaise|dressing|sugar|honey|syrup)\b/.test(x.name)) || foods[0];
+    const others = foods.filter(x => x !== main).sort((a, b) => b.kcal - a.kcal).slice(0, 3).map(x => x.name);
+    const list = others.length > 1 ? `${others.slice(0, -1).join(', ')} and ${others[others.length - 1]}` : others[0] || '';
     let how = '';
+    let mins = 0;
     try {
         const prof = Planner && Planner.recipeProfile ? Planner.recipeProfile(meal) : null;
-        const t = prof && prof.techniques || [];
-        how = t.includes('roast') ? ', roasted' : t.includes('bake') ? ', baked' : t.includes('grill') ? ', grilled' : t.includes('stir-fry') ? ', stir-fried'
-            : t.includes('simmer') || t.includes('braise') ? ', simmered' : t.includes('fry') || t.includes('sauté') ? ', pan-cooked' : !prof || !prof.cooked ? ', no cooking needed' : '';
-        const mins = Number(meal.active_minutes) || Number(meal.time_minutes) || (prof && prof.minutes) || 0;
-        const time = mins ? ` About ${mins >= 90 ? `${Math.round(mins / 60 * 2) / 2} hours` : `${Math.round(mins / 5) * 5 || mins} minutes`}.` : '';
-        const text = `${list.charAt(0).toUpperCase() + list.slice(1)}${how}.${time}`;
-        return text.slice(0, 160);
-    } catch (e) {
-        return `${list.charAt(0).toUpperCase() + list.slice(1)}.`;
+        const t = (prof && prof.techniques) || [];
+        const fried = /deep[- ]?fr/i.test((meal.steps || []).join(' ')) || ((meal.ingredients || []).some(l => /\bfor (deep[- ]?)?frying\b|\bto fry\b/i.test(l)) && /\bfry\b|\bfried\b/i.test((meal.steps || []).join(' ')));
+        how = t.includes('deep-fry') || fried ? 'Fried' : t.includes('roast') ? 'Roasted' : t.includes('bake') ? 'Baked' : t.includes('grill') ? 'Grilled' : t.includes('stir-fry') ? 'Stir-fried'
+            : t.includes('braise') ? 'Braised' : t.includes('simmer') ? 'Simmered' : t.includes('fry') || t.includes('sauté') ? 'Pan-cooked' : prof && !prof.cooked ? 'No-cook' : '';
+        mins = Number(meal.active_minutes) || Number(meal.time_minutes) || (prof && prof.minutes) || 0;
+    } catch (e) { how = ''; }
+    // When the name says what the dish is (pancakes, chili, a salad), that leads: "Pancakes made
+    // with rolled oats, bananas, cottage cheese and eggs." Otherwise the main food and how it's cooked.
+    const dish = (String(meal.name).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/\s+(with|and a side of|served with|on|over)\s+.*$/, '').match(DESC_DISH) || [])[0];
+    if (dish && !String(main.name).includes(dish)) {
+        const all = [main.name].concat(others);
+        const made = all.length > 1 ? `${all.slice(0, -1).join(', ')} and ${all[all.length - 1]}` : all[0];
+        const t2 = mins ? ` About ${mins >= 90 ? `${Math.round(mins / 60 * 2) / 2} hours` : `${Math.round(mins / 5) * 5 || mins} minutes`}.` : '';
+        return `${dish.charAt(0).toUpperCase() + dish.slice(1)} made with ${made}.${t2}`.slice(0, 200);
     }
+    const lead = how === 'No-cook' ? `No-cook ${main.name}` : how ? `${how} ${main.name}` : main.name.charAt(0).toUpperCase() + main.name.slice(1);
+    const time = mins ? ` About ${mins >= 90 ? `${Math.round(mins / 60 * 2) / 2} hours` : `${Math.round(mins / 5) * 5 || mins} minutes`}.` : '';
+    return `${lead}${list ? ` with ${list}` : ''}.${time}`.slice(0, 200);
 }
 
 // Which try to keep: a complete one before an incomplete one, then the one with the fewest problems.

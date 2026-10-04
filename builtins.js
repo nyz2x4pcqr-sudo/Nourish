@@ -457,7 +457,7 @@
             category: [meal], cuisine, source_name: 'Nourish kitchen', source_id: 'builtin', builtin: true,
         };
         if (wait) { r.active_minutes = minutes; r.wait_minutes = wait; }
-        const calc = N.calculate(r.ingredients, servings);
+        const calc = N.calculate(r.ingredients, servings, r.steps);
         r.nutrition = calc.nutrition;
         r.nutrition_basis = 'calculated';
         if (calc.unmatched && calc.unmatched.length) r.nutrition_unmatched = calc.unmatched;
