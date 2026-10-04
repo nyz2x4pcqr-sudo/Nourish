@@ -212,6 +212,19 @@ print("Valid meal in the app's format:", m["name"], "-", len(m["ingredients"]), 
 PY
 cp "$PROBE" shots/ios-ai-probe.json
 
+echo "== 5b. A one-line description with the description format (0.1.10: it failed in 0.0 s every time)"
+probe "const r = await nativeCall('generate', { model: 'test-model.gguf', grammar: DESCRIBE_GRAMMAR, temperature: 0.7, max_tokens: 60, n_ctx: 2048, gpu: false,
+  messages: [{ role: 'system', content: 'You write one short, appetizing sentence about a dish.' }, { role: 'user', content: 'Describe Lemon Chicken Traybake (made with chicken thighs, potatoes, lemon, garlic) in one sentence of at most 20 words.' }] }, { timeoutMs: 0 });
+  return JSON.stringify({ text: r.text, fallback: describeFromRecipe({ name: 'Lemon Chicken Traybake', time_minutes: 45, ingredients: ['8 chicken thighs', '500 g new potatoes', '1 lemon', '3 garlic cloves'], steps: ['Roast everything for 40 minutes.'] }) });" 180
+python3 - "$PROBE" <<'PY' || fail "the phone's AI couldn't write a description"
+import json, sys, re
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"]); t = v["text"].strip()
+print("Description from the phone's AI:", t); print("Description made from the recipe:", v["fallback"])
+assert re.match(r'^[A-Z][^"\\]{20,140}[.!]$', t), t
+assert v["fallback"], v
+PY
+
 echo "== 6a. A 7-day plan on the phone through the app's own Generate Plan code; the app is killed after day 2"
 probe "Object.assign(settings, { active_provider: 'local', local_model: 'test-model.gguf', local_ctx: '4096', local_gpu: 'off' }); changed('settings');
   runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },

@@ -2258,16 +2258,31 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
 // A one-line description written by the AI on this phone or PC (a small job), once per recipe,
 // only when the model is already set up and nothing else is running.
 async function describeLater(meal, mealType, dayIndex, cookbookId) {
-    if (meal.description || planJob || !['local', 'lmstudio', 'ollama'].includes(settings.active_provider) || !aiReady()) return;
-    if (settings.active_provider === 'local' && !settings.local_model) return;
+    if (meal.description) return;
+    // When there's no AI to ask, or it fails: a description made from the recipe itself (its main
+    // ingredients, how it's cooked, how long), never nothing.
+    const fromRecipe = why => {
+        const text = typeof describeFromRecipe === 'function' ? describeFromRecipe(meal) : '';
+        if (!text || meal.description) return;
+        meal.description = text;
+        if (why) nlog('plan', `Description for "${meal.name}" made from the recipe (${why})`, null, 'debug');
+        if (dayIndex != null) changed('plan');
+        if (openRecipe && openRecipe.meal === meal) openRecipeSheet(mealType, meal, dayIndex, { cookbookId });
+    };
+    const canAsk = !planJob && ['local', 'lmstudio', 'ollama'].includes(settings.active_provider) && aiReady() && !(settings.active_provider === 'local' && !settings.local_model);
+    if (!canAsk) { fromRecipe(''); return; }
     try {
         const run = settings.active_provider === 'local' ? phoneRunner({ isCancelled: () => !!planJob }) : aiRunner();
         const text = await aiDescribe(run, meal);
-        if (!text || meal.description) return;
+        if (meal.description) return;
+        if (!text) { fromRecipe('the AI\'s sentence wasn\'t usable'); return; }
         meal.description = text;
         if (dayIndex != null) changed('plan');
         if (openRecipe && openRecipe.meal === meal) openRecipeSheet(mealType, meal, dayIndex, { cookbookId });
-    } catch (e) { nlog('plan', `No description: ${e.message}`, null, 'debug'); }
+    } catch (e) {
+        nlog('plan', `The AI couldn't describe "${meal.name}" (${e.message}); using a description made from the recipe`, null, 'warn');
+        fromRecipe('');
+    }
 }
 
 let recipeProgress = null;

@@ -73,3 +73,21 @@ test('grocery totals follow the chosen unit system', () => {
     // The same thing twice in ONE recipe is a mistake: only the first line counts.
     assert.deepEqual(g.buildList([{ breakfast: { ingredients: ['1 cup milk', '250 ml milk'] } }], ['breakfast'], 'metric').map(r => r.text), ['Milk — 240 ml']);
 });
+
+test('amount caps judge the main ingredient, not a flavour word in brackets or in front of it', () => {
+    const u = require('../units.js');
+    // 0.1.10: "½ cup almond milk (vanilla)" was cut to 2 tbsp by the rule for extracts.
+    for (const line of ['½ cup unsweetened almond milk (vanilla)', '1 cup vanilla yogurt', '1 cup vanilla almond milk', '2 cups ginger ale',
+        '1 cup garlic bread crumbs', '1/2 cup cinnamon raisin granola', '1 cup chili beans', '1 cup curry-spiced lentils, cooked',
+        '1/2 cup oil-packed sun-dried tomatoes', '1 cup salted peanuts', '1/2 cup tomato paste', '1 cup pesto (basil, pine nuts)',
+        '1/2 cup oregano-marinated olives', '1 cup thyme honey roasted carrots'])
+        assert.equal(u.clampIngredient(line).clamped, '', line);
+    // Real overdoses are still capped.
+    assert.equal(u.clampIngredient('1/2 cup vanilla extract').line, '2 tbsp vanilla extract');
+    assert.equal(u.clampIngredient('1 cup ground cumin').line, '2 tbsp ground cumin');
+    assert.equal(u.clampIngredient('1/2 cup smoked paprika, divided').clamped, 'pastes, extracts and spices: at most 2 tbsp');
+    assert.equal(u.clampIngredient('1/2 cup vanilla (extract)').clamped, 'pastes, extracts and spices: at most 2 tbsp');
+    assert.equal(u.clampIngredient('1 cup red curry paste (Thai)').line, '2 tbsp red curry paste (Thai)');
+    assert.equal(u.clampIngredient('1 cup extra virgin olive oil, plus more').clamped, 'oils and vinegars: at most ¼ cup');
+    assert.equal(u.clampIngredient('1/4 cup kosher salt').clamped, 'salt and raising agents: at most 1 tbsp');
+});

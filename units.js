@@ -160,13 +160,28 @@
         return out;
     }
 
-    // Upper limits per recipe, in millilitres, for things the AI tends to overdo.
+    // Upper limits per recipe, in millilitres, for things the AI tends to overdo. Each is matched
+    // against the line's main ingredient only (see mainIngredient): its last words, which name what
+    // it is. "½ cup almond milk (vanilla)" is almond milk, "1 cup vanilla yogurt" is yogurt, "2 cups
+    // ginger ale" is ale: none is an extract or a spice (0.1.10 capped the almond milk at 2 tbsp).
+    const TAIL = '(?:\\s+(?:powder|leaves|seeds?|sprigs?|flakes|pods?))?s?$';
     const LIMITS = [
-        [/\b(salt|baking soda|baking powder|bicarbonate)\b/i, 15, 'salt and raising agents: at most 1 tbsp'],
-        [/\b(paste|extract|essence|spice|seasoning|cumin|paprika|cinnamon|turmeric|chili powder|chilli powder|curry powder|garam masala|nutmeg|cloves? ground|cayenne|chili flakes|chilli flakes|red pepper flakes|black pepper|oregano|thyme|garlic powder|onion powder|ginger powder|ground ginger|five spice|allspice|cardamom|coriander powder|ground coriander|za'atar|sumac|smoked paprika|vanilla)\b/i, 30, 'pastes, extracts and spices: at most 2 tbsp'],
-        [/\b(oil|vinegar)\b/i, 60, 'oils and vinegars: at most ¼ cup'],
-        [/\b(basil|cilantro|coriander leaves|parsley|mint|dill|chives|tarragon|fresh herbs|herbs)\b/i, 240, 'fresh herbs: at most 1 cup'],
+        [new RegExp(`\\b(salt|baking soda|baking powder|bicarbonate(?: of soda)?)${TAIL}`, 'i'), 15, 'salt and raising agents: at most 1 tbsp'],
+        [new RegExp(`\\b(paste|extract|essence|spice|spice mix|seasoning|cumin|paprika|cinnamon|turmeric|chili powder|chilli powder|curry powder|garam masala|nutmeg|cloves? ground|ground cloves|cayenne|chili flakes|chilli flakes|red pepper flakes|black pepper|oregano|thyme|garlic powder|onion powder|ginger powder|ground ginger|five spice|allspice|cardamom|coriander powder|ground coriander|za'atar|sumac|smoked paprika|vanilla|vanilla bean)${TAIL}`, 'i'), 30, 'pastes, extracts and spices: at most 2 tbsp'],
+        [new RegExp(`\\b(oil|vinegar)${TAIL}`, 'i'), 60, 'oils and vinegars: at most ¼ cup'],
+        [new RegExp(`\\b(basil|cilantro|coriander leaves|parsley|mint|dill|chives|tarragon|fresh herbs|herbs)${TAIL}`, 'i'), 240, 'fresh herbs: at most 1 cup'],
     ];
+    // Pastes that are a main ingredient in real amounts.
+    const NOT_CAPPED = /\b(tomato|almond|sesame|chickpea|bean|date|red bean|lotus seed) paste$/i;
+    // The main ingredient of a line: without what's in brackets, what follows a comma ("divided",
+    // "cooked", "plus more"), "or …" alternatives and words that only describe it.
+    function mainIngredient(text) {
+        return String(text || '')
+            .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+            .split(/,|;|\s+or\s+|\s+for\s+|\s+to taste\b/i)[0]
+            .replace(/\b(divided|plus more|optional|unsweetened|sweetened|heaping|scant|level|about|approximately|fresh|freshly|good quality|organic)\b/gi, ' ')
+            .replace(/\s+/g, ' ').trim();
+    }
 
     // An ingredient line with an impossible amount capped: "1 cup green curry paste" → "2 tbsp green curry paste".
     // Returns { line, clamped: '' | why }.
@@ -174,9 +189,11 @@
         const item = splitIngredient(line);
         if (item.qty == null || !ML[item.unit]) return { line: String(line), clamped: '' };
         const name = item.text;
+        const main = mainIngredient(name);
         const ml = item.qty * ML[item.unit];
+        if (!main || NOT_CAPPED.test(main)) return { line: String(line), clamped: '' };
         for (const [re, max, why] of LIMITS) {
-            if (!re.test(name) || ml <= max * 1.01) continue;
+            if (!re.test(main) || ml <= max * 1.01) continue;
             const capped = volumeIn(max, 'imperial');
             const text = item.note !== undefined ? `${name}: ${formatAmount(capped.qty, capped.unit)}${item.note ? ' ' + item.note : ''}` : `${formatAmount(capped.qty, capped.unit)} ${name}`;
             return { line: text, clamped: why };

@@ -584,14 +584,47 @@ async function aiSubstitute(run, recipeName, avoid) {
     const sub = String(text || '').toLowerCase().replace(/[^a-z ]/g, '').trim();
     return sub && sub.indexOf(String(avoid).toLowerCase().replace(/s$/, '')) < 0 ? sub : '';
 }
+// The output format for the one-line description. Written raw: "\x00-\x1F" must reach the model as
+// those characters, not as real control characters. 0.1.10 had a plain string here, so the format
+// held a NUL byte, the phone's AI read it cut short, and every description failed in 0.0 s.
+const DESCRIBE_GRAMMAR = String.raw`root ::= [A-Z] [^"\\\x00-\x1F]{20,140} [.!]`;
 async function aiDescribe(run, meal) {
     if (!run || !meal) return '';
     const text = await run([{ role: 'system', content: 'You write one short, appetizing sentence about a dish. No names of people or days.' },
         { role: 'user', content: `Describe "${meal.name}" (made with ${(meal.ingredients || []).slice(0, 6).join(', ')}) in one sentence of at most 20 words.` }],
-    { grammar: 'root ::= [A-Z] [^"\\\x00-\x1F]{20,140} "."', maxTokens: 60, id: 'describe' });
+    { grammar: DESCRIBE_GRAMMAR, maxTokens: 60, id: 'describe' });
     const t = String(text || '').trim();
     const people = personNames();
     return t && !people.some(p => t.toLowerCase().indexOf(p) >= 0) && !DISH_DAY_WORDS.test(t) ? t.slice(0, 160) : '';
+}
+// A description made from the recipe itself, for when no AI is set up or it fails: its main
+// ingredients, how it's cooked and how long it takes. "Chicken thighs, new potatoes and lemon,
+// roasted together. About 45 minutes."
+const DESC_STAPLE = /^(salt|pepper|black pepper|water|oil|olive oil|vegetable oil|butter|sugar|flour|cooking spray|garlic|onion|kosher salt|sea salt|ice)$/i;
+function describeFromRecipe(meal) {
+    if (!meal || !meal.name) return '';
+    const names = (meal.ingredients || []).map(l => String(l).toLowerCase()
+        .replace(/\([^)]*\)/g, ' ').replace(/,.*$/, '')
+        .replace(/^[\d\s/.½¼¾⅓⅔-]+/, '')
+        .replace(/^(cups?|tbsp|tsp|tablespoons?|teaspoons?|g|kg|ml|l|oz|lbs?|pounds?|grams?|cans?|tins?|cloves?|pinch|handful|slices?|bunch|large|medium|small|whole)\b\.?\s*/g, '')
+        .replace(/^(of|large|medium|small|fresh|freshly|chopped|sliced|diced|minced)\s+/g, '').trim())
+        .filter(n => n && n.length > 2 && !DESC_STAPLE.test(n));
+    const main = [...new Set(names)].slice(0, 3);
+    if (!main.length) return '';
+    const list = main.length > 1 ? `${main.slice(0, -1).join(', ')} and ${main[main.length - 1]}` : main[0];
+    let how = '';
+    try {
+        const prof = Planner && Planner.recipeProfile ? Planner.recipeProfile(meal) : null;
+        const t = prof && prof.techniques || [];
+        how = t.includes('roast') ? ', roasted' : t.includes('bake') ? ', baked' : t.includes('grill') ? ', grilled' : t.includes('stir-fry') ? ', stir-fried'
+            : t.includes('simmer') || t.includes('braise') ? ', simmered' : t.includes('fry') || t.includes('sauté') ? ', pan-cooked' : !prof || !prof.cooked ? ', no cooking needed' : '';
+        const mins = Number(meal.active_minutes) || Number(meal.time_minutes) || (prof && prof.minutes) || 0;
+        const time = mins ? ` About ${mins >= 90 ? `${Math.round(mins / 60 * 2) / 2} hours` : `${Math.round(mins / 5) * 5 || mins} minutes`}.` : '';
+        const text = `${list.charAt(0).toUpperCase() + list.slice(1)}${how}.${time}`;
+        return text.slice(0, 160);
+    } catch (e) {
+        return `${list.charAt(0).toUpperCase() + list.slice(1)}.`;
+    }
 }
 
 // Which try to keep: a complete one before an incomplete one, then the one with the fewest problems.
@@ -1584,5 +1617,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
+    module.exports = { DESCRIBE_GRAMMAR, describeFromRecipe, repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }

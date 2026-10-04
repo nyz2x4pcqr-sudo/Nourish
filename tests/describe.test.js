@@ -1,0 +1,41 @@
+// One-line recipe descriptions: the AI's output format (grammar) must reach the model intact (0.1.10
+// sent one with a NUL byte in it, so every description failed in 0.0 s), and when there's no AI or it
+// fails, a description is made from the recipe itself.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const O = require('../ondevice.js');
+
+const controlChars = g => [...String(g)].filter(c => c.charCodeAt(0) < 32 && c !== '\n').map(c => c.charCodeAt(0));
+
+test('no output format sent to the AI holds hidden control characters', () => {
+    const grammars = { describe: O.DESCRIBE_GRAMMAR, meal: O.mealGrammar(2), import: O.importGrammar(), nutrition: O.nutritionGrammar ? O.nutritionGrammar() : '', edit: O.editGrammar ? O.editGrammar() : '' };
+    for (const [name, g] of Object.entries(grammars)) assert.deepEqual(controlChars(g), [], `${name} grammar`);
+});
+
+// The description format turned into a JavaScript pattern (the same rules as llama.cpp's GBNF for
+// this one-line grammar): a capital letter, 20 to 140 characters without quotes, backslashes or
+// control characters, then a full stop or "!".
+function describePattern(g) {
+    const m = String(g).match(/^root ::= \[A-Z\] \[\^"\\\\\\x00-\\x1F\]\{(\d+),(\d+)\} \[\.!\]$/);
+    assert.ok(m, `the description grammar has an unexpected shape: ${g}`);
+    return new RegExp(`^[A-Z][^"\\\\\\x00-\\x1F]{${m[1]},${m[2]}}[.!]$`);
+}
+
+test('the description format loads and accepts a real sentence (and nothing else)', () => {
+    const re = describePattern(O.DESCRIBE_GRAMMAR);
+    assert.ok(re.test('Tender chicken thighs roasted with lemon, garlic and crisp new potatoes.'));
+    assert.ok(re.test('A bright, zesty bowl of noodles with sesame and crunchy greens!'));
+    assert.ok(!re.test('too short.'));
+    assert.ok(!re.test('lowercase start, which the format does not allow at all.'));
+    assert.ok(!re.test('Says "quoted" things, which would break the format here.'));
+});
+
+test('a description made in code from the recipe when there is no AI or it fails', () => {
+    const d = O.describeFromRecipe({ name: 'Lemon Chicken Traybake', time_minutes: 45,
+        ingredients: ['8 chicken thighs', '500 g new potatoes, halved', '1 lemon, sliced', '3 garlic cloves', '2 tbsp olive oil', '1 tsp salt'],
+        steps: ['Heat the oven to 200C.', 'Toss everything in a roasting tin and roast for 40 minutes.'] });
+    assert.equal(d, 'Chicken thighs, new potatoes and lemon, roasted. About 45 minutes.');
+    const salad = O.describeFromRecipe({ name: 'Chickpea Salad', ingredients: ['1 can chickpeas', '1 cup cherry tomatoes', '1/2 cucumber', '2 tbsp olive oil', 'salt'], steps: ['Mix everything in a bowl and serve.'] });
+    assert.match(salad, /^Chickpeas, cherry tomatoes and (1\/2 )?cucumber, no cooking needed\./);
+    assert.equal(O.describeFromRecipe({ name: 'Water', ingredients: ['1 cup water'], steps: [] }), '');
+});
