@@ -3447,7 +3447,7 @@ function mealGuidance({ type, d, cuisine, dish }) {
 const LIBRARY_KEY = 'nourish_library_index';
 // Files to read again on the next pass ("Try again" after a failure, "Read again" for a book).
 const libraryForce = new Set();
-const libraryState = { count: 0, files: 0, folder: '', where: null, busy: false, error: '', notes: [], progress: null, cancel: false };
+const libraryState = { count: 0, files: 0, folder: '', where: null, busy: false, error: '', notes: [], progress: null, cancel: false, pause: false };
 let libraryIndexCache = null;
 function libraryIndex() { if (!libraryIndexCache) libraryIndexCache = loadJSON(LIBRARY_KEY, { files: {} }); return libraryIndexCache; }
 // Saved on this device. Cookbook passages can be big: if the phone's storage for the app is full,
@@ -3475,7 +3475,10 @@ function cookbookNotes(question, k) {
 let recipeDB = NourishRecipeDB.forDevice();
 let recipeDBReady = false;
 let recipeDBSyncing = false;
-async function openRecipeDB() {
+let recipeDBOpening = null;
+// Opened once (at start; anything that needs it earlier waits for the same opening).
+function openRecipeDB() { return recipeDBOpening || (recipeDBOpening = openRecipeDBOnce()); }
+async function openRecipeDBOnce() {
     try {
         await recipeDB.open();
     } catch (e) {
@@ -3519,7 +3522,7 @@ async function saveBookRecipes(path, e) {
     const title = e.title || String(path).split('/').pop().replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
     const mine = /^My Recipes\//.test(path);
     const book = await recipeDB.importBook({ id: fp, title, author: e.author, path, kind: NourishLibrary.kindOf(path), label: mine ? `From your recipes: ${title}` : undefined }, recipes, { known: webLibraryNames() });
-    Object.assign(e, { fp, bookId: book.id, count: book.count, review: book.review, meals: book.meals, duplicates: book.duplicates });
+    Object.assign(e, { fp, bookId: book.id, count: book.count, review: book.review, meals: book.meals, others: book.others, duplicates: book.duplicates });
     return book;
 }
 // Drinks, desserts and sides from their books, as snack ideas (complete, reviewed ones only).
@@ -3534,6 +3537,32 @@ function librarySummary(index) {
 }
 openRecipeDB();
 function libraryAvailable() { return !isLocalMode() || nativeAvailable(); }
+
+// What the recipe database knows about a file with these contents (its fingerprint): the book it
+// was saved as, or the record of reading it (also for files that gave no recipes, failed, were
+// stopped or paused). A file it knows isn't read again, even if the list of files was lost.
+function libraryKnown(fp) {
+    if (!recipeDBReady || !fp) return null;
+    const b = recipeDB.book(fp), rec = recipeDB.file(fp);
+    if (!b && !rec) return null;
+    const r = rec || {};
+    return {
+        id: b ? b.id : undefined, count: b ? b.count : (r.count || 0), title: (b && b.title) || r.title, author: (b && b.author) || r.author,
+        note: r.stopped ? 'Stopped before the end. Tap Read again to read it.' : r.partial ? `Paused at ${r.partial.unit || 'part'} ${r.partial.at} of ${r.partial.total}` : (b ? '' : r.note),
+        failed: !b && r.failed, passages: r.passages, partial: r.partial,
+    };
+}
+// A pause between pages of a scanned book when the phone gets hot (text recognition works hard).
+let libraryCoolCheck = 0;
+async function libraryCool() {
+    if (!nativeAvailable() || Date.now() - libraryCoolCheck < 20000) return;
+    libraryCoolCheck = Date.now();
+    const specs = await nativeCall('specs', {}, { timeoutMs: 10000 }).catch(() => null);
+    const hot = specs && (specs.thermal === 'serious' || specs.thermal === 'critical');
+    if (!hot) return;
+    nlog('library', `The phone is ${specs.thermal === 'critical' ? 'very ' : ''}hot: reading the book waits ${specs.thermal === 'critical' ? 90 : 30} s to let it cool`, null, 'warn');
+    for (let i = 0; i < (specs.thermal === 'critical' ? 90 : 30) && !libraryState.cancel && !libraryState.pause; i++) await new Promise(ok => setTimeout(ok, 1000));
+}
 
 async function indexLibrary({ quiet = true } = {}) {
     if (libraryState.busy || !libraryAvailable()) return;
@@ -3556,41 +3585,53 @@ async function indexLibrary({ quiet = true } = {}) {
                 }
                 return got < length ? out.subarray(0, got) : out;
             },
+            // PDFs a few pages at a time; scanned pages are read with the phone's text recognition.
+            // (Not on Android yet: its PDFs are read the old way, see the release notes.)
+            pdf: isLocalMode() && /Android/i.test(navigator.userAgent) ? undefined : async (path, from, count) => { const r = await api('/api/library/pdf', { method: 'POST', timeoutMs: 180000, body: { path, from, count } }); if (count) await libraryCool(); return r; },
             ocr: canReadTextOnPhone() ? async image => ((await nativeCall('ocr', { image }, { timeoutMs: 60000 })) || {}).text || '' : null,
             readStructured: (html, url) => { try { return NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } },
             readText: html => { try { return NourishImport.readableText(new DOMParser().parseFromString(html, 'text/html')); } catch (e) { return ''; } },
             sleep: ms => new Promise(ok => setTimeout(ok, ms)),
         };
         libraryState.cancel = false;
+        libraryState.pause = false;
         let shown = 0;
         if (!recipeDBReady) await openRecipeDB().catch(() => {});
         const force = [...libraryForce];
         libraryForce.clear();
         const res = await NourishLibrary.refresh(JSON.parse(JSON.stringify(libraryIndex())), io, {
             batch: 2, pause: 500, maxFiles: 20, force,
-            // A book already saved (renamed or moved): not read again.
-            known: fp => { const b = recipeDBReady && recipeDB.book(fp); return b ? { id: b.id, count: b.count, title: b.title } : null; },
+            // A file already read (renamed or moved, or the list of files was lost): not read again.
+            known: libraryKnown,
             // A big book: how far it has got, shown in Settings → Recipes (at most once a second).
             progress: (path, done, total, chapter) => {
                 libraryState.progress = { path, done, total, chapter };
                 if (settingsPage === 'sources' && Date.now() - shown > 1000) { shown = Date.now(); renderSettings(); }
             },
             cancelled: () => libraryState.cancel,
+            paused: () => libraryState.pause,
+            // Paused: how far it got is kept; "Carry on" continues from there.
+            onPause: async (path, fp, state) => {
+                if (!recipeDBReady || !fp) return;
+                await recipeDB.recordFile(fp, { path, partial: state, stopped: undefined });
+                nlog('library', `${path}: paused at ${state.unit || 'part'} ${state.at} of ${state.total}`);
+            },
+            // Stopped: not read again by itself (Read again starts it over).
+            onCancel: async (path, fp) => {
+                if (!recipeDBReady || !fp) return;
+                await recipeDB.recordFile(fp, { path, stopped: true, partial: undefined });
+            },
+            // Each file is saved as soon as it's done: a finished book is never read again because
+            // the app was closed while the next one was being read.
+            onFile: async (path, e, idx) => {
+                await saveLibraryEntry(path, e);
+                saveLibraryIndex(idx);
+                librarySummary(idx);
+            },
         });
         libraryState.progress = null;
-        // Each file's recipes into the offline recipe database (read once; again only when the file
-        // changes or "Read again" is tapped).
-        for (const [path, e] of Object.entries(res.index.files || {})) {
-            if (e.recipes && e.recipes.length) {
-                const book = await saveBookRecipes(path, e);
-                nlog('library', `Saved ${book.count} recipe${book.count === 1 ? '' : 's'} from "${book.title}" into the recipe database` +
-                    `${book.meals != null ? ` (${book.meals} meals for plans` : ''}${book.review ? `, ${book.review} need review` : ''}${book.duplicates ? `, ${book.duplicates} already saved elsewhere` : ''}${book.meals != null ? ')' : ''}`);
-            } else if (e.linked && e.bookId) {
-                await recipeDB.linkPath(e.bookId, path);
-                delete e.linked;
-                nlog('library', `${path}: already saved (same book under a new name), not read again`);
-            } else if (e.recipes) delete e.recipes;
-        }
+        // Files the database already knew (renamed or moved): just their new place remembered.
+        for (const [path, e] of Object.entries(res.index.files || {})) await saveLibraryEntry(path, e);
         // A file that's gone: its recipes stay until the person decides (My books → Remove).
         for (const r of res.removed || []) {
             if (r.bookId && !Object.values(res.index.files).some(x => x.bookId === r.bookId)) {
@@ -3600,7 +3641,8 @@ async function indexLibrary({ quiet = true } = {}) {
         }
         saveLibraryIndex(res.index);
         librarySummary(res.index);
-        if (res.cancelled) { nlog('library', 'Reading the recipe files was stopped (the rest is read next time)'); return; }
+        if (res.cancelled) { nlog('library', 'Reading the recipe files was stopped (tap Read again to read that book)'); return; }
+        if (res.paused) { nlog('library', 'Reading the recipe files is paused (tap Carry on to continue)'); return; }
         if (res.changed) nlog('library', `Recipe library: ${libraryState.count} recipes from ${libraryState.files} files (${res.read} read now${res.pending ? `, ${res.pending} more next time` : ''})`, res.errors.length ? res.errors : null);
         if (res.pending) setTimeout(() => indexLibrary(), 20000);   // big folders: the rest a little later
     } catch (e) {
@@ -3613,15 +3655,45 @@ async function indexLibrary({ quiet = true } = {}) {
         if (settingsPage === 'sources') renderSettings();
     }
 }
+// One file's result into the recipe database: its recipes, or (for a known file) its new place,
+// and in every case the record that it was read, so it's never read twice.
+async function saveLibraryEntry(path, e) {
+    if (!recipeDBReady) return;
+    if (e.recipes && e.recipes.length) {
+        const book = await saveBookRecipes(path, e);
+        nlog('library', `Saved ${book.count} recipe${book.count === 1 ? '' : 's'} from "${book.title}"${book.author ? ` by ${book.author}` : ''} into the recipe database` +
+            ` (${book.meals || 0} meals for plans${book.others ? `, ${book.others} drinks, desserts, sauces and others` : ''}${book.review ? `, ${book.review} need review` : ''}${book.duplicates ? `, ${book.duplicates} already saved elsewhere` : ''})` +
+            `${e.scanned ? `; ${e.scanned} scanned pages read with text recognition` : ''}`);
+    } else if (e.linked && e.bookId) {
+        await recipeDB.linkPath(e.bookId, path);
+        delete e.linked;
+        nlog('library', `${path}: already saved (same book${recipeDB.book(e.bookId) && recipeDB.book(e.bookId).path !== path ? ' under a new name' : ''}), not read again`);
+        return;
+    } else {
+        if (e.recipes) delete e.recipes;
+        if (e.saved || e.linked) return;
+        if (e.empty && /\.(epub|pdf|docx)$/i.test(path)) nlog('library', `${path}: no recipes saved. ${e.note}`, null, 'warn');
+    }
+    if (e.fp && !e.saved && !e.paused) {
+        await recipeDB.recordFile(e.fp, { path, title: e.title, author: e.author, count: e.count || 0, note: e.note || undefined, failed: e.failed || undefined, empty: e.empty || undefined,
+            passages: e.passages && e.passages.length ? e.passages.slice(0, 250) : undefined, partial: undefined, stopped: undefined });
+    }
+    e.saved = true;
+}
 function readLibraryFileAgain(path) {
     libraryForce.add(path);
-    showToast(`Reading ${path.split('/').pop()} again…`, false);
+    const e = (libraryIndex().files || {})[path];
+    showToast(`${e && e.paused ? 'Carrying on with' : 'Reading'} ${path.split('/').pop()}${e && e.paused ? '' : ' again'}…`, false);
     if (libraryState.busy) { setTimeout(() => indexLibrary({ quiet: false }), 1500); return; }
     indexLibrary({ quiet: false });
 }
 function cancelLibraryReading() {
     libraryState.cancel = true;
-    showToast('Stopping… (the book is read again next time)', false);
+    showToast('Stopping… (tap Read again to read that book)', false);
+}
+function pauseLibraryReading() {
+    libraryState.pause = true;
+    showToast('Pausing… (tap Carry on to continue from the same page)', false);
 }
 
 async function openLibraryFolder() {
@@ -3707,11 +3779,14 @@ async function libraryLocation() {
 function libraryFileStatus(path) {
     const entry = (libraryIndex().files || {})[path];
     const p = libraryState.progress;
-    if (p && p.path === path) return `Reading… part ${p.done} of ${p.total}${p.chapter ? ` (${String(p.chapter).slice(0, 40)})` : ''}`;
+    if (p && p.path === path) return `Reading… ${/^page /.test(p.chapter || '') ? p.chapter : `part ${p.done} of ${p.total}${p.chapter ? ` (${String(p.chapter).slice(0, 40)})` : ''}`}`;
     if (!entry || libraryForce.has(path)) return libraryState.busy ? 'Reading…' : 'Waiting to be read';
     if (entry.failed) return `Failed: ${String(entry.note || 'it couldn\'t be read').replace(/^Couldn't read it: /, '')}`;
+    if (entry.paused) return `${entry.note || 'Paused'}. Tap Carry on to continue.`;
     const count = entry.count != null ? entry.count : (entry.recipes || []).length;
-    if (count) return `Done · ${count} recipe${count > 1 ? 's' : ''} saved${entry.review ? ` (${entry.review} need${entry.review === 1 ? 's' : ''} review)` : ''}${entry.passages && entry.passages.length ? ' · also cooking knowledge' : ''}`;
+    const book = entry.bookId && recipeDBReady ? recipeDB.book(entry.bookId) : null;
+    if (count) return `Done · ${count} recipe${count > 1 ? 's' : ''} saved${book ? ` (${book.meals || 0} meal${book.meals === 1 ? '' : 's'}${book.others ? `, ${book.others} other` : ''}${book.review ? `, ${book.review} to review` : ''})` : entry.review ? ` (${entry.review} need${entry.review === 1 ? 's' : ''} review)` : ''}${entry.scanned ? ` · ${entry.scanned} scanned pages read` : ''}`;
+    if (/^Stopped/.test(entry.note || '')) return entry.note;
     if (entry.passages && entry.passages.length) return 'Done · no full recipes, used as cooking knowledge';
     return entry.note ? `Not used: ${entry.note}` : 'Done';
 }
@@ -3738,7 +3813,8 @@ function libraryGroup() {
         libraryState.progress ? h('div', { class: 'settings-row settings-row-stack' },
             h('span', { class: 'settings-label', text: `Reading ${libraryState.progress.path.split('/').pop()}` }),
             h('progress', { class: 'library-progress', max: String(libraryState.progress.total || 1), value: String(libraryState.progress.done || 0) }),
-            h('span', { class: 'settings-hint', text: `Part ${libraryState.progress.done} of ${libraryState.progress.total}. Big books are read a little at a time so the phone stays cool.` })) : null,
+            h('span', { class: 'settings-hint', text: `${/^page /.test(libraryState.progress.chapter || '') ? libraryState.progress.chapter.replace(/^page/, 'Page') : `Part ${libraryState.progress.done} of ${libraryState.progress.total}`}. Big books are read a little at a time so the phone stays cool; you can keep using Nourish.` })) : null,
+        libraryState.progress ? settingsButton('Pause (carry on later from here)', pauseLibraryReading) : null,
         libraryState.progress ? settingsButton('Stop reading', cancelLibraryReading) : null,
         ...listed.map(f => {
             const entry = (libraryIndex().files || {})[f.path];
@@ -3748,6 +3824,7 @@ function libraryGroup() {
                 h('span', { class: 'settings-label', text: f.path.split('/').pop() }),
                 h('span', { class: 'settings-hint' + (entry && entry.failed ? ' warn' : ''), text: `${f.folder || ''}${f.folder ? ' · ' : ''}${libraryFileStatus(f.path)}` }),
                 entry && entry.failed && !reading ? h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => readLibraryFileAgain(f.path) }, icon('i-refresh'), 'Try again')
+                    : entry && entry.paused && !reading ? h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => readLibraryFileAgain(f.path) }, icon('i-refresh'), 'Carry on')
                     : entry && book && !reading && !libraryForce.has(f.path) ? h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => readLibraryFileAgain(f.path) }, icon('i-refresh'), 'Read again') : null);
         }),
         recipeDBReady && recipeDB.books().length ? settingsButton(`My books (${recipeDB.books().length})`, () => openSettingsPage('books')) : null,
@@ -3781,7 +3858,7 @@ function bookRecipeRow(r) {
         (r.meal_types || []).map(m => MEAL_LABELS[m]).join(', ') || kind,
         r.nutrition && r.nutrition.calories ? `${formatCalories(r.nutrition.calories)} kcal` : '',
         r.chapter && !(r.meal_types || []).some(m => MEAL_LABELS[m].toLowerCase() === String(r.chapter).toLowerCase()) ? r.chapter : '',
-        r.review ? 'needs review' : '', r.duplicate_of ? 'same as one already saved' : '',
+        r.review ? `needs review: ${r.review_why}` : '', r.duplicate_of ? 'same as one already saved' : '',
     ].filter(Boolean);
     return h('button', { type: 'button', class: 'settings-row settings-row-stack settings-nav', onclick: () => openBookRecipe(r) },
         h('span', { class: 'settings-label', text: r.name }),
@@ -3811,11 +3888,17 @@ function renderMyBooks() {
     }
     books.forEach(b => {
         const open = booksOpen === b.id;
-        const recipes = open ? recipeDB.recipesOf(b.id).sort((x, y) => (x.chapter || '').localeCompare(y.chapter || '') || x.name.localeCompare(y.name)) : [];
+        // Recipes that need review first (with what's missing), then by chapter.
+        const recipes = open ? recipeDB.recipesOf(b.id).sort((x, y) => (y.review ? 1 : 0) - (x.review ? 1 : 0) || (x.chapter || '').localeCompare(y.chapter || '') || x.name.localeCompare(y.name)) : [];
+        const others = b.others != null ? b.others : recipeDB.recipesOf(b.id).filter(r => r.kind !== 'meal' && !r.duplicate_of).length;
+        const fileEntry = b.path ? (libraryIndex().files || {})[b.path] : null;
         const rows = [
             h('button', { type: 'button', class: 'settings-row settings-row-stack settings-nav', onclick: () => { booksOpen = open ? null : b.id; renderSettings(); } },
                 h('span', { class: 'settings-label', text: b.title + (b.author ? ` · ${b.author}` : '') }),
-                h('span', { class: 'settings-hint', text: [`${b.count || 0} recipes`, b.meals != null ? `${b.meals} for plans` : '', b.review ? `${b.review} need review` : '', b.duplicates ? `${b.duplicates} already saved elsewhere` : '', open ? 'tap to close' : 'tap to see them'].filter(Boolean).join(' · ') })),
+                h('span', { class: 'settings-hint', text: [`${b.count || 0} recipes found`, `${b.meals || 0} meals`, others ? `${others} other (drinks, desserts, sauces, sides)` : '', b.review ? `${b.review} need review` : '', b.duplicates ? `${b.duplicates} already saved elsewhere` : '', open ? 'tap to close' : 'tap to see them'].filter(Boolean).join(' · ') })),
+            b.path && !b.missing && fileEntry ? h('div', { class: 'settings-row' },
+                h('span', { class: 'settings-hint', text: b.path.split('/').pop() }),
+                h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => { readLibraryFileAgain(b.path); openSettingsPage('sources'); } }, icon('i-refresh'), 'Read again')) : null,
             b.missing ? h('div', { class: 'settings-row settings-row-stack' },
                 h('span', { class: 'settings-hint warn', text: `The file (${b.path || 'unknown'}) was removed. Its recipes are kept.` }),
                 h('button', { type: 'button', class: 'btn btn-secondary btn-small danger', onclick: () => removeBookRecipes(b) }, icon('i-trash'), 'Remove its recipes')) : null,
@@ -3840,7 +3923,7 @@ function bookRecipeActions(meal, mealType, dayIndex, cookbookId) {
     if (!meal.from_book || dayIndex != null || cookbookId) return null;
     const id = meal.book_recipe_id;
     const stored = id && recipeDBReady ? recipeDB.get(id) : null;
-    return h('div', { class: 'recipe-actions' + (stored && stored.review ? ' three' : '') },
+    return h('div', { class: 'recipe-actions' + (stored && !stored.review ? ' three' : '') },
         h('button', { type: 'button', class: 'btn btn-primary', onclick: () => showSlotPicker(meal.name, mealType, (d, t) => { placeInPlan(meal, d, t); closeRecipeSheet(); showToast(`Added "${meal.name}" to ${dayName(d)}`, false); }) }, icon('i-calendar'), 'Add to plan'),
         h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => { addToCookbook(meal, mealType, 'imported'); showToast('Saved to your Cookbook', false); } }, icon('i-heart'), 'Save'),
         stored && stored.review ? h('button', { type: 'button', class: 'btn btn-secondary', title: stored.review_why || '', onclick: async () => {
@@ -3849,7 +3932,22 @@ function bookRecipeActions(meal, mealType, dayIndex, cookbookId) {
             openBookRecipe(recipeDB.get(id));
             if (settingsPage === 'books') renderSettings();
         } }, icon('i-check'), 'Looks right') : null,
-        stored && stored.review ? h('p', { class: 'settings-note', text: `Needs review: ${stored.review_why}. It stays out of plans until you confirm it (or edit it after saving it to your Cookbook).` }) : null);
+        stored ? h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => editBookRecipe(stored) }, icon('i-edit'), stored.review ? 'Fix it' : 'Edit') : null,
+        stored && stored.review ? h('p', { class: 'settings-note', text: `Needs review: ${stored.review_why}. It stays out of plans until you fix it (Fix it) or confirm it as it is (Looks right).` }) : null);
+}
+// A book recipe in the editor: what's missing is said at the top; saving works it out again and
+// confirms it.
+function editBookRecipe(r) {
+    closeRecipeSheet();
+    openRecipeEditor(r, { mode: 'book', mealType: bookMealType(r), notes: r.review ? [`What needs checking: ${r.review_why}`] : [] });
+}
+async function saveEditedBookRecipe() {
+    const recipe = editedRecipe();
+    if (!recipe || !editing || !editing.recipe.id) return;
+    const r = await recipeDB.update(editing.recipe.id, { name: recipe.name, ingredients: recipe.ingredients, steps: recipe.steps, servings: recipe.servings, time_minutes: recipe.time_minutes });
+    closeRecipeEditor();
+    showToast(r && r.kind === 'meal' ? `Saved: "${r.name}" can go into plans now` : `Saved "${recipe.name}"`, false);
+    if (settingsPage === 'books') renderSettings();
 }
 function exportBookRecipes() {
     const data = JSON.stringify(Object.assign({ app: 'Nourish', exported: new Date().toISOString() }, recipeDB.exportData()));
@@ -4674,7 +4772,7 @@ function openRecipeEditor(recipe, { mode = 'import', notes = [], mealType = 'din
     setChildren($('recipeEditContent'),
         h('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
         h('div', { class: 'sheet-header' },
-            h('h2', { class: 'title', text: mode === 'import' ? 'Check the recipe' : 'Edit recipe' }),
+            h('h2', { class: 'title', text: mode === 'import' ? 'Check the recipe' : mode === 'book' && recipe.review ? 'Fix the recipe' : 'Edit recipe' }),
             h('button', { type: 'button', class: 'icon-btn btn-close', 'aria-label': 'Close', onclick: closeRecipeEditor }, icon('i-close'))),
         h('div', { class: 'sheet-body' },
             mode === 'import' ? h('p', { class: 'sheet-hint', text: 'Fix anything that looks wrong, then save it to your Cookbook or add it to your plan.' }) : null,
@@ -4695,7 +4793,9 @@ function openRecipeEditor(recipe, { mode = 'import', notes = [], mealType = 'din
                 num('editKcal', n.calories, 'kcal'), num('editProtein', n.protein_g, 'Protein g'), num('editCarbs', n.carbs_g, 'Carbs g'), num('editFat', n.fat_g, 'Fat g')),
             nutritionNotes(recipe).filter(t => !/^Portion|^Less oil|^Seasoning/.test(t)).map(t => h('p', { class: 'recipe-note', text: t })),
             h('div', { class: 'form-error', id: 'editError', role: 'alert', hidden: true }),
-            mode === 'edit'
+            mode === 'book'
+                ? h('button', { type: 'button', class: 'btn btn-primary edit-save', onclick: saveEditedBookRecipe }, icon('i-check'), 'Save (it\'s right now)')
+            : mode === 'edit'
                 ? h('button', { type: 'button', class: 'btn btn-primary edit-save', onclick: saveEditedCookbookRecipe }, icon('i-check'), 'Save changes')
                 : h('div', { class: 'edit-actions' },
                     h('button', { type: 'button', class: 'btn btn-primary', onclick: () => saveImported('cookbook') }, icon('i-heart'), 'Save to Cookbook'),

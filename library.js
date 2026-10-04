@@ -300,7 +300,7 @@
     // opts.progress(path, done, total, chapter) is told how far a book is; opts.cancelled() → true
     // stops reading (the book isn't marked as read); opts.paused() → true stops a book where it is
     // and keeps how far it got (opts.onPause(path, fp, state); it carries on from there when it's
-    // asked for again with force).
+    // asked for again with force); opts.onCancel(path, fp) is told which book was stopped.
     // opts.known(fingerprint) → { id, count, title, note, partial } when a file with these contents
     // was already read (renamed or moved, or the index was lost): it isn't read again.
     // opts.force: paths to read again even though they haven't changed ("Read again", "Try again",
@@ -308,7 +308,7 @@
     // a finished book is saved even if the app is closed before the others are read.
     // index: { files: { path: { sig, fp, recipes, count, note, failed, title, author } } }.
     // Returns { index, changed, read, errors, cancelled, paused, removed: [{ path, fp }] }.
-    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled, paused, onPause, known, force, onFile } = {}) {
+    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled, paused, onPause, onCancel, known, force, onFile } = {}) {
         const idx = index && index.files ? index : { files: {} };
         const listed = (await io.list()).filter(f => kindOf(f.path) && !isReadme(f.path));
         const seen = new Set(listed.map(f => f.path));
@@ -392,7 +392,7 @@
                     read++;
                     done = true;
                 } catch (e) {
-                    if (e.cancelled) { stopped = true; return; }   // not saved: not read
+                    if (e.cancelled) { stopped = true; if (onCancel) await onCancel(f.path, entry.fp); return; }   // not marked as read
                     if (e.paused) {
                         held = true;
                         if (onPause) await onPause(f.path, entry.fp, e.state);

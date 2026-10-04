@@ -24,11 +24,12 @@
     function idbBackend(idb, name = 'nourish') {
         let dbp = null;
         const open = () => dbp || (dbp = new Promise((ok, bad) => {
-            const req = idb.open(name, 1);
+            // Version 2 adds 'files': every file read, by fingerprint (also the ones with no recipes),
+            // so a book is never read twice; and how far a paused book got.
+            const req = idb.open(name, 2);
             req.onupgradeneeded = () => {
                 const db = req.result;
-                if (!db.objectStoreNames.contains('recipes')) db.createObjectStore('recipes', { keyPath: 'id' });
-                if (!db.objectStoreNames.contains('books')) db.createObjectStore('books', { keyPath: 'id' });
+                ['recipes', 'books', 'files'].forEach(store => { if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath: 'id' }); });
             };
             req.onsuccess = () => ok(req.result);
             req.onerror = () => bad(req.error || new Error('the recipe database could not be opened'));
@@ -48,13 +49,14 @@
         return {
             kind: 'IndexedDB',
             async load() {
-                let recipes = [], books = [];
-                await tx(['recipes', 'books'], 'readonly', t => {
-                    const a = getAll(t, 'recipes'), b = getAll(t, 'books');
+                let recipes = [], books = [], files = [];
+                await tx(['recipes', 'books', 'files'], 'readonly', t => {
+                    const a = getAll(t, 'recipes'), b = getAll(t, 'books'), c = getAll(t, 'files');
                     a.onsuccess = () => { recipes = a.result || []; };
                     b.onsuccess = () => { books = b.result || []; };
+                    c.onsuccess = () => { files = c.result || []; };
                 });
-                return { recipes, books };
+                return { recipes, books, files };
             },
             put: (store, items) => tx([store], 'readwrite', t => { const s = t.objectStore(store); items.forEach(x => s.put(x)); }),
             del: (store, ids) => tx([store], 'readwrite', t => { const s = t.objectStore(store); ids.forEach(id => s.delete(id)); }),
@@ -62,20 +64,25 @@
     }
     function localBackend(storage, key = 'nourish_recipe_db') {
         let data = null;
-        const read = () => { if (!data) { try { data = JSON.parse(storage.getItem(key) || 'null') || { recipes: {}, books: {} }; } catch (e) { data = { recipes: {}, books: {} }; } } return data; };
+        const read = () => {
+            if (!data) { try { data = JSON.parse(storage.getItem(key) || 'null') || {}; } catch (e) { data = {}; } }
+            ['recipes', 'books', 'files'].forEach(k => { if (!data[k]) data[k] = {}; });
+            return data;
+        };
         const write = () => { storage.setItem(key, JSON.stringify(data)); };
         return {
             kind: 'localStorage',
-            async load() { const d = read(); return { recipes: Object.values(d.recipes), books: Object.values(d.books) }; },
+            async load() { const d = read(); return { recipes: Object.values(d.recipes), books: Object.values(d.books), files: Object.values(d.files) }; },
             async put(store, items) { const d = read(); items.forEach(x => { d[store][x.id] = x; }); write(); },
             async del(store, ids) { const d = read(); ids.forEach(id => { delete d[store][id]; }); write(); },
         };
     }
     function memoryBackend() {
-        const d = { recipes: {}, books: {} };
+        const d = { recipes: {}, books: {}, files: {} };
+        const copy = store => Object.values(d[store]).map(x => JSON.parse(JSON.stringify(x)));
         return {
             kind: 'memory',
-            async load() { return { recipes: Object.values(d.recipes).map(x => JSON.parse(JSON.stringify(x))), books: Object.values(d.books).map(x => JSON.parse(JSON.stringify(x))) }; },
+            async load() { return { recipes: copy('recipes'), books: copy('books'), files: copy('files') }; },
             async put(store, items) { items.forEach(x => { d[store][x.id] = JSON.parse(JSON.stringify(x)); }); },
             async del(store, ids) { ids.forEach(id => { delete d[store][id]; }); },
         };
@@ -109,7 +116,10 @@
             category: Array.isArray(raw.category) ? raw.category.join(', ') : String(raw.category || raw.chapter || ''),
         };
         const why = [];
-        if (r.ingredients.length < 3) why.push('fewer than 3 ingredients');
+        // A title that looks cut off ("in Stuffed Pasta Shells", "and Rice") or missing.
+        if (raw.untitled || /^Untitled recipe/.test(r.name)) why.push('no title found');
+        else if (/^[a-z]/.test(r.name) || /^(in|with|and|or|on|of|for|to|from|over|under|at|by|&|y|con|de|en)\b/i.test(r.name) || /\b(and|with|in|of|or|&)$/i.test(r.name)) why.push('the title looks cut off');
+        if (r.ingredients.length < 2 || (r.ingredients.length < 3 && !(r.ingredients.every(l => AMOUNT.test(l))))) why.push('fewer than 3 ingredients');
         if (!r.steps.length) why.push('no steps');
         const amounts = r.ingredients.filter(l => AMOUNT.test(l)).length;
         if (r.ingredients.length >= 3 && amounts < r.ingredients.length / 2) why.push('most ingredients have no amounts');
@@ -158,9 +168,21 @@
     function create(backend) {
         const recipes = new Map();
         const books = new Map();
+        const files = new Map();
         let ready = null;
         const listeners = [];
         const changed = what => listeners.forEach(fn => { try { fn(what); } catch (e) { /* keep going */ } });
+        // A book's counts: recipes, meals for plans, other kinds, waiting for review.
+        async function recount(bookId) {
+            const b = books.get(bookId);
+            if (!b) return;
+            const mine = [...recipes.values()].filter(x => x.book_id === bookId && !x.duplicate_of);
+            b.count = mine.length;
+            b.review = mine.filter(x => x.review).length;
+            b.meals = mine.filter(x => x.kind === 'meal' && !x.review).length;
+            b.others = mine.filter(x => x.kind !== 'meal').length;
+            await backend.put('books', [b]);
+        }
         const api = {
             backend,
             open() {
@@ -168,6 +190,7 @@
                     ready = backend.load().then(d => {
                         (d.books || []).forEach(b => books.set(b.id, b));
                         (d.recipes || []).forEach(r => recipes.set(r.id, r));
+                        (d.files || []).forEach(f => files.set(f.id, f));
                         return api;
                     });
                 }
@@ -229,6 +252,7 @@
                 book.review = fresh.filter(r => r.review && !r.duplicate_of).length;
                 book.meals = fresh.filter(r => r.kind === 'meal' && !r.review && !r.duplicate_of).length;
                 book.duplicates = fresh.filter(r => r.duplicate_of).length;
+                book.others = fresh.filter(r => r.kind !== 'meal' && !r.duplicate_of).length;
                 books.set(id, book);
                 const gone = removed.filter(rid => !recipes.has(rid));
                 if (gone.length) await backend.del('recipes', gone);
@@ -237,6 +261,20 @@
                 changed('import');
                 return book;
             },
+            // Every file that was read, by its fingerprint: { id, path, title, author, count, note,
+            // failed, empty, passages, partial (where a paused read got to), stopped }. Kept even for
+            // files with no recipes, so nothing is read twice.
+            file(fp) { return files.get(fp) || null; },
+            files() { return [...files.values()]; },
+            async recordFile(fp, data) {
+                if (!fp) return null;
+                const rec = Object.assign({}, files.get(fp) || {}, data, { id: fp, at: Date.now() });
+                Object.keys(rec).forEach(k => { if (rec[k] === undefined) delete rec[k]; });
+                files.set(fp, rec);
+                await backend.put('files', [rec]);
+                return rec;
+            },
+            async forgetFile(fp) { if (files.delete(fp)) await backend.del('files', [fp]); },
             // A book's file is in a new place (renamed or moved): just remembered.
             async linkPath(id, path) {
                 const b = books.get(id);
@@ -268,8 +306,24 @@
                 if (!r) return null;
                 Object.assign(r, patch || {});
                 delete r.review; delete r.review_why;
-                const b = books.get(r.book_id);
-                if (b) { b.review = api.recipesOf(b.id).filter(x => x.review && !x.duplicate_of).length; b.meals = api.recipesOf(b.id).filter(x => x.kind === 'meal' && !x.review && !x.duplicate_of).length; await backend.put('books', [b]); }
+                await recount(r.book_id);
+                await backend.put('recipes', [r]);
+                changed('confirm');
+                return r;
+            },
+            // Edited by the person (name, ingredients, steps, servings, time): worked out again
+            // (nutrition, meal type) and confirmed.
+            async update(id, patch) {
+                const old = recipes.get(id);
+                if (!old) return null;
+                const b = books.get(old.book_id) || { id: old.book_id, title: old.book, author: old.author, path: old.library_path };
+                const r = enrich(Object.assign({ chapter: old.chapter, page: old.page, category: old.category }, patch), b);
+                Object.assign(r, { id, edited: true });
+                if (old.duplicate_of) r.duplicate_of = old.duplicate_of;
+                delete r.review; delete r.review_why;
+                Object.keys(r).forEach(k => { if (r[k] === undefined) delete r[k]; });
+                recipes.set(id, r);
+                await recount(r.book_id);
                 await backend.put('recipes', [r]);
                 changed('confirm');
                 return r;
