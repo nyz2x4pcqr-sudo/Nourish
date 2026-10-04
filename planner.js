@@ -882,8 +882,11 @@
         'grandma grandmas granny nana nanas nonna nonnas mama mamas mom moms mum mums papa dad dads auntie aunt uncle family famous ' +
         'little mini big bites bake bakes plate platter board boats cups rolls sliders burgers patties meatballs nuggets tenders strips wings thighs breast fillets').split(/\s+/));
     // Fixes obvious misspellings in an AI-written dish name ("Chiken Tikka Masla" → "Chicken Tikka Masala").
+    // Real dish words a spell-check must never "correct" ("Mapo Tofu" became "Mayo Tofu" in 0.1.10,
+    // and then wasn't recognised as already in the plan).
+    const KEEP_WORDS = 'mapo lemony garlicky herby zesty smoky cheesy bulgogi bibimbap japchae tteokbokki kimbap gyudon katsu donburi okonomiyaki yakisoba udon ramen soba pho banh larb laksa rendang nasi goreng satay pozole posole birria chilaquiles tamales tostadas elote shakshuka harissa tagine mujadara fattoush tabbouleh shawarma kofta falafel halloumi spanakopita moussaka souvlaki tzatziki gnocchi orzo farro freekeh dhal chana paneer saag pakora biryani khichdi upma poha idli dosa congee jook arroz habichuelas guisadas sofrito mofongo pastelon picadillo ropa vieja'.split(' ');
     function fixName(name) {
-        const vocab = new Set(DISH_WORDS);
+        const vocab = new Set(DISH_WORDS.concat(KEEP_WORDS));
         return String(name || '').split(/(\s+|-)/).map(tok => {
             const w = tok.toLowerCase();
             if (!/^[a-z]{4,}$/.test(w) || vocab.has(w) || vocab.has(w.replace(/e?s$/, '')) || vocab.has(w.replace(/s$/, '')) || PLAIN_WORDS.has(w) || P.correct(w) === w || P.correct(P.singular(w)) === P.singular(w)) return tok;

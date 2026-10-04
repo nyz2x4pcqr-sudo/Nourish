@@ -97,3 +97,16 @@ test('the built-in recipes: at least 60 per meal, original names, every one fits
         MEALS.forEach(m => assert.ok(B.forMeal(m).filter(r => !ex(r)).length >= 7, `${diet} ${m}`));
     });
 });
+
+test('spell-check never changes a real dish name (0.1.10 turned "Mapo Tofu" into "Mayo Tofu", then used it twice)', () => {
+    const PL = require('../planner.js');
+    const B = require('../builtins.js');
+    const names = ['breakfast', 'lunch', 'dinner'].flatMap(m => B.forMeal(m)).map(r => r.name);
+    const changed = names.filter(n => PL.fixName(n) !== n).map(n => `${n} → ${PL.fixName(n)}`);
+    assert.deepEqual(changed, []);
+    assert.equal(PL.fixName('Mapo Tofu'), 'Mapo Tofu');
+    // Real typos from an AI are still fixed.
+    assert.equal(PL.fixName('Chiken Tikka Masalla'), 'Chicken Tikka Masala');
+    // The no-repeat check knows them as the same dish either way.
+    assert.ok(PL.dishList(['Mapo Tofu']).has('Mapo Tofu'));
+});

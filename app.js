@@ -3211,7 +3211,8 @@ function normalizeMeal(m) {
     if (!m || typeof m !== 'object' || !m.name) return null;
     const n = m.nutrition && typeof m.nutrition === 'object' ? m.nutrition : null;
     const ingredients = cleanIngredients(toStringList(m.ingredients), m.name);
-    const written = !m.source_url && !m.library_path;   // by the AI: its spelling is checked
+    // Only a name the AI wrote is spell-checked: never a web, book or Nourish recipe's own name.
+    const written = !m.source_url && !m.library_path && !m.builtin && !m.from_book && !m.quick;
     const out = Object.assign({
         name: written && typeof NourishPlanner !== 'undefined' ? NourishPlanner.fixName(String(m.name).trim()) : String(m.name).trim(),
         servings: toNumber(m.servings) >= 1 ? Math.round(toNumber(m.servings)) : undefined,
