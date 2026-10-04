@@ -231,6 +231,49 @@ enum RecipeLibrary {
         }
     }
 
+    /// A PDF a few pages at a time (the app asks for the next pages with short pauses in between, so
+    /// a 500-page book never blocks the phone and can be paused or stopped). Each page gives its own
+    /// text; a page that is only a picture (a scanned book has no text, just photos of the pages) is
+    /// read on the phone with Apple's text recognition (Vision) when `ocr` is on. `count` 0 gives
+    /// just the number of pages and the book's own title and author.
+    static func pdf(_ rel: String, from: Int, count: Int, ocr: Bool) throws -> [String: Any] {
+        let url = try resolve(rel)
+        guard let doc = PDFDocument(url: url) else { throw LibraryError(message: "This PDF couldn't be opened (it may be damaged).") }
+        if doc.isLocked { throw LibraryError(message: "This PDF is password-protected, so Nourish can't read it.") }
+        let attrs = doc.documentAttributes ?? [:]
+        var out: [String: Any] = ["pages": doc.pageCount,
+                                  "title": (attrs[PDFDocumentAttribute.titleAttribute] as? String) ?? "",
+                                  "author": (attrs[PDFDocumentAttribute.authorAttribute] as? String) ?? ""]
+        let end = min(doc.pageCount, from + max(0, min(count, 40)))
+        var pages: [[String: Any]] = []
+        var recognised = 0
+        if from >= 0 && from < end {
+            for i in from..<end {
+                autoreleasepool {
+                    guard let page = doc.page(at: i) else { pages.append(["text": ""]); return }
+                    let text = page.string ?? ""
+                    let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+                    // A page with (almost) no text of its own is a picture of a page.
+                    if letters < 40 && ocr {
+                        let box = page.bounds(for: .mediaBox)
+                        let scale = 2000 / max(box.width, box.height, 1)
+                        let image = page.thumbnail(of: CGSize(width: box.width * scale, height: box.height * scale), for: .mediaBox)
+                        if let cg = image.cgImage, let lines = try? TextReader.lines(of: cg) {
+                            recognised += 1
+                            pages.append(["text": lines.joined(separator: "\n"), "ocr": true])
+                            return
+                        }
+                    }
+                    pages.append(["text": text])
+                }
+            }
+        }
+        out["from"] = from
+        out["texts"] = pages
+        out["recognised"] = recognised
+        return out
+    }
+
     /// Opens the Files app at the Nourish folder.
     static func open() -> [String: Any] {
         setUp()

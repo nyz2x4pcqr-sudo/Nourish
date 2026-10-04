@@ -118,6 +118,28 @@ def pdf_text(path: Path) -> str:
     return "\n".join(parts)
 
 
+def read_pdf_pages(rel: str, start: int, count: int) -> dict:
+    """A PDF a few pages at a time, with the book's own title and author (count 0: only those and
+    the number of pages). Scanned pages (pictures) have no text here: the iPhone app reads them."""
+    path = _resolve(rel)
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        raise LibraryError("PDFs can't be read on this PC (the pypdf package is missing).")
+    reader = PdfReader(str(path))
+    if reader.is_encrypted:
+        raise LibraryError("This PDF is password-protected, so Nourish can't read it.")
+    meta = reader.metadata or {}
+    pages = []
+    for i in range(start, min(len(reader.pages), start + count)):
+        try:
+            pages.append({"text": reader.pages[i].extract_text() or ""})
+        except Exception:  # noqa: BLE001 (one damaged page shouldn't stop the book)
+            pages.append({"text": ""})
+    return {"pages": len(reader.pages), "title": str(meta.get("/Title") or ""), "author": str(meta.get("/Author") or ""),
+            "from": start, "texts": pages, "recognised": 0}
+
+
 def read_range(rel: str, offset: int, length: int) -> dict:
     """A slice of a file, base64 (books are read this way, a part at a time)."""
     path = _resolve(rel)

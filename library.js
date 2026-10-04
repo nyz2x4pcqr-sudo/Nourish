@@ -42,18 +42,19 @@
     }
 
     // Every recipe in a block of text: a title, an ingredients section and a method section.
-    function parseRecipeText(text, { fallbackTitle = '' } = {}) {
-        const lines = String(text || '').split(/\r?\n/).map(cleanLine);
+    function parseRecipeText(text, opts) { return parseMarked(text, opts).map(r => { delete r._start; delete r._end; return r; }); }
+    function parseMarked(text, { fallbackTitle = '' } = {}) {
+        const { lines } = prepareLines(text);
         const out = [];
         for (let i = 0; i < lines.length; i++) {
             if (!ING_HEAD.test(lines[i])) continue;
             // The title: the nearest heading-like line above, before any earlier recipe's text.
-            let title = '';
+            let title = '', titleAt = i;
             const floor = out.length ? out[out.length - 1]._end : 0;
             for (let k = i - 1; k >= Math.max(floor, i - 15); k--) {
-                if (lines[k] && /^#+\s/.test(lines[k]) && titleLike(lines[k])) { title = lines[k]; break; }
+                if (lines[k] && /^#+\s/.test(lines[k]) && titleLike(lines[k])) { title = lines[k]; titleAt = k; break; }
             }
-            if (!title) for (let k = i - 1; k >= Math.max(floor, i - 15); k--) { if (lines[k] && titleLike(lines[k]) && !/\b(serves|servings|prep|cook|total|yield|makes)\b/i.test(lines[k])) { title = lines[k]; break; } }
+            if (!title) for (let k = i - 1; k >= Math.max(floor, i - 15); k--) { if (lines[k] && titleLike(lines[k]) && !/\b(serves|servings|prep|cook|total|yield|makes)\b/i.test(lines[k])) { title = lines[k]; titleAt = k; break; } }
             const ingredients = [];
             let j = i + 1;
             for (; j < lines.length && !STEP_HEAD.test(lines[j]) && !ING_HEAD.test(lines[j]); j++) {
@@ -86,12 +87,189 @@
                 steps: steps.map(x => x.trim()).filter(x => x.length > 3).slice(0, 30),
                 servings: servingsIn(body),
                 time_minutes: timeIn(body),
-                _end: k,
+                _start: titleAt, _end: k,
             };
             if (recipe.name && recipe.ingredients.length >= 3 && recipe.steps.length) out.push(recipe);
             i = k - 1;
         }
-        return out.map(r => { delete r._end; return r; });
+        return out;
+    }
+
+    // === RECIPES IN OLDER AND TRADITIONAL COOKBOOKS ===
+    // Many cookbooks (and most scanned ones) have no "Ingredients" or "Method" headings: a title in
+    // capitals, maybe an English name in brackets and the servings, the ingredients (sometimes in
+    // lettered groups, "A", "B", that the steps refer to), then numbered steps or paragraphs, and the
+    // next recipe straight after on the same page. Recipes are found by that shape instead: a run of
+    // lines that look like ingredients (an amount, a unit or a food), followed by lines that read
+    // like cooking steps, with the nearest title-like line above.
+    const UNITS = /\b(cups?|c\.|tbsps?|tbs\.?|tbsp\.|tsps?\.?|tablespoons?(?:ful)?|teaspoons?(?:ful)?|ounces?|oz\.?|pounds?|lbs?\.?|grams?|g|kg|kilos?|ml|millilit(?:er|re)s?|lit(?:er|re)s?|l|pints?|pts?\.?|quarts?|qts?\.?|gallons?|cans?|tins?|jars?|packages?|pkgs?\.?|packets?|sticks?|cloves?|heads?|bunch(?:es)?|sprigs?|stalks?|slices?|pieces?|pinch(?:es)?|dash(?:es)?|handfuls?|sheets?|leaves|inch(?:es)?|cm|drops?|scoops?|shots?|bags?|envelopes?|squares?|bottles?|dozen)\b/i;
+    const FOOD = /\b(salt|pepper|sugar|flour|butter|oil|lard|water|milk|cream|eggs?|yolks?|whites?|garlic|onions?|tomato(?:es)?|rice|chicken|pork|beef|ham|bacon|lamb|fish|cod|codfish|bacalao|shrimps?|prawns?|crab|lobster|beans?|garbanzos?|chickpeas?|lentils?|potato(?:es)?|plantains?|yucca|yautia|pumpkin|squash|corn|cornmeal|peppers?|ajes?|cilantro|culantro|recao|oregano|cumin|paprika|cinnamon|vanilla|nutmeg|cloves|olives?|capers?|alcaparrado|sofrito|achiote|annatto|vinegar|wine|rum|stock|broth|cheese|bread|crumbs|coconut|lime|lemon|orange|juice|honey|syrup|tea|coffee|ice|yogh?urt|tofu|noodles|pasta|spaghetti|cabbage|carrots?|celery|spinach|lettuce|avocados?|bananas?|apples?|mangoes|pineapple|guava|raisins?|almonds?|nuts?|walnuts?|peanuts?|sesame|ginger|soy|mushrooms?|herbs?|parsley|basil|thyme|bay|mint|chili|chiles?|chocolate|cocoa|baking|yeast|soda|gelatin|steak|ribs|sausages?|chorizo|tapioca|boba|pearls|matcha)\b/i;
+    const QTY = /^(?:[-*•]\s*)?(?:\d|[½¼¾⅓⅔⅛⅜⅝⅞]|(?:a|an|one|two|three|four|five|six|eight|ten|twelve|half|several|dash|pinch|handful|few|juice of|zest of|grated|freshly)\b)/i;
+    const LABEL = /^\(?[A-H]\)?\s*[.:—–-]?$/;
+    const LABEL_PREFIX = /^\(?[A-H]\)?\s*[—–:.)-]\s+(?=\S)/;
+    const VERBS = /\b(add|bake|beat|blend|boil|braise|bring|brown|chill|chop|combine|cook|cool|cover|cut|dice|drain|fold|fry|grill|heat|knead|marinate|mash|melt|mix|place|pour|preheat|put|reduce|remove|rinse|roast|saut[eé]|season|serve|shake|simmer|slice|soak|sprinkle|steam|stir|strain|stuff|toss|turn|wash|whisk|wrap|brew|steep|crush|grind|spread|arrange|transfer|let|set|allow|keep|garnish|top|squeeze|peel|scald|parboil|baste|dissolve|sift|cream|grease|line|roll|shape|refrigerate|freeze|warm|discard|return|repeat)\b/i;
+    const SERVINGS_LINE = /^\(?\s*(?:serves|servings?|makes|yields?|for)\b.{0,30}\)?$|^\(?\s*\d{1,2}(?:\s*(?:to|-|–)\s*\d{1,2})?\s*(?:servings?|portions?|people|persons?)\b.{0,20}\)?$/i;
+    const SMALL = new Set(['a', 'an', 'and', 'or', 'of', 'the', 'with', 'in', 'on', 'de', 'del', 'con', 'en', 'y', 'a la', 'al', 'la', 'el', 'los', 'las', 'for', 'to', 'à', 'au', 'aux', 'du', 'des', 'le']);
+    const CONNECT_END = /\b(and|with|in|on|&|de|del|con|en|y|a la|al|for|of|or)$/i;
+    const CONNECT_START = /^(and|with|in|on|&|de|del|con|en|y|al|for|of|or)\b/i;
+    function stripLabel(l) { return l.replace(LABEL_PREFIX, ''); }
+    // strict: the line has an amount (a list starts with one); otherwise a short food line ("Ice",
+    // "Salt", "Lard or vegetable oil for frying") counts too, inside a list.
+    function isIngLine(raw, strict) {
+        const l = stripLabel(raw);
+        if (l.length < 2 || l.length > 100) return false;
+        if (/[.!?]\s+[A-Z][a-z]/.test(l) || /:$/.test(l)) return false;
+        const words = l.split(/\s+/).length;
+        if (words > 14) return false;
+        if (/\bto taste\b/i.test(l) && words <= 8) return true;
+        if (QTY.test(l)) return UNITS.test(l) || FOOD.test(l) || words <= 5;
+        if (strict) return false;
+        if (/\b(for frying|for greasing|for serving|for garnish|to serve|as needed|optional)\b/i.test(l) && words <= 8 && FOOD.test(l)) return true;
+        return words <= 4 && FOOD.test(l) && !(words >= 3 && words === l.split(/\s+/).filter(w => /^[A-Z]/.test(w)).length) && !VERBS.test(l) && /^[a-z]/i.test(l) && !/[.!]$/.test(l);
+    }
+    const NUM_STEP = /^(?:step\s*)?(\d{1,2})\s*[.)]\s+(?=[A-Za-z])/i;
+    function isStepLine(l) {
+        if (NUM_STEP.test(l)) { const t = l.replace(NUM_STEP, ''); return t.length >= 12 && (VERBS.test(t) || t.length >= 30) && !(UNITS.test(t.split(/\s+/).slice(0, 2).join(' ')) && t.length < 40); }
+        return l.length >= 25 && /^[A-Z¿¡"'(]/.test(l) && VERBS.test(l) && !isIngLine(l);
+    }
+    function titleish(l) {
+        if (!l || l.length < 3 || l.length > 70 || /[.,;:]$/.test(l) || !/[a-z]/i.test(l)) return false;
+        if (isIngLine(l) || SERVINGS_LINE.test(l) || LABEL.test(l) || ING_HEAD.test(l) || STEP_HEAD.test(l) || OTHER_HEAD.test(l)) return false;
+        if (/^\(.*\)$/.test(l) || /^\d/.test(l)) return false;
+        const words = l.split(/\s+/);
+        if (words.length > 10) return false;
+        if (l === l.toUpperCase()) return true;
+        const caps = words.filter(w => /^[A-ZÁÉÍÓÚÑ"'(]/.test(w)).length;
+        return /^[A-ZÁÉÍÓÚÑ¿¡"']/.test(l) && (caps >= Math.ceil(words.filter(w => !SMALL.has(w.toLowerCase())).length * 0.6) || words.length <= 5)
+            && !(VERBS.test(words[0]) && words.slice(1).some(w => /^[a-z]/.test(w) && !SMALL.has(w)));
+    }
+    // "ARROZ CON POLLO" → "Arroz con Pollo".
+    function niceTitle(t) {
+        let s = String(t).replace(/\s+/g, ' ').trim();
+        if (s === s.toUpperCase() && /[A-Z]{3}/.test(s)) {
+            s = s.toLowerCase().split(' ').map((w, i) => (i > 0 && SMALL.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
+        }
+        return s;
+    }
+    // Lines as a cookbook's pages give them: page numbers, running heads ("PUERTO RICAN COOKERY" on
+    // every page) and words split at the end of a line are cleaned up; each line keeps its page.
+    function prepareLines(text) {
+        const raw = String(text || '').split(/\r?\n/);
+        const lines = [], pages = [];
+        let page = 1;
+        raw.forEach(l => { if (l.indexOf('\f') >= 0) page += (l.match(/\f/g) || []).length; lines.push(cleanLine(l)); pages.push(page); });
+        // Running heads and feet: the same short line on many pages.
+        const totalPages = pages.length ? pages[pages.length - 1] : 1;
+        if (totalPages >= 4) {
+            const seen = new Map();
+            lines.forEach((l, i) => {
+                if (!l || l.length > 60 || isIngLine(l)) return;
+                const k = l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ');
+                if (!seen.has(k)) seen.set(k, new Set());
+                seen.get(k).add(pages[i]);
+            });
+            const heads = new Set([...seen.entries()].filter(([, p]) => p.size >= Math.max(4, totalPages * 0.2)).map(([k]) => k));
+            lines.forEach((l, i) => { if (heads.has(l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' '))) lines[i] = ''; });
+        }
+        for (let i = 0; i < lines.length; i++) {
+            if (/^(?:\d{1,4}|page \d{1,4}|[ivxlc]{1,6})$/i.test(lines[i])) lines[i] = '';
+            // "toma-" + "toes, chopped" → "tomatoes, chopped".
+            if (/[a-z]-$/.test(lines[i]) && i + 1 < lines.length && /^[a-z]/.test(lines[i + 1])) {
+                const next = lines[i + 1].split(' ');
+                lines[i] = lines[i].slice(0, -1) + next.shift();
+                lines[i + 1] = next.join(' ');
+            }
+        }
+        return { lines, pages };
+    }
+    function parseLooseRecipes(text, { skip = [] } = {}) {
+        const { lines, pages } = prepareLines(text);
+        const n = lines.length;
+        const used = i => skip.some(([a, b]) => i >= a && i < b);
+        const ingAt = i => i < n && !!lines[i] && isIngLine(lines[i], true);
+        // Two or more ingredient lines soon after line i (the start of a recipe's list).
+        const ingRunSoon = (i, span = 8) => { let c = 0; for (let k = i; k < Math.min(n, i + span); k++) { if (ingAt(k)) { c++; if (c >= 2) return true; } else if (lines[k] && isStepLine(lines[k])) return false; } return false; };
+        const out = [];
+        let floor = 0;
+        for (let i = 0; i < n; i++) {
+            if (!ingAt(i) || used(i) || !ingRunSoon(i, 4)) continue;
+            // The ingredients: a run of ingredient lines; group labels ("A"), "For the sauce:" and
+            // blank lines in between are fine; a line that wraps is joined to the one before.
+            const ingredients = [];
+            let j = i;
+            for (; j < n; j++) {
+                const l = lines[j];
+                if (!l || LABEL.test(l) || ING_HEAD.test(l) || /^(for (the|a)\b.{0,40}|[A-Za-z ]{3,30}):$/i.test(l)) continue;
+                if (isIngLine(l) && !(titleish(l) && !isIngLine(l, true) && ingRunSoon(j + 1, 6) && !ingredients.length)) { ingredients.push(stripLabel(l)); continue; }
+                if (ingredients.length && /^[a-z(]/.test(l) && l.length < 50 && !isStepLine(l)) { ingredients[ingredients.length - 1] += ' ' + l; continue; }
+                break;
+            }
+            if (ingredients.length < 2) continue;
+            // The steps: numbered steps or paragraphs, up to the next recipe.
+            const steps = [];
+            let cur = '';
+            let k = j;
+            const push = () => { if (cur) { steps.push(cur.trim()); cur = ''; } };
+            for (; k < n; k++) {
+                const l = lines[k];
+                if (!l) { if (cur && /[.!)]$/.test(cur)) push(); continue; }
+                if (used(k)) break;
+                if (STEP_HEAD.test(l)) continue;
+                if (OTHER_HEAD.test(l) || /^(variations?|note|tips?|cook'?s note)\b/i.test(l)) { push(); break; }
+                if (titleish(l) && ingRunSoon(k + 1, 10) && !(cur && /^[a-z]/.test(l))) break;
+                if (ingAt(k) && ingRunSoon(k, 3) && (steps.length || cur)) break;
+                if (NUM_STEP.test(l) || (isStepLine(l) && (!cur || /[.!)]$/.test(cur)))) { push(); cur = l.replace(NUM_STEP, ''); continue; }
+                if (titleish(l) && (!cur || /[.!)]$/.test(cur))) { if (steps.length || cur) break; continue; }
+                if (cur) { cur += ' ' + l; continue; }
+            }
+            push();
+            const good = steps.filter(s => s.length >= 15 && (VERBS.test(s) || s.length >= 40));
+            if (!good.length) continue;
+            // The title: the nearest title-like line above (past the servings, an English name in
+            // brackets and a short introduction), joined with the line above when it's split in two.
+            let title = '', note = '', titleAt = -1;
+            let servingsLine = '';
+            for (let t = i - 1, prose = 0; t >= Math.max(floor, i - 14); t--) {
+                const l = lines[t];
+                if (!l || LABEL.test(l)) continue;
+                if (SERVINGS_LINE.test(l)) { servingsLine = servingsLine || l; continue; }
+                if (/^\(.*\)$/.test(l)) { if (!SERVINGS_LINE.test(l.slice(1, -1))) note = note || l; else servingsLine = servingsLine || l; continue; }
+                if (titleish(l)) { title = l; titleAt = t; break; }
+                if (++prose > 8) break;
+            }
+            if (titleAt > floor && lines[titleAt - 1] && titleish(lines[titleAt - 1]) && (CONNECT_START.test(title) || CONNECT_END.test(lines[titleAt - 1])) && (lines[titleAt - 1] + title).length <= 80) {
+                title = `${lines[titleAt - 1]} ${title}`;
+                titleAt--;
+            }
+            const body = lines.slice(Math.max(floor, titleAt >= 0 ? titleAt : i), k);
+            const sm = (servingsLine || body.join(' ')).match(/\b(?:serves|servings?|makes|yields?)\b\D{0,12}(\d{1,2})|(\d{1,2})(?:\s*(?:to|-|–)\s*\d{1,2})?\s*(?:servings?|portions?|people|persons?)\b/i);
+            out.push({
+                name: title ? niceTitle(title) + (note && note.length < 50 ? ` ${note}` : '') : '',
+                ingredients: ingredients.map(x => x.replace(BULLET, '').trim()).filter(x => x.length > 1).slice(0, 40),
+                steps: good.slice(0, 30),
+                servings: sm ? Number(sm[1] || sm[2]) : null,
+                time_minutes: timeIn(body),
+                page: pages[titleAt >= 0 ? titleAt : i] > 1 || pages[n - 1] > 1 ? pages[titleAt >= 0 ? titleAt : i] : undefined,
+                _start: titleAt >= 0 ? titleAt : i, _end: k,
+            });
+            floor = k;
+            i = k - 1;
+        }
+        return out;
+    }
+    // Every recipe in a text: the ones with "Ingredients" / "Method" headings, then the ones found by
+    // their shape (older and scanned cookbooks), without counting any twice.
+    function findRecipesInText(text, opts = {}) {
+        const marked = parseMarked(text, opts);
+        const loose = parseLooseRecipes(text, { skip: marked.map(r => [r._start, r._end]) });
+        const keys = new Set(marked.map(r => r.name.toLowerCase()));
+        const all = marked.concat(loose.filter(r => !r.name || !keys.has(r.name.toLowerCase()))).sort((a, b) => a._start - b._start);
+        return all.map(r => {
+            delete r._start; delete r._end;
+            if (!r.name) { r.name = opts.fallbackTitle && all.length === 1 ? opts.fallbackTitle : `Untitled recipe${r.page ? ` (page ${r.page})` : ''}`; r.untitled = true; }
+            if (r.page === undefined) delete r.page;
+            return r;
+        });
     }
 
     // Recipes from one file, as the phone or PC returned it: { kind, text?, html? }.
@@ -102,9 +280,9 @@
         if (file.kind === 'html' && file.html) {
             const r = readStructured ? readStructured(file.html, file.url || '') : null;
             if (r) found = [r];
-            else if (readText) found = parseRecipeText(readText(file.html), { fallbackTitle: name });
+            else if (readText) found = findRecipesInText(readText(file.html), { fallbackTitle: name });
         } else if (file.text) {
-            found = parseRecipeText(file.text, { fallbackTitle: name });
+            found = findRecipesInText(file.text, { fallbackTitle: name });
         }
         return found.map(r => Object.assign({}, r, {
             source_name: file.folder ? `${file.folder}: ${name}` : name,
@@ -116,15 +294,21 @@
     // Brings the index up to date: reads only new or changed files, a few at a time, pausing
     // between batches. io: { list() → [{ path, size, mtime }], read(path) → { kind, text?, html?, image?, size? },
     // range(path, offset, length) → Uint8Array (books: EPUB and Word are read a slice at a time, see
-    // books.js), ocr(image) → text (optional), readStructured, readText, sleep(ms) }.
+    // books.js), pdf(path, from, count) → { pages, title, author, texts: [{ text, ocr }] } (a PDF a
+    // few pages at a time; scanned pages are read with the phone's text recognition), ocr(image) →
+    // text (optional), readStructured, readText, sleep(ms) }.
     // opts.progress(path, done, total, chapter) is told how far a book is; opts.cancelled() → true
-    // stops reading (the book is read again from the start next time).
-    // opts.known(fingerprint) → { id, count } when a file with these contents was already imported
-    // into the recipe database (renamed or moved): it isn't read again. opts.force: paths to read
-    // again even though they haven't changed ("Read again", "Try again").
+    // stops reading (the book isn't marked as read); opts.paused() → true stops a book where it is
+    // and keeps how far it got (opts.onPause(path, fp, state); it carries on from there when it's
+    // asked for again with force).
+    // opts.known(fingerprint) → { id, count, title, note, partial } when a file with these contents
+    // was already read (renamed or moved, or the index was lost): it isn't read again.
+    // opts.force: paths to read again even though they haven't changed ("Read again", "Try again",
+    // "Carry on"). opts.onFile(path, entry) is called (and awaited) as soon as each file is done, so
+    // a finished book is saved even if the app is closed before the others are read.
     // index: { files: { path: { sig, fp, recipes, count, note, failed, title, author } } }.
-    // Returns { index, changed, read, errors, cancelled, removed: [{ path, fp }] }.
-    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled, known, force } = {}) {
+    // Returns { index, changed, read, errors, cancelled, paused, removed: [{ path, fp }] }.
+    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled, paused, onPause, known, force, onFile } = {}) {
         const idx = index && index.files ? index : { files: {} };
         const listed = (await io.list()).filter(f => kindOf(f.path) && !isReadme(f.path));
         const seen = new Set(listed.map(f => f.path));
@@ -135,7 +319,7 @@
         const todo = listed.filter(f => again.has(f.path) || !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).slice(0, maxFiles);
         let read = 0;
         const errors = [];
-        let stopped = false;
+        let stopped = false, held = false;
         // Books are read one at a time, after the other files (they take longer).
         const BOOK = { epub: 1, docx: 1, pdf: 1 };
         const books = todo.filter(f => BOOK[kindOf(f.path)]);
@@ -143,67 +327,149 @@
         const rest = todo.filter(f => !BOOK[kindOf(f.path)]);
         for (let i = 0; i < rest.length; i += batch) groups.push(rest.slice(i, i + batch));
         books.forEach(b => groups.push([b]));
-        for (let g = 0; g < groups.length && !stopped; g++) {
-            if (cancelled && cancelled()) { stopped = true; break; }
+        const halt = () => (cancelled && cancelled()) || (paused && paused());
+        for (let g = 0; g < groups.length && !stopped && !held; g++) {
+            if (halt()) { if (cancelled && cancelled()) stopped = true; else held = true; break; }
             await Promise.all(groups[g].map(async f => {
                 const entry = { sig: `${f.size}:${f.mtime}`, recipes: [], note: '' };
+                let done = false;
                 try {
                     const kind = kindOf(f.path);
-                    // The file's fingerprint (its size and first and last 64 KB): a book already saved
-                    // under another name isn't read again.
+                    // The file's fingerprint (its size and first and last 64 KB): a book already read
+                    // (under this name or another) isn't read again.
                     if (io.range && f.size > 0 && kind !== 'kindle') {
                         try {
                             const n = Math.min(65536, f.size);
                             entry.fp = fingerprintOf(f.size, await io.range(f.path, 0, n), await io.range(f.path, Math.max(0, f.size - n), n));
                         } catch (e) { /* older app without slices: fingerprinted from its text below */ }
                     }
-                    const hit = entry.fp && known && !again.has(f.path) ? known(entry.fp) : null;
-                    if (hit) {
-                        Object.assign(entry, { bookId: hit.id, count: hit.count || 0, title: hit.title, linked: true });
+                    const hit = entry.fp && known ? known(entry.fp) : null;
+                    if (hit && !again.has(f.path)) {
+                        Object.assign(entry, { bookId: hit.id, count: hit.count || 0, title: hit.title, linked: !!hit.id, note: hit.note || '', failed: hit.failed || undefined, paused: hit.partial ? true : undefined });
+                        if (hit.author) entry.author = hit.author;
+                        if (hit.passages) entry.passages = hit.passages;
+                        if (!entry.failed) delete entry.failed;
+                        if (!entry.paused) delete entry.paused;
                         idx.files[f.path] = entry;
                         changed++;
+                        done = true;
                         return;
                     }
+                    const resume = hit && hit.partial ? hit.partial : null;
                     if (kind === 'kindle') {
                         entry.note = booksReader() ? booksReader().KINDLE_NOTE : 'Kindle books can\'t be read.';
                         idx.files[f.path] = entry;
                         changed++;
+                        done = true;
                         return;
                     }
-                    let got = await io.read(f.path);
-                    if (kind === 'epub' || kind === 'docx') got = await readBook(f, got, kind, io, { progress, cancelled });
+                    const how = { progress, cancelled, paused, resume };
+                    let got;
+                    if (kind === 'epub' || kind === 'docx') got = await readBook(f, await io.read(f.path), kind, io, how);
+                    else if (kind === 'pdf' && io.pdf) got = await readPdf(f, io, how);
+                    else got = await io.read(f.path);
                     const file = Object.assign({ path: f.path, folder: f.folder }, got);
                     if (got.kind === 'image') {
                         file.text = io.ocr ? await io.ocr(got.image) : '';
                         if (!io.ocr) entry.note = 'Pictures can be read in the iPhone app.';
                     }
-                    if (got.kind === 'pdf' && !got.text) entry.note = got.note || 'No text could be read from this PDF.';
+                    if (got.kind === 'pdf' && !String(got.text || '').trim()) entry.note = got.why || got.note || 'No text could be read from this PDF.';
                     entry.recipes = got.recipes ? got.recipes : recipesFromFile(file, io.readStructured, io.readText);
                     const text = file.text || (file.html && io.readText ? io.readText(file.html) : '');
                     if (!entry.fp) entry.fp = textFingerprint(text || got.image || f.path);
-                    entry.title = got.title || String(f.path).split('/').pop().replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
-                    if (got.author) entry.author = got.author;
+                    entry.title = cleanTitle(got.title) || titleFromFileName(f.path);
+                    if (got.author) entry.author = cleanAuthor(got.author);
+                    if (got.pages) entry.pages = got.pages;
+                    if (got.scanned) entry.scanned = got.scanned;
                     entry.count = entry.recipes.length;
                     // Passages for the cooking notes: a recipe file is already covered by its recipes.
                     entry.passages = passagesFrom(text, { max: entry.recipes.length > 3 || f.folder === 'Recipe Books' ? 250 : 40 })
                         .filter(p => !entry.recipes.some(r => r.name && p.indexOf(r.name) >= 0 && p.length < 900));
                     if (!entry.passages.length) delete entry.passages;
-                    if (!entry.recipes.length && !entry.passages && !entry.note) entry.note = 'No recipe found (it needs a title, an ingredients list and steps).';
+                    // Never a silent nothing: why no recipe came out of it, in plain words.
+                    if (!entry.recipes.length && !entry.note) entry.note = got.why || 'No recipe found (it needs a title, an ingredients list and steps).';
+                    if (!entry.recipes.length) entry.empty = true;
                     read++;
+                    done = true;
                 } catch (e) {
-                    if (e.cancelled) { stopped = true; return; }   // not saved: read again next time
+                    if (e.cancelled) { stopped = true; return; }   // not saved: not read
+                    if (e.paused) {
+                        held = true;
+                        if (onPause) await onPause(f.path, entry.fp, e.state);
+                        entry.paused = true;
+                        entry.note = e.state && e.state.total ? `Paused at ${e.state.unit || 'part'} ${e.state.at} of ${e.state.total}` : 'Paused';
+                        idx.files[f.path] = entry;
+                        changed++;
+                        return;
+                    }
                     entry.note = e.drm && booksReader() ? booksReader().DRM_NOTE : `Couldn't read it: ${e.message}`;
                     entry.failed = true;
                     errors.push(`${f.path}: ${e.message}`);
+                    done = true;
                 }
                 idx.files[f.path] = entry;
                 changed++;
+                if (done && onFile) await onFile(f.path, entry, idx);
             }));
-            if (g + 1 < groups.length && io.sleep && !stopped) await io.sleep(pause);
+            if (g + 1 < groups.length && io.sleep && !stopped && !held) await io.sleep(pause);
         }
         idx.at = Date.now();
         idx.listed = listed.map(f => ({ path: f.path, folder: f.folder, size: f.size }));
-        return { index: idx, changed, read, errors, removed, cancelled: stopped, pending: Math.max(0, listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).length) };
+        return { index: idx, changed, read, errors, removed, cancelled: stopped, paused: held, pending: Math.max(0, listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).length) };
+    }
+
+    // A book's own title and author, without shop and download-site tags ("(Z-Library)", "[ebook]").
+    const TAGS = /\s*[([{](?:z-?lib(?:rary)?(?:\.org)?|1lib|libgen(?:\.\w+)?|annas?-archive|anna['’]s archive|pdfdrive|ebook|e-book|epub|pdf|mobi|retail|calibre|ocr|scan(?:ned)?|v\d+|\d{4}|[a-z0-9]{1,3}\.?\s?ed(?:ition)?\.?|(?:1st|2nd|3rd|\d+th) ed(?:ition)?\.?)[)\]}]/gi;
+    function cleanTitle(t) {
+        return String(t || '').replace(TAGS, '').replace(/\s*[-–—_]\s*(z-?library|libgen|ebook)$/i, '').replace(/\s+/g, ' ').replace(/^[\s:;,-]+|[\s:;,-]+$/g, '').trim();
+    }
+    function cleanAuthor(a) {
+        const s = cleanTitle(a).replace(/^(by)\s+/i, '');
+        // "Valldejuli, Carmen Aboy" → "Carmen Aboy Valldejuli" (only a single "Last, First").
+        const m = s.match(/^([^,&;]+),\s*([^,&;]+)$/);
+        return m && !/\b(jr|sr|ii|iii|phd|md)\.?$/i.test(m[2]) ? `${m[2].trim()} ${m[1].trim()}` : s;
+    }
+    function titleFromFileName(path) {
+        return cleanTitle(String(path).split('/').pop().replace(/\.[a-z0-9]+$/i, '').replace(TAGS, '').replace(/[_]+/g, ' ').replace(/\s+-\s+/g, ' - ').replace(/(\S)-(\S)/g, '$1-$2'));
+    }
+
+    // A PDF a few pages at a time (io.pdf), with progress, pauses so the phone stays cool, and a
+    // way to stop or pause: a scanned book is read with the phone's text recognition, which takes
+    // about a second a page. Its recipes keep their page number.
+    async function readPdf(f, io, { progress, cancelled, paused, resume } = {}) {
+        const info = await io.pdf(f.path, 0, 0);
+        const total = Math.min(Number(info.pages) || 0, 1500);
+        const texts = resume && Array.isArray(resume.texts) ? resume.texts.slice() : [];
+        let scanned = resume ? resume.scanned || 0 : 0;
+        let page = resume ? Math.min(resume.at || 0, total) : 0;
+        let size = 3;   // a small first step: scanned pages take a second each
+        while (page < total) {
+            if (cancelled && cancelled()) { const e = new Error('stopped'); e.cancelled = true; throw e; }
+            if (paused && paused()) { const e = new Error('paused'); e.paused = true; e.state = { kind: 'pdf', at: page, total, unit: 'page', texts, scanned }; throw e; }
+            const r = await io.pdf(f.path, page, size);
+            const got = (r && r.texts) || [];
+            if (!got.length) break;
+            got.forEach(t => { texts.push(String((t && t.text) || '')); if (t && t.ocr) scanned++; });
+            page += got.length;
+            if (progress) progress(f.path, page, total, `page ${page} of ${total}${scanned ? ' (reading scanned pages)' : ''}`);
+            // Scanned pages are slow to read: smaller steps with a longer breath in between.
+            const ocr = got.some(t => t && t.ocr);
+            size = ocr ? 3 : 12;
+            if (io.sleep) await io.sleep(ocr ? 400 : 60);
+        }
+        const text = texts.join('\n\f\n');
+        const fileName = titleFromFileName(f.path);
+        const title = cleanTitle(info.title) && !/^(untitled|microsoft word|document\d*|\d+)$/i.test(cleanTitle(info.title)) ? cleanTitle(info.title) : fileName;
+        const found = findRecipesInText(text, { fallbackTitle: '' });
+        const recipes = found.map(r => Object.assign({}, r, { source_name: r.page ? `${title} · page ${r.page}` : title, book: title, library_path: f.path }));
+        let why = '';
+        if (!recipes.length) {
+            const letters = (text.match(/[a-z]/gi) || []).length;
+            why = !total ? 'This PDF has no pages Nourish could open.'
+                : letters < total * 40 ? `No text could be read from its ${total} pages${scanned ? ' (they are pictures, and the text recognition found almost nothing on them)' : ''}.`
+                    : `Read all ${total} pages${scanned ? ` (${scanned} scanned)` : ''}, but no recipe was recognised: no ingredient lists followed by steps were found.`;
+        }
+        return { kind: 'pdf', text, recipes, title, author: info.author || undefined, pages: total, scanned, why };
     }
 
     // A book (EPUB or Word) read a slice at a time. Its recipes keep the book's title and chapter:
@@ -213,24 +479,26 @@
         if (root.NourishBooks) return root.NourishBooks;
         try { return typeof require === 'function' ? require('./books.js') : null; } catch (e) { return null; }
     }
-    async function readBook(f, got, kind, io, { progress, cancelled } = {}) {
+    async function readBook(f, got, kind, io, { progress, cancelled, paused, resume } = {}) {
         const Books = booksReader();
         if (!Books || !io.range) throw new Error('books can\'t be read here yet');
         const size = got.size || f.size;
         const opts = {
             size, readRange: (offset, length) => io.range(f.path, offset, length),
             progress: progress ? (done, total, chapter) => progress(f.path, done, total, chapter) : null,
-            cancelled, pause: io.sleep,
+            cancelled, paused, resume, pause: io.sleep,
         };
         const book = kind === 'epub' ? await Books.readEpub(opts) : await Books.readDocx(opts);
-        const fileName = String(f.path).split('/').pop().replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
-        const title = book.title || fileName;
+        const fileName = titleFromFileName(f.path);
+        // The book's own title, unless the file name is a longer form of it ("Guga" → "Guga: …").
+        let title = cleanTitle(book.title) || fileName;
+        if (fileName.toLowerCase().startsWith(title.toLowerCase()) && fileName.length > title.length + 3 && !book.subtitle) title = fileName;
         const recipes = book.recipes.map(r => Object.assign({}, r, {
             source_name: r.chapter ? `${title} · ${r.chapter}` : title,
             book: title,
             library_path: f.path,
         }));
-        return { kind, text: book.text, recipes, title, author: book.author || undefined, note: recipes.length ? '' : undefined };
+        return { kind, text: book.text, recipes, title, author: book.author || undefined, note: recipes.length ? '' : undefined, why: book.why };
     }
 
     // File fingerprints (recipedb.js), with a small copy here so this file works on its own.
@@ -356,7 +624,7 @@
         return out;
     }
 
-    const api = { parseRecipeText, recipesFromFile, refresh, allRecipes, kindOf, isReadme, passagesFrom, retrieve, pairingScore, terms };
+    const api = { cleanTitle, cleanAuthor, titleFromFileName, parseRecipeText, parseLooseRecipes, findRecipesInText, prepareLines, recipesFromFile, refresh, allRecipes, kindOf, isReadme, passagesFrom, retrieve, pairingScore, terms };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishLibrary = api;
 })(typeof window !== 'undefined' ? window : globalThis);

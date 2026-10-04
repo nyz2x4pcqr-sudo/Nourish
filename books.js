@@ -50,8 +50,23 @@
             entries[name] = { name, flags, method, comp, size: full, local };
             p += 46 + nameLen + extraLen + commentLen;
         }
+        // Names as books store them vary: "OEBPS\\Text\\ch1.xhtml" (made on Windows), "/OEBPS/…",
+        // different capitals, or %20 for spaces. Looked up exactly first, then loosely.
+        const norm = n => { let x = String(n || '').replace(/\\/g, '/').replace(/^\.?\//, ''); try { x = decodeURIComponent(x); } catch (err) { /* keep */ } return x.normalize ? x.normalize('NFC').toLowerCase() : x.toLowerCase(); };
+        let loose = null;
+        const find = name => {
+            if (entries[name]) return entries[name];
+            try { if (entries[decodeURIComponent(name)]) return entries[decodeURIComponent(name)]; } catch (err) { /* keep */ }
+            if (!loose) { loose = new Map(); Object.keys(entries).forEach(k => loose.set(norm(k), entries[k])); }
+            const k = norm(name);
+            if (loose.has(k)) return loose.get(k);
+            // Last resort: the only file anywhere with that name.
+            const base = k.split('/').pop();
+            const same = [...loose.keys()].filter(x => x.split('/').pop() === base);
+            return same.length === 1 ? loose.get(same[0]) : null;
+        };
         async function read(name) {
-            const e = entries[name] || entries[decodeURIComponent(name)];
+            const e = find(name);
             if (!e) return null;
             if (e.flags & 1) { const err = new Error('encrypted'); err.drm = true; throw err; }
             const head = await readRange(e.local, 30);
@@ -61,7 +76,7 @@
             if (e.method === 8) return inflate(data);
             throw new Error('a part of the file is packed in a way Nourish can\'t unpack');
         }
-        return { entries, read, readText: async name => { const b = await read(name); return b ? utf8(b) : null; } };
+        return { entries, find, read, readText: async name => { const b = await read(name); return b ? utf8(b) : null; } };
     }
 
     // === HTML / XML into text with its structure ===
@@ -77,7 +92,9 @@
         let s = String(html || '').replace(/<head[\s\S]*?<\/head>/i, ' ').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ');
         const out = [];
         const lists = [];
-        const re = /<(\/?)(h[1-6]|p|li|ol|ul|div|dt|dd|td|tr|br|section|blockquote|figcaption|table)\b([^>]*)>/gi;
+        // A table row is one line ("2 cups" | "milk" → "2 cups milk"): cells are joined, rows split.
+        s = s.replace(/<\/t[dh]>\s*<t[dh]\b[^>]*>/gi, ' ');
+        const re = /<(\/?)(h[1-6]|p|li|ol|ul|div|dt|dd|td|th|tr|br|section|blockquote|figcaption|table)\b([^>]*)>/gi;
         let last = 0, cur = null;
         const flush = upto => {
             if (!cur) return;
@@ -103,7 +120,16 @@
         }
         flush(s.length);
         close();
-        return out.map(b => Object.assign(b, { text: b.text.replace(/\s*\n\s*/g, '\n').trim() })).filter(b => b.text);
+        const blocks = out.map(b => Object.assign(b, { text: b.text.replace(/\s*\n\s*/g, '\n').trim() })).filter(b => b.text);
+        // A paragraph that is really a list (ingredients one per line, split by line breaks) becomes
+        // one block per line, so each line is judged on its own.
+        const split = [];
+        blocks.forEach(b => {
+            const lines = b.text.split('\n').map(x => x.trim()).filter(Boolean);
+            if (b.kind !== 'h' && lines.length >= 2 && lines.filter(x => x.length <= 100).length >= lines.length * 0.7) lines.forEach(t => split.push(Object.assign({}, b, { text: t })));
+            else split.push(b);
+        });
+        return split;
     }
 
     // === RECIPES IN A CHAPTER ===
@@ -114,6 +140,8 @@
     const SERVES = /\b(serves|servings?|makes|yield)\b\D{0,12}(\d{1,2})/i;
     const TIME = /\b(?:total|ready in|takes?|prep(?:aration)?|cook(?:ing)?)(?: time)?\b\D{0,10}(?:(\d+)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:utes?)?)?)?/gi;
     const SKIP_CHAPTER = /^(contents|table of contents|introduction|intro|foreword|preface|acknowledg(e)?ments?|about the author|about this book|index|copyright|title page|dedication|cover|also by|glossary|conversion|equipment|basics of|thanks|credits|notes?)\b/i;
+    const JOIN_START = /^(?:[a-z]|(?:and|with|in|on|over|&|de|del|con|en|y|al|for|of|or|plus)\b)/;
+    const JOIN_END = /\b(?:and|with|in|on|over|&|de|del|con|en|y|a la|al|for|of|or|plus)$/i;
     const isIngredient = b => (b.kind === 'li' || /ingr/i.test(b.cls) || b.kind === 'p') && b.text.length < 160 && (AMOUNT.test(b.text) || UNIT.test(b.text) || /ingr/i.test(b.cls)) && !/[.!?]\s+[A-Z]/.test(b.text);
     const isStepLike = b => b.text.length >= 20 && /^[A-Z0-9]/.test(b.text) && (b.kind === 'li' || /method|step|instruct|direction|proc/i.test(b.cls) || /[.!]$/.test(b.text));
     function minutesOf(text) {
@@ -153,6 +181,8 @@
                 if (STEP_HEAD.test(b.text)) { k++; break; }
                 if (isIngredient(b)) { b.text.split('\n').forEach(l => { if (l.trim()) ingredients.push(l.replace(/^[-*•]\s*/, '').trim()); }); continue; }
                 if (b.kind === 'li' && b.list === 'ul' && b.text.length < 120) { ingredients.push(b.text); continue; }
+                // One short line without an amount in the middle of the list ("Ice", "Salt") stays in it.
+                if (b.kind !== 'h' && b.text.length <= 40 && !/[.!?]$/.test(b.text) && part[k + 1] && isIngredient(part[k + 1])) { ingredients.push(b.text); continue; }
                 break;
             }
             const steps = [];
@@ -165,8 +195,15 @@
             }
             const body = part.map(b => b.text).join('\n');
             const serves = body.match(SERVES);
+            // A title set over two lines ("Smoked Brisket" / "in Stuffed Pasta Shells") is one title.
+            let name = blocks[i].text.replace(/\s+/g, ' ').trim();
+            for (let p = i - 1; p >= 0 && p >= i - 2 && blocks[p].kind === 'h'; p--) {
+                const above = blocks[p].text.replace(/\s+/g, ' ').trim();
+                if (!(JOIN_START.test(name) || JOIN_END.test(above)) || ING_HEAD.test(above) || (above + name).length > 110) break;
+                name = `${above} ${name}`;
+            }
             const recipe = {
-                name: blocks[i].text.replace(/\s+/g, ' ').trim(),
+                name,
                 ingredients: ingredients.filter(x => x.length > 1).slice(0, 40),
                 steps: steps.filter(x => x.length > 3).slice(0, 30),
                 servings: serves ? Number(serves[2]) : null,
@@ -175,7 +212,9 @@
                 book: book || undefined,
                 chapter: chapter || undefined,
             };
-            if (recipe.ingredients.length >= 3 && recipe.steps.length) { out.push(recipe); i = end - 1; }
+            // Two ingredients are enough when both have amounts (a syrup, a drink, a dressing).
+            const enough = recipe.ingredients.length >= 3 || (recipe.ingredients.length === 2 && recipe.ingredients.every(x => AMOUNT.test(x)));
+            if (enough && recipe.steps.length) { out.push(recipe); i = end - 1; }
         }
         return out;
     }
@@ -205,11 +244,26 @@
         const opf = await zip.readText(opfPath);
         if (!opf) throw new Error('this EPUB\'s contents list is missing');
         const base = dirOf(opfPath);
-        const title = decode(((opf.match(/<dc:title[^>]*>([\s\S]*?)<\/dc:title>/i) || [])[1] || '').replace(/<[^>]+>/g, '')).trim();
-        const author = decode(((opf.match(/<dc:creator[^>]*>([\s\S]*?)<\/dc:creator>/i) || [])[1] || '').replace(/<[^>]+>/g, '')).trim();
+        // Title and author from the book's own details. EPUB 3 can give a main title and a subtitle
+        // as two titles ("Guga" + "…"); several authors are joined; illustrators and editors aren't authors.
+        const text = x => decode(String(x || '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+        const titles = [...opf.matchAll(/<dc:title\b([^>]*)>([\s\S]*?)<\/dc:title>/gi)].map(m => ({ id: attr(m[1], 'id'), text: text(m[2]) })).filter(t => t.text);
+        const typeOf = id => id ? ((opf.match(new RegExp(`<meta[^>]*refines=["']#${id}["'][^>]*property=["']title-type["'][^>]*>([^<]*)<`, 'i')) || [])[1] || '').trim().toLowerCase() : '';
+        const main = titles.find(t => typeOf(t.id) === 'main') || titles[0] || { text: '' };
+        const sub = titles.find(t => t !== main && (typeOf(t.id) === 'subtitle' || !typeOf(t.id)));
+        let title = main.text;
+        if (sub && sub.text && title.toLowerCase().indexOf(sub.text.toLowerCase()) < 0) title = `${title}: ${sub.text}`;
+        const creators = [...opf.matchAll(/<dc:creator\b([^>]*)>([\s\S]*?)<\/dc:creator>/gi)].map(m => {
+            const role = attr(m[1], 'opf:role') || ((opf.match(new RegExp(`<meta[^>]*refines=["']#${attr(m[1], 'id')}["'][^>]*property=["']role["'][^>]*>([^<]*)<`, 'i')) || [])[1] || '');
+            return { name: text(m[2]), role: role.trim().toLowerCase() };
+        }).filter(c => c.name && (!c.role || c.role === 'aut'));
+        const author = [...new Set(creators.map(c => c.name))].slice(0, 3).join(' & ');
         const manifest = {};
         for (const m of opf.matchAll(/<item\b[^>]*>/gi)) manifest[attr(m[0], 'id')] = { href: joinPath(base, attr(m[0], 'href')), type: attr(m[0], 'media-type'), props: attr(m[0], 'properties') };
-        const spine = [...opf.matchAll(/<itemref\b[^>]*>/gi)].map(m => manifest[attr(m[0], 'idref')]).filter(x => x && /html|xml/i.test(x.type || 'html')).map(x => x.href);
+        const isPage = x => x && /html|xml/i.test(x.type || 'html') && !/ncx|svg|css|image|font/i.test(x.type || '') && !/\bnav\b/.test(x.props || '');
+        const spine = [...opf.matchAll(/<itemref\b[^>]*>/gi)].map(m => manifest[attr(m[0], 'idref')]).filter(isPage).map(x => x.href);
+        // Pages listed in the book but left out of its reading order are read after it.
+        Object.values(manifest).filter(isPage).forEach(x => { if (!spine.includes(x.href)) spine.push(x.href); });
         // Table of contents: EPUB 3 nav page, or EPUB 2 toc.ncx.
         const toc = {};
         const nav = Object.values(manifest).find(x => /\bnav\b/.test(x.props || ''));
@@ -230,33 +284,72 @@
         return { title, author, spine, toc };
     }
     // Every recipe in an EPUB. opts: { readRange, size, inflate, progress(done, total, chapter),
-    // cancelled() → bool, pause(ms) }. Returns { title, recipes, chapters, skipped, text }.
+    // cancelled() → bool, paused() → bool, resume (where a paused read got to), pause(ms) }.
+    // Returns { title, author, recipes, chapters, skipped, missing, text, why }: why says in plain
+    // words why no recipe was found, when none was.
     async function readEpub(opts) {
         const zip = await openZip(opts);
         const { title, author, spine, toc } = await epubOutline(zip);
-        const recipes = [];
-        let section = '';
-        let skipped = 0;
-        const textParts = [];
-        for (let i = 0; i < spine.length; i++) {
+        const r0 = opts.resume && opts.resume.kind === 'epub' ? opts.resume : null;
+        const recipes = r0 ? r0.recipes.slice() : [];
+        let section = r0 ? r0.section || '' : '';
+        let skipped = r0 ? r0.skipped || 0 : 0, missing = r0 ? r0.missing || 0 : 0, recipeLike = r0 ? r0.recipeLike || 0 : 0;
+        const textParts = r0 ? (r0.textParts || []).slice() : [];
+        for (let i = r0 ? r0.at : 0; i < spine.length; i++) {
             if (opts.cancelled && opts.cancelled()) { const e = new Error('stopped'); e.cancelled = true; throw e; }
+            if (opts.paused && opts.paused()) {
+                const e = new Error('paused'); e.paused = true;
+                e.state = { kind: 'epub', at: i, total: spine.length, unit: 'chapter', recipes, section, skipped, missing, recipeLike, textParts: textParts.slice(0, 120) };
+                throw e;
+            }
             const file = spine[i];
             const label = toc[file] || '';
             if (label) section = label;
             if (SKIP_CHAPTER.test(label)) { skipped++; if (opts.progress) opts.progress(i + 1, spine.length, label); continue; }
             const html = await zip.readText(file);
-            if (!html) continue;
+            // A chapter the book lists but doesn't contain is counted (and said), never skipped silently.
+            if (!html) { missing++; if (opts.progress) opts.progress(i + 1, spine.length, label || file); continue; }
+            const blocks = blocksOf(html);
             // A chapter label like "Breakfast" or "Mains" stays the section for the chapters under it.
-            const heading = (blocksOf(html).find(b => b.kind === 'h' && b.level <= 2) || {}).text || '';
-            const chapter = label || heading || section;
-            const found = recipesInChapter(html, { chapter: sectionName(chapter, section), book: title });
-            if (!found.length) skipped++;
+            const heading = (blocks.find(b => b.kind === 'h' && b.level <= 2) || {}).text || '';
+            const chapter = sectionName(label || heading || section, section);
+            let found = recipesInChapter(html, { chapter, book: title });
+            // Recipes laid out without headings or lists (bold lines, plain paragraphs) are found by
+            // their shape, as in a scanned cookbook (library.js).
+            const L = libraryReader();
+            if (L) {
+                const extra = L.findRecipesInText(blocks.map(b => b.text).join('\n'), {})
+                    .filter(r => !r.untitled && !found.some(f => sameRecipe(f, r)))
+                    .map(r => Object.assign(r, { category: chapter ? [chapter] : [], book: title || undefined, chapter: chapter || undefined }));
+                found = found.concat(extra);
+            }
+            if (!found.length) { skipped++; if (blocks.filter(b => /^(?:[-*•]\s*)?(?:\d|½|¼|¾|⅓|⅔)/.test(b.text) && b.text.length < 90).length >= 3) recipeLike++; }
             found.forEach(r => recipes.push(r));
-            if (textParts.length < 400) textParts.push(blocksOf(html).map(b => b.text).join('\n'));
+            if (textParts.length < 400) textParts.push(blocks.map(b => b.text).join('\n'));
             if (opts.progress) opts.progress(i + 1, spine.length, chapter);
             if (opts.pause && i % 3 === 2) await opts.pause(60);   // a short breath every few chapters: the phone stays cool
         }
-        return { title, author, recipes, chapters: spine.length, skipped, text: textParts.join('\n\n') };
+        let why = '';
+        if (!recipes.length) {
+            const read = spine.length - missing;
+            why = !spine.length ? 'This book has no chapters Nourish could find.'
+                : missing && missing >= spine.length / 2 ? `${missing} of the book's ${spine.length} chapters couldn't be found inside the file (it may be damaged or packed in an unusual way).`
+                    : recipeLike ? `Read ${read} chapters: ${recipeLike} have ingredient amounts, but no complete recipe (a title, an ingredient list and steps) was recognised in them.`
+                        : `Read ${read} chapters, but none of them has an ingredient list with amounts.`;
+        }
+        return { title, author, recipes, chapters: spine.length, skipped, missing, text: textParts.join('\n\n'), why };
+    }
+    // The same recipe found twice (by its headings and by its shape): mostly the same ingredients.
+    function sameRecipe(a, b) {
+        const words = r => new Set((r.ingredients || []).map(x => String(x).toLowerCase().replace(/[^a-z ]/g, ' ').trim()).filter(Boolean));
+        const A = words(a), B = words(b);
+        let common = 0;
+        B.forEach(x => { if (A.has(x)) common++; });
+        return String(a.name).toLowerCase() === String(b.name).toLowerCase() || common >= Math.min(A.size, B.size) * 0.5;
+    }
+    function libraryReader() {
+        if (root.NourishLibrary) return root.NourishLibrary;
+        try { return typeof require === 'function' ? require('./library.js') : null; } catch (e) { return null; }
     }
     // The section a recipe belongs to: the nearest chapter name that says what kind of food it is.
     const MEAL_SECTION = /\b(breakfast|brunch|lunch|dinner|supper|mains?|main courses?|salads?|soups?|sides?|desserts?|puddings?|baking|snacks?|starters?|small plates|drinks|sauces|weeknight|light meals)\b/i;

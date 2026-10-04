@@ -150,6 +150,14 @@ final class NativeBridge: NSObject {
             case "list": return RecipeLibrary.list()
             case "read": return try RecipeLibrary.read(a["path"] as? String ?? "")
             case "range": return try RecipeLibrary.range(a["path"] as? String ?? "", offset: (a["offset"] as? NSNumber)?.intValue ?? 0, length: (a["length"] as? NSNumber)?.intValue ?? 0)
+            case "pdf":
+                let started = Date()
+                let r = try RecipeLibrary.pdf(a["path"] as? String ?? "", from: (a["from"] as? NSNumber)?.intValue ?? 0,
+                                              count: (a["count"] as? NSNumber)?.intValue ?? 0, ocr: a["ocr"] as? Bool ?? true)
+                if let n = r["recognised"] as? Int, n > 0 {
+                    log("Read \(n) scanned page\(n == 1 ? "" : "s") of a PDF with text recognition in \(Int(Date().timeIntervalSince(started) * 1000)) ms", level: "debug")
+                }
+                return r
             case "open": return RecipeLibrary.open()
             case "add": return try RecipeLibrary.pick { [weak self] p in self?.event("libraryAdd", p) }
             case "where": return RecipeLibrary.location()

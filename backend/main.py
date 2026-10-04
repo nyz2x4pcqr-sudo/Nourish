@@ -445,6 +445,23 @@ def library_range(req: LibraryRangeRequest):
         raise HTTPException(status_code=500, detail=f"Couldn't read that file ({type(e).__name__})")
 
 
+class LibraryPdfRequest(BaseModel):
+    path: str = Field(max_length=2000)
+    start: int = Field(default=0, ge=0, alias="from")
+    count: int = Field(default=0, ge=0, le=40)
+    ocr: bool = True
+
+
+@app.post("/api/library/pdf")
+def library_pdf(req: LibraryPdfRequest):
+    try:
+        return library.read_pdf_pages(req.path, req.start, req.count)
+    except library.LibraryError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Couldn't read that file ({type(e).__name__})")
+
+
 class LibraryAddRequest(BaseModel):
     name: str = Field(max_length=300)
     data: str = Field(max_length=560_000_000)   # base64 of at most 400 MB (a book; other files 40 MB)
