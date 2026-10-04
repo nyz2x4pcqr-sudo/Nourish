@@ -375,6 +375,34 @@ print("MOST FROM ONE SOURCE:", max(sp["perSource"].values()) if sp["perSource"] 
 lib = v["library"]; print(f"WEB LIBRARY AFTER ONE PLAN: {lib['total']} recipes (breakfast {lib['perMeal']['breakfast']}, lunch {lib['perMeal']['lunch']}, dinner {lib['perMeal']['dinner']})")
 PY
 
+echo "== 6d1. Nutrition rules on that plan, and a Weekly-mode week with one big day (pass/fail: expensive food only at dinner, every breakfast at least 25 g protein, no day under 75%)"
+probe "const check = () => daysData.map((d, i) => { const t = NourishPlanner.dayTotals(d); return { day: i + 1, kcal: Math.round(t.kcal), target: dayKcalTarget(i), protein: Math.round(t.protein), fiber: Math.round(t.fiber),
+    breakfast: d.breakfast ? Math.round(d.breakfast.nutrition.protein_g) : null, pricey: ['breakfast', 'lunch'].map(m => d[m] ? NourishPlanner.pricey(d[m]) : '').concat((d.snacks || []).map(x => NourishPlanner.pricey(x))).filter(Boolean) }; });
+  const daily = check();
+  Object.assign(settings, { body_weight: '80', units: 'metric', calorie_mode: 'weekly', big_days: JSON.stringify([{ weekday: 5, kcal: 3200 }]), big_days_ok: '' }); changed('settings');
+  const week = weekPlan();
+  await runSmartPlan('', '');
+  const weekly = check();
+  const rules = activityLog.filter(l => l.area === 'plan' && /protein|fiber|olive oil|Fatty fish|Vitamins|Weekly calories|Nourish recipes used/.test(l.msg)).slice(-14).map(l => l.msg);
+  Object.assign(settings, { calorie_mode: 'daily', big_days: '', body_weight: '', units: '' }); changed('settings');
+  return JSON.stringify({ daily, weekly, week: { perDay: week.perDay, floor: week.floor, budget: week.budget }, protein: proteinTarget(), rules, flags: planFlags });" 600
+python3 - "$PROBE" <<'PY' || fail "a nutrition rule was broken on the iPhone"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"])
+print("Rules that fired (log):"); print("\n".join("  " + x for x in v["rules"]))
+print("Flags on the Plan screen:", v["flags"])
+for name in ("daily", "weekly"):
+    print(name.upper() + ":")
+    for d in v[name]:
+        print(f"  day {d['day']}: {d['kcal']} kcal (target {d['target']}), protein {d['protein']} g, fiber {d['fiber']} g, breakfast protein {d['breakfast']} g" + (f", EXPENSIVE: {d['pricey']}" if d["pricey"] else ""))
+        assert not d["pricey"], d
+        assert d["breakfast"] is None or d["breakfast"] >= 25, d
+print("WEEK:", v["week"])
+assert v["week"]["perDay"][5] == 3200 and all(k >= v["week"]["floor"] for k in v["week"]["perDay"]), v["week"]
+assert all(d["target"] == v["week"]["perDay"][d["day"] - 1] for d in v["weekly"]), "the weekly day targets weren't used"
+PY
+
 echo "== 6d2. The web library grows: three 'Refresh recipes now' rounds (not pass/fail: needs the live sites)"
 probe "const out = [];
   for (let i = 0; i < 3; i++) { await refreshRecipeLibrary({ manual: true }); const s = libraryStats(); out.push({ total: s.total, perMeal: s.perMeal, sources: Object.keys(s.perSource).length }); }

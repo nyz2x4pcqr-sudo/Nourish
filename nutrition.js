@@ -22,6 +22,9 @@
         'sub rolls': 'bread', 'sub roll': 'bread', 'hoagie rolls': 'bread', 'dinner rolls': 'bread', 'crusty bread': 'bread', 'baguette': 'bread',
         'bean sprouts': 'cabbage', 'red chilies': 'jalapeno', 'red chili': 'jalapeno', 'thai chilies': 'jalapeno', 'green chilies': 'jalapeno', 'chilies': 'jalapeno',
         'chili bean paste': 'miso', 'doubanjiang': 'miso', 'arugula': 'lettuce', 'rocket': 'lettuce',
+        // Cured and salted meats, and legumes the table names differently.
+        'salt pork': 'bacon', 'fatback': 'bacon', 'pork belly': 'bacon', 'pancetta': 'bacon', 'guanciale': 'bacon',
+        'pigeon peas': 'chickpeas', 'gandules': 'chickpeas', 'black-eyed peas': 'chickpeas', 'black eyed peas': 'chickpeas', 'split peas': 'cooked lentils', 'yellow split peas': 'cooked lentils',
         // British names.
         'natural yogurt': 'yogurt', 'stock cube': 'chicken broth', 'stock pot': 'chicken broth', 'gem lettuce': 'lettuce', 'little gem': 'lettuce',
         'plain flour': 'flour', 'self raising flour': 'flour', 'self-raising flour': 'flour', 'wholemeal flour': 'flour', 'caster sugar': 'sugar', 'demerara sugar': 'brown sugar',

@@ -3474,18 +3474,10 @@ function dayRules(day, i) {
     const s = plannerSettings(dayTargetsFor(i));
     const people = servingsWanted();
     const ex = nutritionExcluder();
-    let cur = Object.assign({}, day);
-    // Oil instead of butter or lard for cooking, where the dish allows it (Settings → Profile).
-    if (settings.fat_swap !== 'off') MEAL_TYPES.forEach(t => {
-        const m = cur[t];
-        const swapped = m && !m.fat_swapped ? P.fatSwap(m) : m;
-        if (swapped !== m) { cur[t] = swapped; nlog('plan', `${dayName(i)} ${t} "${m.name}": ${swapped.fat_swapped}`); }
-    });
-    const fiber = P.balanceFiber(cur, s, people, ex);
-    fiber.notes.forEach(n => nlog('plan', `${dayName(i)}: ${n}`));
-    const protein = P.balanceProtein(fiber.day, s, people, ex);
-    protein.notes.forEach(n => nlog('plan', `${dayName(i)}: ${n}`));
-    cur = protein.day;
+    // Oil for butter (Settings → Profile), fiber, protein: planner.js applyDayRules.
+    const res = P.applyDayRules(day, s, people, ex, { fatSwapOn: settings.fat_swap !== 'off' });
+    res.notes.forEach(n => nlog('plan', `${dayName(i)}: ${n}`));
+    const cur = res.day;
     MEAL_TYPES.forEach(t => { if (cur[t]) cur[t] = normalizeMeal(cur[t]); });
     return cur;
 }
@@ -4388,6 +4380,20 @@ async function runSmartPlan(likes, hates) {
         const inPool = new Set(MEAL_TYPES.flatMap(m => (plan.pools[m] || []).filter(r => r.from_book).map(r => r.book_recipe_id || r.name))).size;
         const chosen = daysData.flatMap(d => MEAL_TYPES.map(t => d[t]).filter(x => x && x.from_book));
         nlog('plan', `Book recipes: ${inPool} in the pool (of ${recipeDBReady ? recipeDB.forPlanning().length : 0} ready in your books), ${chosen.length} chosen${chosen.length ? `: ${chosen.map(m => `${m.name} (${m.book})`).join(', ')}` : ''}`);
+        // Why Nourish's own recipes were used (they're a backup): what turned the others away.
+        const builtinUsed = daysData.map((d, i) => MEAL_TYPES.filter(t => d && d[t] && (d[t].builtin || d[t].source_id === 'builtin')).map(t => `${dayName(i, true)} ${t}`)).flat();
+        if (builtinUsed.length && plan.rejected) {
+            const why = {};
+            Object.entries(plan.rejected).forEach(([k, v]) => {
+                const m = k.split(':')[0];
+                const kind = /takes about/.test(v) ? 'take longer than the time you have' : /needs cooking/.test(v) ? 'need cooking (no-cook slot)' : /expensive/.test(v) ? 'have an expensive ingredient (dinner only)'
+                    : /meals from/.test(v) ? 'come from a source already used 3 times' : /isn't a|not a|dinner dish|too heavy/.test(v) ? 'aren\'t that kind of meal' : 'other reasons';
+                const key = `${m}: ${kind}`;
+                why[key] = (why[key] || 0) + 1;
+            });
+            nlog('plan', `Nourish recipes used for ${builtinUsed.length} meal${builtinUsed.length === 1 ? '' : 's'} (${builtinUsed.join(', ')}): no web or book recipe passed that slot's rules`,
+                Object.entries(why).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} recipes for ${k.replace(': ', ' ')}`));
+        }
         const split = planSourceSplit(daysData);
         nlog('plan', `Where the meals came from: ${split.web} from recipe websites, ${split.books} from your books and files, ${split.builtin} Nourish recipes${split.ai ? `, ${split.ai} written by the AI` : ''}`, split.perSource);
         if (st.budget) nlog('plan', `Left out for the budget (${settings.budget || 'normal'}): ${st.budget.length} recipe${st.budget.length === 1 ? '' : 's'}`, st.budget);

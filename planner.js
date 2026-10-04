@@ -906,6 +906,7 @@
         const kind = mealType !== 'breakfast' ? 'main' : SWEET_BREAKFAST_DISH.test(meal.name || '') && !/\b(eggs?|savou?ry|masala|indian|peas|tomato|cheese|spinach|bean|congee|upma|poha)\b/i.test(meal.name || '') ? 'sweet' : 'savory';
         const n = Math.max(1, Number(meal.servings) || people || 1);
         for (const [food, unit, perUnit, step] of BOOSTERS[kind]) {
+            if ((meal.protein_added || []).some(l => l.indexOf(food) >= 0)) continue;   // a different food each time: variety, never a second scoop line
             // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces.
             const units = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
             const qty = units * n;
@@ -997,9 +998,9 @@
         const T = targetsOf(settings || {});
         const notes = [];
         let cur = day;
-        for (let i = 0; i < 3 && dayTotals(cur).fiber < T.fiber - 0.5; i++) {
+        for (let i = 0; i < 5 && dayTotals(cur).fiber < T.fiber - 0.5; i++) {
             // The meal with the least fiber that can take one more addition.
-            const m = MEALS.filter(x => cur[x] && cur[x].nutrition && !cur[x].leftover && (cur[x].fiber_added || []).length < 1)
+            const m = MEALS.filter(x => cur[x] && cur[x].nutrition && !cur[x].leftover && (cur[x].fiber_added || []).length < 2)
                 .sort((a, b) => (Number(cur[a].nutrition.fiber_g) || 0) - (Number(cur[b].nutrition.fiber_g) || 0))[0];
             if (!m) break;
             const opts = FIBER_BOOSTERS[m === 'breakfast' ? 'breakfast' : 'main'].filter(([line]) => !(exclude && exclude({ name: line, ingredients: [line] })) && !(cur[m].ingredients || []).some(l => l.toLowerCase().includes(line.split(' ').slice(-1)[0])));
@@ -1081,6 +1082,24 @@
         const after = weekMicros(out);
         const flags = after.low.map(k => `Low in ${MICRO_NAMES[k]} this week (about ${after.avg[k]} ${MICRO_UNITS[k]} a day; aim for ${MICRO_TARGETS[k]}). ${MICRO_FOODS[k].charAt(0).toUpperCase() + MICRO_FOODS[k].slice(1)} help.`);
         return { days: out, notes, flags, micros: after };
+    }
+
+    // Every rule for one day, in order (app.js runs this on every plan, whoever made it): oil instead
+    // of butter or lard where the dish allows, at least 30 g fiber, then protein (every main meal 25 g
+    // or more, the day's target met) with the day sized to its calories. Returns { day, notes }.
+    function applyDayRules(day, settings, people = 1, exclude, { fatSwapOn = true } = {}) {
+        const notes = [];
+        let cur = Object.assign({}, day);
+        if (fatSwapOn) MEALS.forEach(t => {
+            const m = cur[t];
+            const swapped = m && !m.fat_swapped ? fatSwap(m) : m;
+            if (swapped !== m) { cur[t] = swapped; notes.push(`${t} "${m.name}": ${swapped.fat_swapped}`); }
+        });
+        const fiber = balanceFiber(cur, settings, people, exclude);
+        notes.push(...fiber.notes);
+        const protein = balanceProtein(fiber.day, settings, people, exclude);
+        notes.push(...protein.notes);
+        return { day: protein.day, notes };
     }
 
     // === SNACKS ===
@@ -1242,7 +1261,7 @@
         }).join('');
     }
 
-    const api = { weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { applyDayRules, weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);
