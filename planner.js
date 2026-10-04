@@ -193,6 +193,12 @@
         if (!isFinite(L.minutes)) return Infinity;
         return L.choice ? L.minutes + 2 : Math.round(L.minutes * 1.25) + 3;
     }
+    // Expensive cuts and shellfish: dinner only, never breakfast, lunch or a snack.
+    const DINNER_ONLY_PRICEY = /\b(steaks?|rib[- ]?eye|filet mignon|beef tenderloin|tenderloin steak|fillet steak|sirloin|strip steak|porterhouse|t-bone|tomahawk|flank steak|skirt steak|wagyu|lobster|langoustines?|scallops?|crab(meat)?|king crab|lamb|veal|venison|duck breast|caviar|truffle|foie gras|oysters?)\b/i;
+    function pricey(r) {
+        const m = `${r.name || ''} ${(r.ingredients || []).join(' ')}`.match(DINNER_ONLY_PRICEY);
+        return m ? m[0].toLowerCase() : '';
+    }
     function slotProblem(r, meal, limits) {
         const L = limits || slotLimits({}, meal);
         const p = profileOf(r);
@@ -207,6 +213,7 @@
             if (cooking.length || /\b(cook|heat|stove|skillet|preheat)\b/i.test((r.steps || []).join(' '))) return `needs cooking (${cooking[0] || 'heat'}), and this meal is no-cook`;
         }
         if (p.minutes > timeAllowed(L)) return `takes about ${p.minutes} min${p.timeEstimated ? ' (estimated)' : ''}; ${meal} has ${L.minutes} min`;
+        if (meal !== 'dinner') { const x = pricey(r); if (x) return `has ${x}, an expensive ingredient kept for dinner`; }
         return '';
     }
     // How far a recipe is over the slot's soft limits (a little over on time, steps, ingredients or
@@ -492,7 +499,7 @@
     }
 
     // === CALORIE SPLIT ===
-    const SPLITS = { dinner: [25, 30, 45], even: [33, 33, 34], breakfast: [40, 30, 30] };
+    const SPLITS = { dinner: [25, 30, 45], even: [33, 33, 34], breakfast: [40, 30, 30], frontload: [33, 37, 30] };   // frontload: "Front-load my day"
     const SNACK_SHARE = 0.1;   // each snack: about a tenth of the day
     // Which main meals a day has (Settings: "Meals each day"); all three unless some are switched off.
     function mealsOf(settings) {
@@ -515,9 +522,24 @@
         const mains = 1 - snacksOf(s) * SNACK_SHARE;
         return v.map(x => x / sum * mains);
     }
+    // A day's targets. Protein follows body weight when it's known: 1.6 g per kg a day, 2.0 g/kg when
+    // losing weight (otherwise the protein target typed in Settings). Every main meal 25–40 g (about
+    // 0.4 g/kg), breakfast at least 25 g. Fiber at least 30 g a day. Carbs and fat aren't forced low:
+    // "balanced" by default, or "lower-carb" / "lower-fat" (Settings → Profile).
+    const FIBER_TARGET = 30;
+    const MEAL_PROTEIN = { min: 25, max: 40 };
     function targetsOf(settings) {
         const kcal = Number(settings.calorie_target) || 2000;
-        return { kcal, protein: Number(settings.protein_target) || Math.round(kcal * 0.25 / 4), carbs: Math.round(kcal * 0.45 / 4), fat: Math.round(kcal * 0.3 / 9) };
+        const kg = Number(settings.body_weight_kg) || 0;
+        const cut = (settings.goal || settings.prefsGoal) === 'Cut';
+        const byWeight = kg >= 30 && settings.protein_auto !== 'off';
+        const protein = byWeight ? Math.round(kg * (cut ? 2.0 : 1.6)) : (Number(settings.protein_target) || Math.round(kcal * 0.25 / 4));
+        const pref = settings.macro_pref || 'balanced';
+        const fatShare = pref === 'lower-fat' ? 0.22 : pref === 'lower-carb' ? 0.4 : 0.3;
+        const fat = Math.round(kcal * fatShare / 9);
+        const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
+        const perMeal = byWeight ? Math.min(MEAL_PROTEIN.max, Math.max(MEAL_PROTEIN.min, Math.round(kg * 0.4))) : 30;
+        return { kcal, protein, carbs, fat, fiber: FIBER_TARGET, byWeight, perMeal, mealProtein: MEAL_PROTEIN };
     }
 
     // === PLANNING ===
@@ -810,6 +832,86 @@
         return t;
     }
 
+    // === PROTEIN IN EVERY MEAL ===
+    // A meal short of protein gets a protein food added (and its numbers worked out again), never a
+    // protein-less breakfast: a smoothie or oats get protein powder or Greek yogurt, an egg breakfast
+    // more eggs or egg whites, a lunch or dinner lean chicken, tofu or tuna. Anything the person
+    // avoids, is allergic to or doesn't eat (diet) is never used. `need`: grams of protein per person.
+    const BOOSTERS = {
+        sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 14, 'Serve with the cottage cheese on the side.']],
+        savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 14, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.']],
+        main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 2.5, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 7, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.']],
+    };
+    const SWEET_BREAKFAST_DISH = /\b(smoothie|shake|oat|oats|oatmeal|porridge|granola|muesli|bircher|chia|yogh?urt|parfait|pancakes?|waffles?|crepes?|muffins?|fruit|acai|bowl|toast with (jam|honey|nut))\b/i;
+    function boostProtein(meal, need, mealType, people = 1, exclude) {
+        if (!meal || !(need > 0.5)) return meal;
+        const kind = mealType !== 'breakfast' ? 'main' : SWEET_BREAKFAST_DISH.test(meal.name || '') && !/\b(eggs?|savou?ry|masala|indian|peas|tomato|cheese|spinach|bean|congee|upma|poha)\b/i.test(meal.name || '') ? 'sweet' : 'savory';
+        const n = Math.max(1, Number(meal.servings) || people || 1);
+        for (const [food, unit, perUnit, step] of BOOSTERS[kind]) {
+            // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces.
+            const units = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
+            const qty = units * n;
+            const line = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}${unit === '' && qty === 1 ? '' : ''}`.replace(/^1 eggs$/, '1 egg');
+            if (exclude && exclude({ name: food, ingredients: [line] })) continue;
+            const add = N.calculate([line], n);
+            if (!(add.nutrition.protein_g > 0)) continue;
+            const out = JSON.parse(JSON.stringify(meal));
+            out.ingredients = (out.ingredients || []).concat(line);
+            out.steps = (out.steps || []).concat(step);
+            const nu = out.nutrition || {};
+            ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'].forEach(k => { if (add.nutrition[k] != null) nu[k] = Math.round((Number(nu[k]) || 0) + add.nutrition[k]); });
+            if (add.micros && nu.micros) Object.keys(add.micros).forEach(k => { nu.micros[k] = Math.round(((nu.micros[k] || 0) + add.micros[k]) * 10) / 10; });
+            out.nutrition = nu;
+            out.protein_added = (out.protein_added || []).concat(line);
+            return out;
+        }
+        return meal;
+    }
+    // A day made to meet its protein: every meal at least 25 g (breakfast always), the day's target
+    // reached by adding protein to the meals with least (up to 40 g each), then the day sized to its
+    // calories again. Returns { day, notes } (notes for the log: what was added where and why).
+    function balanceProtein(day, settings, people = 1, exclude) {
+        const T = targetsOf(settings || {});
+        const notes = [];
+        let cur = day;
+        const meals = () => MEALS.filter(m => cur[m] && cur[m].nutrition && !cur[m].leftover);
+        for (let round = 0; round < 3; round++) {
+            let changed = false;
+            meals().forEach(m => {
+                const p = Number(cur[m].nutrition.protein_g) || 0;
+                if (p < T.mealProtein.min - 0.5) {
+                    const b = boostProtein(cur[m], T.mealProtein.min + (m === 'breakfast' ? 3 : 2) - p, m, people, exclude);
+                    if (b !== cur[m]) { notes.push(`${m} "${cur[m].name}": ${Math.round(p)} g protein, under 25 g; added ${b.protein_added[b.protein_added.length - 1]}`); cur = Object.assign({}, cur, { [m]: b }); changed = true; }
+                }
+            });
+            let short = T.protein * 0.97 - dayTotals(cur).protein;
+            if (short > 0) {
+                meals().sort((a, b) => cur[a].nutrition.protein_g - cur[b].nutrition.protein_g).forEach(m => {
+                    if (short <= 0) return;
+                    const room = T.mealProtein.max - (Number(cur[m].nutrition.protein_g) || 0);
+                    if (room < 5) return;
+                    const b = boostProtein(cur[m], Math.min(room, short + 2), m, people, exclude);
+                    if (b === cur[m]) return;
+                    short -= b.nutrition.protein_g - cur[m].nutrition.protein_g;
+                    notes.push(`${m} "${cur[m].name}": the day was short of its ${T.protein} g protein; added ${b.protein_added[b.protein_added.length - 1]}`);
+                    cur = Object.assign({}, cur, { [m]: b });
+                    changed = true;
+                });
+            }
+            if (!changed) break;
+            cur = fitDay(cur, settings, people);
+        }
+        // Sizing can shrink a breakfast again: the last word is the 25 g rule (a few kcal over, if so).
+        meals().forEach(m => {
+            const p = Number(cur[m].nutrition.protein_g) || 0;
+            if (p < T.mealProtein.min - 0.5) {
+                const b = boostProtein(cur[m], T.mealProtein.min + 1 - p, m, people, exclude);
+                if (b !== cur[m]) { notes.push(`${m} "${cur[m].name}": ${Math.round(p)} g protein after sizing; added ${b.protein_added[b.protein_added.length - 1]}`); cur = Object.assign({}, cur, { [m]: b }); }
+            }
+        });
+        return { day: cur, notes };
+    }
+
     // === SNACKS ===
     // Simple snacks, worked out from their ingredients like everything else, sized to a tenth of the day.
     const SNACKS = [
@@ -840,8 +942,10 @@
         delete day.snacks;
         if (!n) return day;
         const kcal = targetsOf(settings).kcal * SNACK_SHARE;
+        // Every snack has some protein (at least 5 g as served), and nothing expensive (dinner only).
         const ok = SNACKS.map(snackRecipe).concat((extra || []).filter(r => r && r.nutrition && r.nutrition.calories >= 60 && r.nutrition.calories <= 450))
-            .filter(r => r.nutrition.calories > 0 && !(exclude && exclude(r)));
+            .filter(r => r.nutrition.calories > 0 && !(exclude && exclude(r)) && !pricey(r)
+                && (Number(r.nutrition.protein_g) || 0) * Math.max(0.5, Math.min(2, kcal / r.nutrition.calories)) >= 5);
         if (!ok.length) return day;
         const snacks = [];
         for (let i = 0; i < n; i++) {
@@ -967,7 +1071,7 @@
         }).join('');
     }
 
-    const api = { sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

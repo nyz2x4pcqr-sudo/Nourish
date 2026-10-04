@@ -91,6 +91,10 @@ const SETTINGS_DEFAULTS = {
     name: '',
     calorie_target: '2400',
     protein_target: '150',
+    body_weight: '',              // in kg (metric) or lb (imperial); protein then follows body weight
+    protein_auto: 'on',           // 'off': use protein_target even when the body weight is known
+    macro_pref: 'balanced',       // 'balanced' | 'lower-carb' | 'lower-fat'
+    fat_swap: 'on',               // oil instead of butter or lard where the dish allows
     diet: 'No restriction',
     allergies: '',
     cuisines: '',
@@ -129,7 +133,6 @@ SETTINGS_DEFAULTS.sched_weekend = 'off';
 SETTINGS_DEFAULTS.sched_asked = '';   // 'yes' once the quick questions were answered or skipped
 SETTINGS_DEFAULTS.allow_leftovers = 'off';
 SETTINGS_DEFAULTS.source_cap = 3;            // at most this many meals a week from one book, one site or Nourish's own recipes
-SETTINGS_DEFAULTS.budget = 'normal';         // 'budget' (cheaper ingredients), 'normal' (no luxury ingredients), 'any' (no limit)
 SETTINGS_DEFAULTS.builtin_mode = 'backup';     // Nourish's own recipes: 'backup' (only when no web recipe fits), 'mix' (equal terms), 'off'   // 'on': a dinner can come back as the next day's lunch
 const settings = Object.assign({}, SETTINGS_DEFAULTS);
 let prefs = { goal: 'Maintain', source: 'aiChef', likes: '', hates: '' };
@@ -995,7 +998,7 @@ function profileText({ forRecipe = false } = {}) {
     const s = settings;
     const lines = [];
     if (s.name && !forRecipe) lines.push(`Name: ${s.name}.`);
-    lines.push(`Goal: ${GOALS[prefs.goal] || prefs.goal}.`, `Daily targets: about ${s.calorie_target} kcal and ${s.protein_target} g protein.`);
+    lines.push(`Goal: ${GOALS[prefs.goal] || prefs.goal}.`, `Daily targets: about ${s.calorie_target} kcal and ${proteinTarget()} g protein (25–40 g a meal), at least 30 g fiber.`);
     if (s.diet && s.diet !== 'No restriction') lines.push(`Diet: ${s.diet}.`);
     if (s.allergies) lines.push(`Allergies/intolerances (NEVER include these): ${s.allergies}.`);
     if (prefs.likes) lines.push(`Foods they like: ${prefs.likes}.`);
@@ -1097,10 +1100,25 @@ function setSetting(key, value, { quiet = false } = {}) {
     if (!quiet) showToast('Saved ✓', false);
     if (APPEARANCE_KEYS.includes(key)) { applyAppearance(); if (settingsPage === 'appearance') refreshLookPreview(); }
     if (key === 'today_stats') updateTodayScreen();
-    if (['calorie_target', 'protein_target', 'week_start', 'show_nutrition', 'name'].includes(key)) { updateTodayScreen(); updatePlanScreen(); }
+    if (['calorie_target', 'protein_target', 'body_weight', 'protein_auto', 'week_start', 'show_nutrition', 'name'].includes(key)) { updateTodayScreen(); updatePlanScreen(); }
     if (key === 'grocery_hide_checked') updateGroceryScreen();
     if (key === 'units') refreshUnits();
 }
+
+// Body weight in kg (typed in kg or lb, by the units in use), or 0 when it isn't set.
+function bodyWeightKg() {
+    const v = Number(settings.body_weight);
+    if (!(v > 0)) return 0;
+    return Math.round((unitSystem() === 'imperial' ? v * 0.4536 : v) * 10) / 10;
+}
+// The settings the planner works with: the profile plus the goal and body weight.
+function plannerSettings(extra) {
+    return Object.assign({}, settings, { goal: prefs.goal, body_weight_kg: bodyWeightKg(), budget: budgetLevel() }, extra || {});
+}
+// The day's protein target (planner.js targetsOf: from body weight when known).
+function proteinTarget() { return NourishPlanner.targetsOf(plannerSettings()).protein; }
+// The profile's Budget setting as the planner reads it: 'budget', 'normal' or 'any' (no limit).
+function budgetLevel() { return { 'Budget-friendly': 'budget', 'No limit': 'any' }[settings.budget] || 'normal'; }
 
 // Imperial (US) or metric. The phone's measurement system decides until it's changed in Settings.
 // Before 0.4.8 the profile had its own Units setting ('US' by default, or 'Metric'); it is read the same way.
@@ -1146,8 +1164,8 @@ function textInput(get, set, { type = 'text', placeholder = '', inputmode, min, 
     });
 }
 
-function settingsInput(key, opts = {}) {
-    return textInput(() => settings[key], v => setSetting(key, v), opts);
+function settingsInput(key, opts = {}, after) {
+    return textInput(() => settings[key], v => { setSetting(key, v); if (after) after(v); }, opts);
 }
 
 function selectInput(current, options, onchange, label) {
@@ -1723,10 +1741,15 @@ const SETTINGS_RENDERERS = {
             ]),
             ...settingsGroup('Daily targets', [
                 settingsRow('Calories', settingsInput('calorie_target', { type: 'number', inputmode: 'numeric', min: '1000', max: '6000' })),
-                settingsRow('Protein (g)', settingsInput('protein_target', { type: 'number', inputmode: 'numeric', min: '20', max: '400' })),
-                settingsRow('Calories by meal', settingsSelect('calorie_split', Object.assign({ dinner: 'Bigger dinner', even: 'Even', breakfast: 'Bigger breakfast' },
+                settingsRow(`Body weight (${unitSystem() === 'imperial' ? 'lb' : 'kg'})`, settingsInput('body_weight', { type: 'number', inputmode: 'decimal', min: '30', max: '700', placeholder: 'optional' }, () => renderSettings()), { hint: 'Protein is then set from it' }),
+                bodyWeightKg() && settings.protein_auto !== 'off'
+                    ? infoRow('Protein', `${proteinTarget()} g a day (${prefs.goal === 'Cut' ? '2.0' : '1.6'} g per kg)`)
+                    : settingsRow('Protein (g)', settingsInput('protein_target', { type: 'number', inputmode: 'numeric', min: '20', max: '400' })),
+                bodyWeightKg() ? settingsToggle('protein_auto', 'Protein from my body weight', { hint: 'Off: type your own protein target', onchange: () => renderSettings() }) : null,
+                settingsRow('Carbs and fat', settingsSelect('macro_pref', { balanced: 'Balanced', 'lower-carb': 'Lower-carb', 'lower-fat': 'Lower-fat' })),
+                settingsRow('Calories by meal', settingsSelect('calorie_split', Object.assign({ dinner: 'Bigger dinner', even: 'Even', breakfast: 'Bigger breakfast', frontload: 'Front-load my day' },
                     settings.calorie_split === 'custom' ? { custom: 'Custom (Advanced)' } : {}))),
-            ], 'Each day of your plan is sized to land within about 5% of your calories. "Bigger dinner" gives about 25% at breakfast, 30% at lunch and 45% at dinner.'),
+            ], 'Each day of your plan is sized to land within about 5% of your calories. "Bigger dinner" gives about 25% at breakfast, 30% at lunch and 45% at dinner; "Front-load my day" moves more to breakfast and lunch (33%, 37%, 30%). Every main meal has 25–40 g protein, breakfast at least 25 g, and each day at least 30 g fiber.'),
             ...settingsGroup('Food', [
                 settingsRow('Diet', settingsSelect('diet', DIETS)),
                 settingsRow('Allergies', settingsInput('allergies', { placeholder: 'e.g. peanuts, shellfish' })),
@@ -1741,7 +1764,7 @@ const SETTINGS_RENDERERS = {
                 settingsRow('Max cook time', settingsSelect('max_cook_time', { '': 'Any', 15: '15 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour' })),
                 settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6']), { hint: 'Recipes are written for this many people' }),
                 settingsRow('Skill', settingsSelect('skill', ['Beginner', 'Intermediate', 'Advanced'])),
-                settingsRow('Budget', settingsSelect('budget', { Any: 'Any', 'Budget-friendly': 'Budget-friendly', Moderate: 'Moderate', 'No limit': 'No limit' })),
+                settingsRow('Budget', settingsSelect('budget', { Any: 'Normal', 'Budget-friendly': 'Budget', Moderate: 'Moderate', 'No limit': 'No limit' }), { hint: 'Normal and Moderate leave out luxury ingredients (wagyu, caviar, truffle); Budget also pricier ones' }),
             ], 'Your profile is used for every AI meal plan and chat.'),
         ];
     },
@@ -1767,7 +1790,6 @@ const SETTINGS_RENDERERS = {
             settingsButton(libraryRefreshing ? 'Refreshing recipes…' : 'Refresh recipes now', () => refreshRecipeLibrary({ manual: true }), 'settings-button-primary'),
             settingsRow('Nourish recipes', settingsSelect('builtin_mode', { backup: 'Backup only', mix: 'Mix in', off: 'Off' })),
             settingsRow('Most meals a week from one source', settingsSelect('source_cap', { 2: '2', 3: '3 (recommended)', 4: '4', 5: '5', 7: '7', 21: 'No limit' }), { hint: 'one book, one site, or Nourish\'s own recipes' }),
-            settingsRow('Budget', settingsSelect('budget', { budget: 'Budget', normal: 'Normal', any: 'No limit' }), { hint: 'Normal leaves out luxury ingredients like wagyu, caviar and truffle' }),
         ];
         const off = new Set(String(settings.sources_off || '').split(',').filter(Boolean));
         const toggle = id => {
@@ -2386,6 +2408,9 @@ function nutritionNotes(meal) {
     if (meal.nutrition_unmatched) notes.push(`Not counted (not in the food table): ${meal.nutrition_unmatched.join('; ')}.`);
     if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion: ${portionLabel(meal)} (${portionWords(meal.scaled.portion)} the recipe's serving), sized to fit this day. The ingredient amounts and calories are for that portion, so the same recipe can show different calories on different days.`);
     if (meal.trimmed) notes.push('Less oil or sugar than the original, to fit your calories. Seasoning is unchanged.');
+    if (meal.protein_added) notes.push(`Added for protein (every meal has at least 25 g): ${meal.protein_added.join(', ')}.`);
+    if (meal.fiber_added) notes.push(`Added for fiber (at least 30 g a day): ${meal.fiber_added.join(', ')}.`);
+    if (meal.fat_swapped) notes.push(meal.fat_swapped);
     if (meal.reseasoned) notes.push(`Seasoning added: ${meal.reseasoned.join(', ')}.`);
     return notes;
 }
@@ -2633,7 +2658,7 @@ function updateTodayScreen() {
             if (bar) bar.style.strokeDasharray = `${circumference * fraction} ${circumference}`;
         }));
         // Protein from Settings; carbs ~50% and fat ~30% of the calorie target.
-        const macros = [['Protein', 'protein_g', Number(settings.protein_target) || 150, 'macro-protein'],
+        const macros = [['Protein', 'protein_g', proteinTarget() || 150, 'macro-protein'],
             ['Carbs', 'carbs_g', Math.round(calTarget * 0.5 / 4), 'macro-carbs'], ['Fat', 'fat_g', Math.round(calTarget * 0.3 / 9), 'macro-fat']];
         summary = h('section', { class: 'card summary', id: 'calorieSection' },
             h('div', { class: 'ring' }, ring,
@@ -3224,7 +3249,13 @@ function normalizeMeal(m) {
         name: written && typeof NourishPlanner !== 'undefined' ? NourishPlanner.fixName(String(m.name).trim()) : String(m.name).trim(),
         servings: toNumber(m.servings) >= 1 ? Math.round(toNumber(m.servings)) : undefined,
         time_minutes: toNumber(m.time_minutes),
-        nutrition: n ? { calories: toNumber(n.calories), protein_g: toNumber(n.protein_g), carbs_g: toNumber(n.carbs_g), fat_g: toNumber(n.fat_g) } : null,
+        nutrition: n ? Object.assign({ calories: toNumber(n.calories), protein_g: toNumber(n.protein_g), carbs_g: toNumber(n.carbs_g), fat_g: toNumber(n.fat_g) },
+            n.fiber_g != null ? { fiber_g: toNumber(n.fiber_g) } : {},
+            n.micros && typeof n.micros === 'object' ? { micros: { vitd: toNumber(n.micros.vitd), ca: toNumber(n.micros.ca), k: toNumber(n.micros.k), mg: toNumber(n.micros.mg) } } : {}) : null,
+        // What Nourish changed to meet the nutrition rules (shown on the recipe and in the log).
+        protein_added: Array.isArray(m.protein_added) && m.protein_added.length ? m.protein_added.map(String).slice(0, 4) : undefined,
+        fiber_added: Array.isArray(m.fiber_added) && m.fiber_added.length ? m.fiber_added.map(String).slice(0, 4) : undefined,
+        fat_swapped: m.fat_swapped ? String(m.fat_swapped).slice(0, 120) : undefined,
         ingredients,
         amounts: ingredientAmounts(ingredients),
         steps: toStringList(m.steps),
@@ -3333,6 +3364,7 @@ function applyPlan(raw, { navigate = true } = {}) {
             if (d.snacks) d.snacks = d.snacks.map(normalizeMeal).filter(Boolean);
         });
     }
+    applyNutritionRules(daysData);
     rememberPlan(planNames());
     selectedDay = todayIndex();
     grocery.checked = [];
@@ -3342,6 +3374,24 @@ function applyPlan(raw, { navigate = true } = {}) {
     if (navigate) switchTab('today');
     showToast(daysData.length < 7 ? `Got ${daysData.length} of 7 days (the response was cut short).` : 'Your meal plan is ready 🎉', daysData.length < 7);
 }
+
+// The nutrition rules on a finished plan, whoever made it (planner.js): every main meal 25–40 g
+// protein (breakfast never under 25 g), each day's protein target met; the rest of the week's rules
+// (fiber, fatty fish, vitamins and minerals) are checked by checkWeek. Everything that fires is logged.
+function nutritionExcluder() { return NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }); }
+function dayRules(day, i) {
+    if (!day) return day;
+    const res = NourishPlanner.balanceProtein(day, plannerSettings(dayTargetsFor(i)), servingsWanted(), nutritionExcluder());
+    res.notes.forEach(n => nlog('plan', `${dayName(i)}: ${n}`));
+    MEAL_TYPES.forEach(t => { if (res.day[t]) res.day[t] = normalizeMeal(res.day[t]); });
+    return res.day;
+}
+function applyNutritionRules(days) {
+    days.forEach((d, i) => { days[i] = dayRules(d, i); });
+    if (typeof checkWeek === 'function') checkWeek(days);
+}
+// Per-day calorie target overrides (Weekly mode: big days and the days around them); {} in Daily mode.
+function dayTargetsFor(i) { return typeof weekDayKcal === 'function' && weekDayKcal(i) ? { calorie_target: weekDayKcal(i) } : {}; }
 
 // Applies {"changes":[{day, meal, recipe}]} from the AI. Returns what changed.
 function applyEdits(parsed) {
@@ -4014,7 +4064,7 @@ async function generateMealPlan() {
 function finderOptions(likes, hates) {
     const off = new Set(String(settings.sources_off || '').split(',').filter(Boolean));
     return {
-        settings: Object.assign({}, settings, { goal: prefs.goal }),
+        settings: plannerSettings(),
         goal: prefs.goal, likes, avoid: hates, days: 7, people: servingsWanted(),
         enabled: id => !off.has(id),
         customSites: String(settings.custom_sites || '').split(/[\s,]+/).filter(Boolean),
@@ -4147,7 +4197,7 @@ async function runSmartPlan(likes, hates) {
             { perSource: st.perSource, perMeal: pm, turnedAway: st.why, failed: st.failed, leftAlone: st.blocked, switchedOff: st.switchedOff, notUsed: st.notUsed, unreadIngredients: st.unread, excluded: st.excluded, bland: st.bland });
         if (localPlanCancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         if (plan.missing.length) await fillMissingMeals(plan);
-        const planSettings = Object.assign({}, settings, { goal: prefs.goal });
+        const planSettings = plannerSettings();
         let days = plan.days.map(d => NourishPlanner.fitDay(d, planSettings, servingsWanted()));
         // The last check, with or without an AI: every day within 10% of the calorie target.
         const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (plan.pools[m] || []).concat(typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off' ? NourishBuiltins.forMeal(m) : [])]));
@@ -4333,7 +4383,7 @@ async function swapFromSources(dayIndex, mealType) {
         return;
     }
     const meal = normalizeMeal(JSON.parse(JSON.stringify(picked)));
-    const fitted = NourishPlanner.fitDay(Object.assign({}, day, { [mealType]: meal }), Object.assign({}, settings, { goal: prefs.goal }), servingsWanted());
+    const fitted = dayRules(NourishPlanner.fitDay(Object.assign({}, day, { [mealType]: meal }), plannerSettings(dayTargetsFor(dayIndex)), servingsWanted()), dayIndex);
     daysData[dayIndex] = fitted;
     changed('plan');
     updateTodayScreen();

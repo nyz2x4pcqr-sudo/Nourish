@@ -891,7 +891,7 @@
         const { pools, stats, adaptable } = await findRecipes(o);
         // Luxury or hard-to-find ingredients (wagyu, caviar, truffle…) are left out unless the budget
         // is "No limit"; on "Budget", pricier ones too (Settings → Advanced → Budget).
-        const budget = (o.settings && o.settings.budget) || 'normal';
+        const budget = ({ budget: 'budget', normal: 'normal', any: 'any', 'Budget-friendly': 'budget', 'No limit': 'any' })[(o.settings && o.settings.budget) || ''] || 'normal';
         const offBudget = [];
         PL.MEALS.forEach(m => { pools[m] = (pools[m] || []).filter(r => { const why = PL.budgetProblem(r, budget); if (why && offBudget.length < 30) offBudget.push(`${r.name}: ${why}`); return !why; }); });
         if (offBudget.length) stats.budget = offBudget;
