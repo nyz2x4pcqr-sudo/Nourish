@@ -76,7 +76,9 @@ const enabled = id => id === 'themealdb' || id === 'library' || SITES.indexOf(id
 
 test('plans a week from several sites at once, skipping the one that refuses', async () => {
     const web = fakeWeb();
-    const plan = await F.planFromSources({ settings: { calorie_target: 1800, protein_target: 110 }, likes: 'All food', avoid: '', days: 3, enabled, readRecipe, fetchPage: web.fetchPage, api: web.api, cache: web.cache });
+    // A fixed day: the searches start at a different word each day, and with this small pretend web
+    // some days leave slots for the AI (that's allowed, see plan.missing below).
+    const plan = await F.planFromSources({ now: () => Date.UTC(2026, 9, 3, 12), settings: { calorie_target: 1800, protein_target: 110 }, likes: 'All food', avoid: '', days: 3, enabled, readRecipe, fetchPage: web.fetchPage, api: web.api, cache: web.cache });
     const meals = plan.days.flatMap(d => PL.MEALS.map(m => d[m]).filter(Boolean));
     assert.ok(meals.length >= 8, `only ${meals.length} meals`);
     meals.forEach(r => assert.ok(r.source_url && r.source_name, `${r.name} has no source`));

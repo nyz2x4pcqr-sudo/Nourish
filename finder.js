@@ -208,12 +208,16 @@
     async function getListing(ctx, url, browser) {
         const hit = ctx.listings[url];
         if (hit && hit.at > ctx.now() - 3 * DAY) return hit.res;
-        if (ctx.memo[url]) return ctx.memo[url];
-        const res = await getPage(ctx, url, browser);
-        const small = { status: res.status, url: res.url, body: String(res.body || '') };
-        ctx.memo[url] = small;
-        if (small.body.length < 60000) ctx.listings[url] = { at: ctx.now(), res: small };
-        return small;
+        // One request per address per run, shared by workers asking at the same moment (a missing
+        // page is then asked for once, not once per worker).
+        if (!ctx.memo[url]) {
+            ctx.memo[url] = getPage(ctx, url, browser).then(res => {
+                const small = { status: res.status, url: res.url, body: String(res.body || '') };
+                if (small.body.length < 60000) ctx.listings[url] = { at: ctx.now(), res: small };
+                return small;
+            });
+        }
+        return ctx.memo[url];
     }
     // Each site's robots.txt, read about once a month: a page it asks robots not to read is never
     // fetched. A site that won't even let the app read its robots.txt (403) is treated as refusing.
