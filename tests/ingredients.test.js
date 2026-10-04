@@ -53,3 +53,18 @@ test('a recipe is kept, nutrition marked approximate, when only small things can
     assert.ok(!all.some(r => r.name === 'Mystery Bowl'), 'real amounts of food it can\'t read: turned away');
     assert.ok(res.stats.unread.some(l => /2 cups frobnicated quux/.test(l)), 'the failing lines are logged word for word');
 });
+
+test('ingredients written name first and split at commas (Diabetes Food Hub) are put back together and read', () => {
+    if (typeof global.DOMParser === 'undefined') global.DOMParser = class { parseFromString(h) { const t = String(h).replace(/<[^>]+>/g, ' '); return { body: { textContent: t } }; } };
+    const I = require('../importer.js');
+    // As the site's recipe data lists them (from the site check's log).
+    const site = ['eggs 4.00 large', 'egg whites 6.00 large', 'deli ham 3.00 oz 4 thick slices', 'reduced-sodium', 'chopped', 'onion(s) 0.25 cup diced', 'salt', '0.25 g',
+        'asparagus 1.00 lbs about 16 spears', 'trimmed and cut into 2-inch pieces', 'Canned', 'No Sugar Added Mandarin Oranges 15.00 oz drained', 'boneless', 'skinless chicken breasts 2.00 whole cooked and sliced', 'lettuce 8.00 leaves'];
+    const lines = I.ingredientLines(site.slice());
+    assert.deepEqual(lines, ['4 large eggs', '6 large egg whites', '3 oz deli ham, 4 thick slices, reduced-sodium, chopped', '0.25 cup onion(s), diced', '0.25 g salt',
+        '1 lbs asparagus, about 16 spears, trimmed and cut into 2-inch pieces', '15 oz Canned No Sugar Added Mandarin Oranges, drained', '2 whole boneless skinless chicken breasts, cooked and sliced', '8 leaves lettuce']);
+    lines.forEach(l => { const r = N.readLine(l, 4); assert.ok(r && !r.unmatched, l); });
+    assert.equal(Math.round(N.readLine('8 leaves lettuce', 1).grams), 80);
+    // Normal lists are left exactly as they are.
+    assert.deepEqual(I.ingredientLines(['1 cup rice', '2 eggs, beaten', 'salt, to taste']), ['1 cup rice', '2 eggs, beaten', 'salt, to taste']);
+});

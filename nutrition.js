@@ -202,6 +202,7 @@
             else if (unit === 'scoop') grams = qty * 30;
             else if (unit === 'fillet') grams = qty * (portionGrams(food, ['fillet']) || 150);
             else if (unit === 'piece') grams = qty * eachGrams(food, m.key, m.phrase);
+            else if (!unit && /^\s*[\d.\/½¼¾]+\s+leaves?\b/i.test(raw)) grams = qty * (/lettuce|cabbage|chard|kale|spinach|collard/.test(m.key) ? 10 : 0.5);   // 8 lettuce leaves, 6 basil leaves
             else if (!unit && FREE.test(clean(words)) && /\b(sticks?|star anise|anise|pods?|cloves|bay lea|leaves|sprigs?|whole)\b/.test(clean(raw))) grams = qty * 1.5;   // 2 cinnamon sticks, 3 star anise
             else grams = qty * eachGrams(food, m.key, m.phrase);
         } else {

@@ -106,10 +106,49 @@
         }
         return null;
     }
+    // Some sites write ingredients name first ("eggs 4.00 large", "onion(s) 0.25 cup diced") and
+    // split a name at its commas into separate lines ("boneless" / "skinless chicken breasts 2.00
+    // whole", "deli ham 3.00 oz" / "reduced-sodium" / "chopped"): Diabetes Food Hub, where every
+    // recipe was turned away because the calculator couldn't read them. Put back as "4 large eggs",
+    // "0.25 cup onion(s), diced", "2 whole boneless skinless chicken breasts, cooked and sliced".
+    const NAME_FIRST = /^([^\d]+?)\s+(\d+\.\d{2})(?![\d-])\s*(.*)$/;
+    const UNIT_WORD = /^(cups?|tbsps?|tsps?|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|l|liters?|litres?|cloves?|slices?|stalks?|cans?|cans|pinch(?:es)?|dash(?:es)?|leaves|sprigs?|heads?|bunch(?:es)?|whole|large|med|medium|small|pieces?|packages?|pkgs?|containers?|sticks?|fillets?)\b\.?/i;
+    function ingredientLines(lines) {
+        const numberish = l => /^\d+(\.\d+)?\s*[a-z]{0,8}\.?$/i.test(l);
+        const nameFirst = lines.filter(l => /^[^\d]+?\s\d+\.\d{2}\b/.test(l)).length;
+        if (nameFirst < Math.max(2, lines.length * 0.4)) return lines;
+        const out = [];
+        let prefix = '';
+        lines.forEach((raw, i) => {
+            const l = raw.trim();
+            if (!l) return;
+            const m = l.match(NAME_FIRST);
+            if (!m || numberish(l)) {
+                // A piece of a split name: a describing word before the next line ("Canned",
+                // "boneless") or after the one before ("reduced-sodium", "chopped", "for garnish").
+                const next = lines[i + 1] || '';
+                if (!numberish(l) && l.split(/\s+/).length <= 2 && /^[A-Za-z-]+( [A-Za-z-]+)?$/.test(l) && NAME_FIRST.test(next) && /^(canned|boneless|skinless|fresh|frozen|dried|low|reduced|fat|lean|plain|unsweetened|no|whole|raw|cooked|large|small|extra)/i.test(l)) { prefix = `${prefix}${l} `; return; }
+                // "salt" then "0.25 g": one ingredient.
+                if (!numberish(l) && numberish(next)) { out.push(`${next.replace(/(\d+\.\d+)/, x => String(Number(x)))} ${l}`); lines[i + 1] = ''; return; }
+                if (out.length && !numberish(l)) out[out.length - 1] += `, ${l}`;
+                return;
+            }
+            let name = `${prefix}${m[1]}`.trim();
+            prefix = '';
+            const qty = String(Number(m[2]));
+            let rest = m[3].trim();
+            const u = rest.match(UNIT_WORD);
+            let unit = '';
+            if (u) { unit = /^med$/i.test(u[0]) ? 'medium' : u[0]; rest = rest.slice(u[0].length).trim(); }
+            // "chicken breasts 2.00 cup cooked chicken breast chopped": the words after are a note.
+            out.push(`${qty}${unit ? ' ' + unit : ''} ${name}${rest ? ', ' + rest : ''}`);
+        });
+        return out;
+    }
     function fromSchema(recipe, url) {
         if (!recipe || !recipe.name) return null;
         const list = v => (Array.isArray(v) ? v : v ? [v] : []);
-        const ingredients = list(recipe.recipeIngredient || recipe.ingredients).map(cleanText).filter(Boolean);
+        const ingredients = ingredientLines(list(recipe.recipeIngredient || recipe.ingredients).map(cleanText).filter(Boolean));
         const steps = recipeSteps(recipe.recipeInstructions);
         if (!ingredients.length && !steps.length) return null;
         const total = isoMinutes(recipe.totalTime) || ((isoMinutes(recipe.prepTime) || 0) + (isoMinutes(recipe.cookTime) || 0)) || null;
@@ -443,7 +482,7 @@
         return finish(recipe, 'ai', doc);
     }
 
-    const api = { wholeSentences, importUrl, platformOf, hostOf, normalizeUrl, structuredRecipe, readableText, looksBlocked, jsonAfter, cleanText, isoMinutes, firstNumber, recipeSteps, PLATFORM_NAMES };
+    const api = { wholeSentences, ingredientLines, importUrl, platformOf, hostOf, normalizeUrl, structuredRecipe, readableText, looksBlocked, jsonAfter, cleanText, isoMinutes, firstNumber, recipeSteps, PLATFORM_NAMES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.NourishImport = api;
 })(typeof window !== 'undefined' ? window : this);
