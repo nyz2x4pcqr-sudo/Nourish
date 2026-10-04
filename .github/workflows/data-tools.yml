@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       what:
-        description: "usda, sources, plan or both (usda + sources)"
+        description: "usda, sources, plan, snapshot (real web recipes for the plan audit) or both (usda + sources)"
         default: both
 
 permissions:
@@ -33,9 +33,12 @@ jobs:
       - name: Real plans from the real sites (timing)
         if: inputs.what == 'plan'
         run: npm i --no-save linkedom@0.18 >/dev/null && node tools/plan-live.js > plan-live.txt 2>&1; cat plan-live.txt
+      - name: Real web recipes for the plan audit (tools/plan-audit.js uses them offline)
+        if: inputs.what == 'snapshot'
+        run: npm i --no-save linkedom@0.18 >/dev/null && node tools/web-snapshot.js 5 > web-recipes.json; ls -l web-recipes.json
       - name: Push results to data-tools-output
         run: |
-          mkdir -p /tmp/out && cp nutrition-data.js usda-log.txt sources-report.txt plan-live.txt /tmp/out/ 2>/dev/null || true
+          mkdir -p /tmp/out && cp nutrition-data.js usda-log.txt sources-report.txt plan-live.txt web-recipes.json /tmp/out/ 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan data-tools-output
