@@ -365,7 +365,7 @@ function cleanChat(list) {
 // Settings, preferences, the plan, the grocery list, the chat and the cookbook are kept on the PC so every device
 // (browser, iPhone app, Android app) shows the same thing. Each section has a revision number:
 // a device that has a newer change sends it; a device that's behind takes the PC's copy.
-const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat', 'cookbook', 'log', 'taste'];
+const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat', 'cookbook', 'log', 'taste', 'books'];
 const syncMeta = Object.assign(
     Object.fromEntries(SECTIONS.map(s => [s, { rev: 0, dirty: false, ver: 0 }])),
     loadJSON('nourish_sync', {}));
@@ -391,6 +391,7 @@ function changed(section) {
 }
 
 function sectionValue(section) {
+    if (section === 'books') return recipeDB.exportData();   // the recipes saved from books (recipedb.js)
     if (section === 'settings') {
         const value = {};
         for (const key of Object.keys(SETTINGS_DEFAULTS)) {
@@ -415,6 +416,7 @@ function hasLocalData(section) {
     if (section === 'plan') return daysData.length > 0;
     if (section === 'grocery') return grocery.checked.length > 0 || grocery.custom.length > 0;
     if (section === 'cookbook') return cookbook.recipes.length > 0;
+    if (section === 'books') return recipeDBReady && recipeDB.count() > 0;
     if (section === 'log') return Object.keys(foodLog.days).length > 0 || foodLog.favorites.length > 0;
     if (section === 'taste') return taste.events.length > 0 || !taste.on || Object.keys(taste.overrides.ingredients).length > 0;
     return chatHistory.length > 0;
@@ -456,6 +458,13 @@ function applyRemote(section, value) {
     } else if (section === 'taste') {
         taste = NourishTaste.clean(value);
         tasteCache = null;
+    } else if (section === 'books') {
+        // The PC's copy of the book recipes: merged in (newer books win), in the background.
+        recipeDBSyncing = true;
+        recipeDB.importData(value).then(n => { if (n) nlog('sync', `${n} book recipes from your PC`); })
+            .catch(e => nlog('sync', `Couldn't take the book recipes from your PC: ${e.message}`, null, 'warn'))
+            .finally(() => { recipeDBSyncing = false; librarySummary(libraryIndex()); });
+        return true;
     }
     persistLocal(section);
     return true;
@@ -490,6 +499,7 @@ async function syncNow() {
     try {
         const remote = await api('/api/state', { timeoutMs: 10000 }) || {};
         for (const section of SECTIONS) {
+            if (section === 'books' && !recipeDBReady) continue;   // never send an empty database before it's loaded
             const meta = syncMeta[section];
             const r = remote[section];
             try {
@@ -505,8 +515,8 @@ async function syncNow() {
                     await pushSection(section);   // the PC's data file was reset; restore it from here
                 }
             } catch (e) {
-                // Nourish on the PC before 0.5.0 doesn't keep a cookbook: it stays on this device.
-                if (section !== 'cookbook' || e.status !== 400) throw e;
+                // Nourish on the PC before 0.5.0 doesn't keep a cookbook (before 0.1.11, book recipes): they stay on this device.
+                if ((section !== 'cookbook' && section !== 'books') || e.status !== 400) throw e;
                 if (!meta.unsupported) nlog('sync', 'The Nourish on your PC is too old to keep the Cookbook; it stays on this device until the PC is updated', null, 'warn');
                 meta.unsupported = true;
             }
@@ -1280,6 +1290,7 @@ const SETTINGS_PAGES = {
     schedule: { icon: 'i-clock', color: '#C2964A', title: 'My schedule' },
     learned: { icon: 'i-sparkle', color: '#B07CC6', title: 'What Nourish has learned' },
     sources: { icon: 'i-book', color: '#C9675A', title: 'Recipes' },
+    books: { icon: 'i-book', color: '#A86B3C', title: 'My books' },
     advanced: { icon: 'i-gear', color: '#6E7F8E', title: 'Recipe sources & keys' },
     grocery: { icon: 'i-cart', color: '#4E9E92', title: 'Grocery list' },
     server: { icon: 'i-server', color: '#7C8A96', title: 'Server & devices' },
@@ -1287,7 +1298,7 @@ const SETTINGS_PAGES = {
     data: { icon: 'i-shield', color: '#8B7E6E', title: 'Data & privacy' },
     logs: { icon: 'i-list', color: '#6E6862', title: 'Activity log' },
 };
-const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'schedule', 'learned', 'sources', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
+const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'schedule', 'learned', 'sources', 'books', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
 const SETTINGS_GROUP_TITLES = ['', '', 'Advanced', ''];
 
 function settingsSummary(page) {
@@ -1305,6 +1316,7 @@ function settingsSummary(page) {
         case 'learned': return !taste.on ? 'Off' : taste.events.length ? `${taste.events.length} thing${taste.events.length > 1 ? 's' : ''} noted` : 'Nothing yet';
         case 'schedule': return ['breakfast', 'lunch', 'dinner'].map(m => SCHEDULE_SHORT[scheduleValue(m)] || '').join(' · ');
         case 'sources': return libraryState.count ? `${libraryState.count} of your own` : 'Automatic';
+        case 'books': { const n = recipeDBReady ? recipeDB.books().length : 0; return n ? `${n} book${n === 1 ? '' : 's'} · ${libraryState.count} recipes` : 'None yet'; }
         case 'advanced': {
             const off = String(s.sources_off || '').split(',').filter(Boolean).length;
             return s.plan_source === 'ai' ? 'AI writes every meal' : off ? `${off} switched off` : 'All on';
@@ -1434,6 +1446,7 @@ function hourWords(h) {
 }
 
 const SETTINGS_RENDERERS = {
+    books: renderMyBooks,
     learned() {
         const prof = tasteProfile();
         const o = taste.overrides;
@@ -2180,6 +2193,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
             h('button', { type: 'button', class: 'btn btn-primary', onclick: () => showSlotPicker(meal.name, mealType, (d, t) => { placeInPlan(meal, d, t); closeRecipeSheet(); closeCookbook(); showToast(`Added "${meal.name}" to ${dayName(d)}`, false); }) }, icon('i-calendar'), 'Add to plan'),
             h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => openRecipeEditor(meal, { mode: 'edit', mealType, cookbookId }) }, icon('i-edit'), 'Edit'),
             h('button', { type: 'button', class: 'btn btn-secondary danger', onclick: () => { removeFromCookbook(cookbookId); closeRecipeSheet(); } }, icon('i-trash'), 'Remove')) : null,
+        bookRecipeActions(meal, mealType, dayIndex, cookbookId),
         dayIndex != null && !cookbookId ? eatenControl(dayIndex, mealType) : null,
         dayIndex != null && !cookbookId ? rateRow(dayIndex, mealType, meal) : null,
         cookbookId ? null : h('div', { class: 'recipe-actions' },
@@ -2209,6 +2223,8 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
                 h('span', { class: 'recipe-step-text' }, highlightStep(NourishUnits.convertText(s, units))))))) : null,
         meal.source_url ? h('a', { class: 'btn btn-secondary recipe-source', href: meal.source_url, target: '_blank', rel: 'noopener noreferrer' },
             icon('i-link'), `Recipe from ${meal.source_name || 'the web'}${meal.via_name ? ` · via ${meal.via_name}` : ''}`)
+            : meal.from_book ? h('button', { type: 'button', class: 'btn btn-secondary recipe-source', onclick: () => { closeRecipeSheet(); openBook(meal.book_id); } }, icon('i-book'),
+                `From your book: ${meal.book || 'your book'}${meal.author ? ` by ${meal.author}` : ''}${meal.chapter ? ` · ${meal.chapter}` : ''}${meal.page ? ` · page ${meal.page}` : ''}`)
             : meal.library_path ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), `From your recipe library: ${meal.library_path}`)
             : meal.builtin ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), "Nourish recipe: written for this app, not from a recipe site (works offline)")
             : h('div', { style: 'height:20px' }),
@@ -3190,7 +3206,15 @@ function normalizeMeal(m) {
         // The meal the recipe's source files it under: part of telling a breakfast from a dinner.
         category: Array.isArray(m.category) ? m.category.map(String).slice(0, 6) : m.category ? String(m.category).slice(0, 80) : undefined,
         library_path: m.library_path ? String(m.library_path).slice(0, 300) : undefined,
-    }, safeSource(m));
+        // Recipes from the person's books (recipedb.js): which book, author, chapter or page.
+        from_book: m.from_book ? true : undefined,
+        book: m.book ? String(m.book).slice(0, 120) : undefined,
+        author: m.author ? String(m.author).slice(0, 80) : undefined,
+        chapter: m.chapter ? String(m.chapter).slice(0, 80) : undefined,
+        page: m.page ? String(m.page).slice(0, 20) : undefined,
+        book_id: m.book_id ? String(m.book_id).slice(0, 80) : undefined,
+        book_recipe_id: m.book_recipe_id || (m.from_book && m.id ? String(m.id).slice(0, 160) : undefined),
+    }, safeSource(m), m.from_book && !m.source_url ? { source_name: String(m.source_name || `From your book: ${m.book || ''}`).slice(0, 140) } : {});
     // Nutrition is never taken on trust: it's calculated from the ingredients (USDA data, nutrition.js),
     // and a source's own numbers are kept only when they agree within 15%.
     if (!out.nutrition_basis && out.ingredients.length && typeof NourishNutrition !== 'undefined') {
@@ -3384,6 +3408,8 @@ function mealGuidance({ type, d, cuisine, dish }) {
 // background in small batches whenever they change (library.js). Their recipes compete on equal
 // terms with every other source; their text is cooking knowledge for the AI (cookbookNotes).
 const LIBRARY_KEY = 'nourish_library_index';
+// Files to read again on the next pass ("Try again" after a failure, "Read again" for a book).
+const libraryForce = new Set();
 const libraryState = { count: 0, files: 0, folder: '', where: null, busy: false, error: '', notes: [], progress: null, cancel: false };
 let libraryIndexCache = null;
 function libraryIndex() { if (!libraryIndexCache) libraryIndexCache = loadJSON(LIBRARY_KEY, { files: {} }); return libraryIndexCache; }
@@ -3405,13 +3431,69 @@ function cookbookNotes(question, k) {
     return 'Ideas from their own cookbooks (use for pairings, seasoning and technique; do not copy): '
         + found.map((f, i) => `(${i + 1}) ${f.text.replace(/\s+/g, ' ').slice(0, settings.active_provider === 'local' ? 260 : 420)}`).join(' ');
 }
-function libraryRecipes() { return NourishLibrary.allRecipes(libraryIndex()); }
+// === THE OFFLINE RECIPE DATABASE (recipedb.js) ===
+// Every recipe read from the person's books and files is saved here for good (IndexedDB, which
+// holds thousands; localStorage only when the device has no IndexedDB). The library index above
+// only remembers which files were read and their fingerprints, not the recipes.
+let recipeDB = NourishRecipeDB.forDevice();
+let recipeDBReady = false;
+let recipeDBSyncing = false;
+async function openRecipeDB() {
+    try {
+        await recipeDB.open();
+    } catch (e) {
+        // A WebView without a working IndexedDB: the same data in localStorage instead.
+        nlog('library', `The recipe database couldn't use IndexedDB (${e.message}); using this device's smaller storage instead`, null, 'warn');
+        recipeDB = NourishRecipeDB.create(NourishRecipeDB.localBackend(localStorage));
+        await recipeDB.open();
+    }
+    recipeDBReady = true;
+    recipeDB.onChange(what => { if (what !== 'sync' && !recipeDBSyncing && !isLocalMode()) changed('books'); librarySummary(libraryIndex()); });
+    await migrateLibraryRecipes();
+    librarySummary(libraryIndex());
+    const books = recipeDB.books();
+    nlog('library', `Recipe database (${recipeDB.backend.kind}): ${recipeDB.count()} recipes from ${books.length} book${books.length === 1 ? '' : 's'} and files; ${recipeDB.forPlanning().length} ready for plans`);
+    if (settingsPage) renderSettings();
+}
+// Before 0.1.11 the recipes lived in the library index (localStorage): moved into the database once.
+async function migrateLibraryRecipes() {
+    const index = libraryIndex();
+    const old = Object.entries(index.files || {}).filter(([, e]) => Array.isArray(e.recipes) && e.recipes.length);
+    if (!old.length) return;
+    for (const [path, e] of old) {
+        try {
+            const book = await saveBookRecipes(path, e);
+            if (book) nlog('library', `Moved ${book.count} recipes from "${book.title}" into the recipe database`);
+        } catch (err) { nlog('library', `Couldn't move the recipes of ${path}: ${err.message}`, null, 'warn'); }
+    }
+    saveLibraryIndex(index);
+}
+// Names already in the web library: a book's copy of the same dish is kept once.
+function webLibraryNames() {
+    const cache = loadJSON(NourishFinder.CACHE.recipes, {}) || {};
+    return Object.values(cache).map(c => c && c.r && c.r.name).filter(Boolean);
+}
+// One file's recipes (from refresh) into the database; the index entry keeps only the counts.
+async function saveBookRecipes(path, e) {
+    const recipes = e.recipes || [];
+    delete e.recipes;
+    if (!recipes.length) return null;
+    const fp = e.fp || NourishRecipeDB.textFingerprint(path + JSON.stringify(recipes.slice(0, 3)));
+    const title = e.title || String(path).split('/').pop().replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
+    const mine = /^My Recipes\//.test(path);
+    const book = await recipeDB.importBook({ id: fp, title, author: e.author, path, kind: NourishLibrary.kindOf(path), label: mine ? `From your recipes: ${title}` : undefined }, recipes, { known: webLibraryNames() });
+    Object.assign(e, { fp, bookId: book.id, count: book.count, review: book.review, meals: book.meals, duplicates: book.duplicates });
+    return book;
+}
+// Recipes the planner can use: complete book meals (equal candidates, never put first).
+function libraryRecipes() { return recipeDBReady ? recipeDB.forPlanning() : NourishLibrary.allRecipes(libraryIndex()); }
 function librarySummary(index) {
     const files = Object.keys(index.files || {});
     libraryState.files = files.length;
-    libraryState.count = NourishLibrary.allRecipes(index).length;
+    libraryState.count = recipeDBReady ? recipeDB.all().filter(r => !r.duplicate_of).length : NourishLibrary.allRecipes(index).length;
     libraryState.notes = files.filter(f => index.files[f].note).map(f => `${f}: ${index.files[f].note}`).slice(0, 20);
 }
+openRecipeDB();
 function libraryAvailable() { return !isLocalMode() || nativeAvailable(); }
 
 async function indexLibrary({ quiet = true } = {}) {
@@ -3442,8 +3524,13 @@ async function indexLibrary({ quiet = true } = {}) {
         };
         libraryState.cancel = false;
         let shown = 0;
+        if (!recipeDBReady) await openRecipeDB().catch(() => {});
+        const force = [...libraryForce];
+        libraryForce.clear();
         const res = await NourishLibrary.refresh(JSON.parse(JSON.stringify(libraryIndex())), io, {
-            batch: 2, pause: 500, maxFiles: 20,
+            batch: 2, pause: 500, maxFiles: 20, force,
+            // A book already saved (renamed or moved): not read again.
+            known: fp => { const b = recipeDBReady && recipeDB.book(fp); return b ? { id: b.id, count: b.count, title: b.title } : null; },
             // A big book: how far it has got, shown in Settings → Recipes (at most once a second).
             progress: (path, done, total, chapter) => {
                 libraryState.progress = { path, done, total, chapter };
@@ -3452,6 +3539,26 @@ async function indexLibrary({ quiet = true } = {}) {
             cancelled: () => libraryState.cancel,
         });
         libraryState.progress = null;
+        // Each file's recipes into the offline recipe database (read once; again only when the file
+        // changes or "Read again" is tapped).
+        for (const [path, e] of Object.entries(res.index.files || {})) {
+            if (e.recipes && e.recipes.length) {
+                const book = await saveBookRecipes(path, e);
+                nlog('library', `Saved ${book.count} recipe${book.count === 1 ? '' : 's'} from "${book.title}" into the recipe database` +
+                    `${book.meals != null ? ` (${book.meals} meals for plans` : ''}${book.review ? `, ${book.review} need review` : ''}${book.duplicates ? `, ${book.duplicates} already saved elsewhere` : ''}${book.meals != null ? ')' : ''}`);
+            } else if (e.linked && e.bookId) {
+                await recipeDB.linkPath(e.bookId, path);
+                delete e.linked;
+                nlog('library', `${path}: already saved (same book under a new name), not read again`);
+            } else if (e.recipes) delete e.recipes;
+        }
+        // A file that's gone: its recipes stay until the person decides (My books → Remove).
+        for (const r of res.removed || []) {
+            if (r.bookId && !Object.values(res.index.files).some(x => x.bookId === r.bookId)) {
+                await recipeDB.markMissing(r.bookId);
+                nlog('library', `${r.path} was removed; its recipes are kept until you remove them in My books`);
+            }
+        }
         saveLibraryIndex(res.index);
         librarySummary(res.index);
         if (res.cancelled) { nlog('library', 'Reading the recipe files was stopped (the rest is read next time)'); return; }
@@ -3466,6 +3573,12 @@ async function indexLibrary({ quiet = true } = {}) {
         libraryState.progress = null;
         if (settingsPage === 'sources') renderSettings();
     }
+}
+function readLibraryFileAgain(path) {
+    libraryForce.add(path);
+    showToast(`Reading ${path.split('/').pop()} again…`, false);
+    if (libraryState.busy) { setTimeout(() => indexLibrary({ quiet: false }), 1500); return; }
+    indexLibrary({ quiet: false });
 }
 function cancelLibraryReading() {
     libraryState.cancel = true;
@@ -3545,10 +3658,12 @@ function libraryFileStatus(path) {
     const entry = (libraryIndex().files || {})[path];
     const p = libraryState.progress;
     if (p && p.path === path) return `Reading… part ${p.done} of ${p.total}${p.chapter ? ` (${String(p.chapter).slice(0, 40)})` : ''}`;
-    if (!entry) return libraryState.busy ? 'Reading…' : 'Waiting to be read';
-    if (entry.recipes && entry.recipes.length) return `Read · ${entry.recipes.length} recipe${entry.recipes.length > 1 ? 's' : ''}`;
-    if (entry.passages && entry.passages.length) return 'Read · used as cooking knowledge';
-    return entry.note ? `Not used: ${entry.note}` : 'Read';
+    if (!entry || libraryForce.has(path)) return libraryState.busy ? 'Reading…' : 'Waiting to be read';
+    if (entry.failed) return `Failed: ${String(entry.note || 'it couldn\'t be read').replace(/^Couldn't read it: /, '')}`;
+    const count = entry.count != null ? entry.count : (entry.recipes || []).length;
+    if (count) return `Done · ${count} recipe${count > 1 ? 's' : ''} saved${entry.review ? ` (${entry.review} need${entry.review === 1 ? 's' : ''} review)` : ''}${entry.passages && entry.passages.length ? ' · also cooking knowledge' : ''}`;
+    if (entry.passages && entry.passages.length) return 'Done · no full recipes, used as cooking knowledge';
+    return entry.note ? `Not used: ${entry.note}` : 'Done';
 }
 
 function libraryGroup() {
@@ -3575,9 +3690,17 @@ function libraryGroup() {
             h('progress', { class: 'library-progress', max: String(libraryState.progress.total || 1), value: String(libraryState.progress.done || 0) }),
             h('span', { class: 'settings-hint', text: `Part ${libraryState.progress.done} of ${libraryState.progress.total}. Big books are read a little at a time so the phone stays cool.` })) : null,
         libraryState.progress ? settingsButton('Stop reading', cancelLibraryReading) : null,
-        ...listed.map(f => h('div', { class: 'settings-row settings-row-stack library-file' },
-            h('span', { class: 'settings-label', text: f.path.split('/').pop() }),
-            h('span', { class: 'settings-hint', text: `${f.folder || ''}${f.folder ? ' · ' : ''}${libraryFileStatus(f.path)}` }))),
+        ...listed.map(f => {
+            const entry = (libraryIndex().files || {})[f.path];
+            const reading = libraryState.busy && (!entry || (libraryState.progress && libraryState.progress.path === f.path));
+            const book = /\.(epub|pdf|docx)$/i.test(f.path);
+            return h('div', { class: 'settings-row settings-row-stack library-file' },
+                h('span', { class: 'settings-label', text: f.path.split('/').pop() }),
+                h('span', { class: 'settings-hint' + (entry && entry.failed ? ' warn' : ''), text: `${f.folder || ''}${f.folder ? ' · ' : ''}${libraryFileStatus(f.path)}` }),
+                entry && entry.failed && !reading ? h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => readLibraryFileAgain(f.path) }, icon('i-refresh'), 'Try again')
+                    : entry && book && !reading && !libraryForce.has(f.path) ? h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => readLibraryFileAgain(f.path) }, icon('i-refresh'), 'Read again') : null);
+        }),
+        recipeDBReady && recipeDB.books().length ? settingsButton(`My books (${recipeDB.books().length})`, () => openSettingsPage('books')) : null,
         listed.length || libraryState.busy ? null : h('div', { class: 'settings-row' }, h('span', { class: 'settings-hint', text: 'No files yet. Tap Add files, or drop files into the folders.' })),
         settingsButton('Check for new files now', () => indexLibrary({ quiet: false })),
     ];
@@ -3587,6 +3710,125 @@ function libraryGroup() {
         : 'Drop files into the Recipe Books or My Recipes folder on this PC, or tap Add files.';
     return settingsGroup('My recipe files', rows, help(`Cookbooks and your own recipes (EPUB, PDF${android ? ' (on the PC)' : ''}, Word, text, Markdown, saved web pages${phone && !android ? ', photos' : ''}). Kindle books (MOBI, AZW3) can't be read. ${how}`,
         'Nourish reads each file in the background and learns from it: which ingredients go together, how dishes are seasoned and cooked. Its recipes can also turn up in your plans, next to recipes from everywhere else; they are not put first. Each folder has a "Read me" note. Files are only read again when they change.'));
+}
+
+// === MY BOOKS ===
+// Every book (and recipe file) read into the recipe database, with its recipes: open one, save it
+// to the Cookbook, add it to a day, confirm one that needs review, or remove a book whose file is gone.
+let booksOpen = null;        // the book whose recipes are shown
+let booksQuery = '';
+function openBook(bookId) {
+    booksOpen = bookId || null;
+    if (typeof switchTab === 'function') switchTab('settings');
+    openSettingsPage('books');
+}
+// A meal type to show a book recipe under.
+function bookMealType(r) { return (r.meal_types && r.meal_types[0]) || 'dinner'; }
+function openBookRecipe(r) { openRecipeSheet(bookMealType(r), normalizeMeal(Object.assign({}, r, { book_recipe_id: r.id })), null); }
+function bookRecipeRow(r) {
+    const kind = r.kind && r.kind !== 'meal' ? { drink: 'drink', dessert: 'dessert', sauce: 'sauce', side: 'side or snack', other: 'not a meal' }[r.kind] : '';
+    const bits = [
+        (r.meal_types || []).map(m => MEAL_LABELS[m]).join(', ') || kind,
+        r.nutrition && r.nutrition.calories ? `${formatCalories(r.nutrition.calories)} kcal` : '',
+        r.chapter && !(r.meal_types || []).some(m => MEAL_LABELS[m].toLowerCase() === String(r.chapter).toLowerCase()) ? r.chapter : '',
+        r.review ? 'needs review' : '', r.duplicate_of ? 'same as one already saved' : '',
+    ].filter(Boolean);
+    return h('button', { type: 'button', class: 'settings-row settings-row-stack settings-nav', onclick: () => openBookRecipe(r) },
+        h('span', { class: 'settings-label', text: r.name }),
+        h('span', { class: 'settings-hint' + (r.review ? ' warn' : ''), text: bits.join(' · ') }));
+}
+function renderMyBooks() {
+    if (!recipeDBReady) return settingsGroup('My books', [infoRow('Recipe database', 'Opening…')]);
+    const books = recipeDB.books();
+    const results = h('div', { class: 'books-results' });
+    const showResults = () => {
+        const found = booksQuery.trim().length > 2 ? recipeDB.search(booksQuery, 40) : [];
+        setChildren(results, ...(booksQuery.trim().length > 2
+            ? [found.length ? h('div', { class: 'settings-group' }, found.map(bookRecipeRow)) : h('p', { class: 'settings-note', text: 'No recipe in your books matches.' })]
+            : []));
+    };
+    const search = h('input', { type: 'search', class: 'settings-input', placeholder: 'Search your books: a dish or an ingredient', value: booksQuery, autocomplete: 'off', 'aria-label': 'Search your books',
+        oninput: e => { booksQuery = e.target.value; showResults(); } });
+    showResults();
+    const out = [
+        settingsGroup('', [h('div', { class: 'settings-row settings-row-stack' }, search)],
+            `${libraryState.count} recipes from ${books.length} book${books.length === 1 ? '' : 's'} and files, saved on this ${isLocalMode() ? 'phone' : 'device'} (they work offline and stay even if a file is deleted). ${recipeDB.forPlanning().length} complete meals can go into plans.`),
+        results,
+    ];
+    if (!books.length) {
+        out.push(settingsGroup('No books yet', [h('div', { class: 'settings-row' }, h('span', { class: 'settings-hint', text: 'Add EPUB or PDF cookbooks, Word files or your own recipes in Settings → Recipes → Add files. Their recipes appear here.' }))],
+            null), settingsGroup('', [settingsButton('Go to Recipes', () => openSettingsPage('sources'))]));
+    }
+    books.forEach(b => {
+        const open = booksOpen === b.id;
+        const recipes = open ? recipeDB.recipesOf(b.id).sort((x, y) => (x.chapter || '').localeCompare(y.chapter || '') || x.name.localeCompare(y.name)) : [];
+        const rows = [
+            h('button', { type: 'button', class: 'settings-row settings-row-stack settings-nav', onclick: () => { booksOpen = open ? null : b.id; renderSettings(); } },
+                h('span', { class: 'settings-label', text: b.title + (b.author ? ` · ${b.author}` : '') }),
+                h('span', { class: 'settings-hint', text: [`${b.count || 0} recipes`, b.meals != null ? `${b.meals} for plans` : '', b.review ? `${b.review} need review` : '', b.duplicates ? `${b.duplicates} already saved elsewhere` : '', open ? 'tap to close' : 'tap to see them'].filter(Boolean).join(' · ') })),
+            b.missing ? h('div', { class: 'settings-row settings-row-stack' },
+                h('span', { class: 'settings-hint warn', text: `The file (${b.path || 'unknown'}) was removed. Its recipes are kept.` }),
+                h('button', { type: 'button', class: 'btn btn-secondary btn-small danger', onclick: () => removeBookRecipes(b) }, icon('i-trash'), 'Remove its recipes')) : null,
+            ...recipes.map(bookRecipeRow),
+        ];
+        out.push(settingsGroup('', rows));
+    });
+    out.push(settingsGroup('Backup', [
+        settingsButton('Export my book recipes', exportBookRecipes),
+        settingsButton('Import a backup', importBookRecipes),
+    ], 'A backup is one file with every book and recipe. With Nourish on your PC, book recipes also sync to it.'));
+    return out;
+}
+async function removeBookRecipes(b) {
+    if (!confirm(`Remove the ${b.count || 0} recipes saved from "${b.title}"? They won't be in your plans any more. This can't be undone (unless you have a backup).`)) return;
+    await recipeDB.removeBook(b.id);
+    nlog('library', `Removed the recipes of "${b.title}" (its file was gone)`);
+    renderSettings();
+}
+// Recipe screen buttons for a recipe opened from My books (or a search).
+function bookRecipeActions(meal, mealType, dayIndex, cookbookId) {
+    if (!meal.from_book || dayIndex != null || cookbookId) return null;
+    const id = meal.book_recipe_id;
+    const stored = id && recipeDBReady ? recipeDB.get(id) : null;
+    return h('div', { class: 'recipe-actions' + (stored && stored.review ? ' three' : '') },
+        h('button', { type: 'button', class: 'btn btn-primary', onclick: () => showSlotPicker(meal.name, mealType, (d, t) => { placeInPlan(meal, d, t); closeRecipeSheet(); showToast(`Added "${meal.name}" to ${dayName(d)}`, false); }) }, icon('i-calendar'), 'Add to plan'),
+        h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => { addToCookbook(meal, mealType, 'imported'); showToast('Saved to your Cookbook', false); } }, icon('i-heart'), 'Save'),
+        stored && stored.review ? h('button', { type: 'button', class: 'btn btn-secondary', title: stored.review_why || '', onclick: async () => {
+            await recipeDB.confirm(id);
+            showToast('Confirmed: it can go into plans now', false);
+            openBookRecipe(recipeDB.get(id));
+            if (settingsPage === 'books') renderSettings();
+        } }, icon('i-check'), 'Looks right') : null,
+        stored && stored.review ? h('p', { class: 'settings-note', text: `Needs review: ${stored.review_why}. It stays out of plans until you confirm it (or edit it after saving it to your Cookbook).` }) : null);
+}
+function exportBookRecipes() {
+    const data = JSON.stringify(Object.assign({ app: 'Nourish', exported: new Date().toISOString() }, recipeDB.exportData()));
+    const name = `nourish-book-recipes-${new Date().toISOString().slice(0, 10)}.json`;
+    const file = new File([data], name, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'Nourish book recipes' }).catch(() => {});
+        return;
+    }
+    const a = h('a', { href: URL.createObjectURL(file), download: name, style: 'display:none' });
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    showToast(`Saved ${recipeDB.count()} recipes to ${name}`, false);
+}
+function importBookRecipes() {
+    const input = h('input', { type: 'file', accept: '.json,application/json', style: 'display:none' });
+    input.addEventListener('change', async () => {
+        const file = input.files && input.files[0];
+        input.remove();
+        if (!file) return;
+        try {
+            const n = await recipeDB.importData(JSON.parse(await file.text()));
+            showToast(n ? `Added ${n} recipes from the backup` : 'Nothing new in that backup', false);
+            renderSettings();
+        } catch (e) { showToast(`That isn't a Nourish backup (${e.message})`); }
+    });
+    document.body.appendChild(input);
+    input.click();
 }
 
 // === GENERATE MEAL PLAN ===

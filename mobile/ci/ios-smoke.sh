@@ -75,22 +75,40 @@ import json; r = json.load(open('$PROBE')); assert r['ok'], r; v = json.loads(r[
 assert v['fileSharing'] and v['foldersMade'], v
 print('Recipe folders:', v['folder'], '| file sharing on | path', v['path'])" || fail "recipe folders not set up for the Files app"
 
-echo "== 1c. An EPUB cookbook in Recipe Books is read on the phone a slice at a time (books.js + the native range reader)"
-node "$GITHUB_WORKSPACE/tools/make-sample-epub.js" "$DATA/Documents/Recipe Books/Easy Mornings.epub" 2>/dev/null || (cd ../.. && node tools/make-sample-epub.js "$DATA/Documents/Recipe Books/Easy Mornings.epub")
-printf 'kindle' > "$DATA/Documents/Recipe Books/Old book.azw3"
-probe "localStorage.removeItem(LIBRARY_KEY); await indexLibrary();
+echo "== 1c. Recipe books in the Recipe Books folder (a PDF and an EPUB, names with spaces and brackets) are opened, their recipes saved in the recipe database"
+RB="$DATA/Documents/Recipe Books"
+(cd "$GITHUB_WORKSPACE" 2>/dev/null || cd ../..; node tools/make-sample-epub.js "$RB/Easy Mornings (2nd ed) – Recetas.epub" && node tools/make-sample-pdf.js "$RB/Puerto Rican Cookery (Sample).pdf")
+printf 'kindle' > "$RB/Old book.azw3"
+probe "localStorage.removeItem(LIBRARY_KEY); libraryIndexCache = null;
+  await new Promise(r => { const t = setInterval(() => { if (recipeDBReady) { clearInterval(t); r(); } }, 200); });
+  await indexLibrary();
   const idx = libraryIndex().files || {};
-  return JSON.stringify({ recipes: libraryRecipes().map(r => r.name + ' | ' + r.source_name), kindle: (idx['Recipe Books/Old book.azw3'] || {}).note || '' });" 120
-python3 - "$PROBE" <<'PY' || fail "the phone couldn't read an EPUB cookbook"
+  return JSON.stringify({ db: recipeDB.backend.kind, count: recipeDB.count(), books: recipeDB.books().map(b => b.title + ': ' + b.count),
+    files: Object.keys(idx).map(f => f + ' → ' + libraryFileStatus(f)), recipes: recipeDB.all().map(r => r.name + ' | ' + r.source_name),
+    kindle: (idx['Recipe Books/Old book.azw3'] || {}).note || '', errors: libraryState.notes });" 180
+python3 - "$PROBE" <<'PY' || fail "the phone couldn't read the recipe books"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
 v = json.loads(r["value"])
-print("\n".join(v["recipes"])); print("Kindle file:", v["kindle"])
-assert any(x.startswith("Spinach & Feta Omelette | Easy Mornings & Evenings · Breakfast") for x in v["recipes"]), v
-assert len(v["recipes"]) == 3, v
+print("Recipe database:", v["db"], "|", v["count"], "recipes"); print("\n".join(v["files"])); print("\n".join(v["recipes"]))
+assert v["count"] > 0, v
+names = " ".join(v["recipes"])
+assert "Spinach & Feta Omelette | From your book: Easy Mornings & Evenings" in names, "EPUB not read"
+assert "Arroz con Pollo" in names and "Habichuelas Guisadas" in names, "PDF not read"
+assert not any("/private" in f or f.startswith("/") for f in v["files"]), "a path still starts wrong"
 assert "Kindle" in v["kindle"], v
 PY
-rm -f "$DATA/Documents/Recipe Books/Easy Mornings.epub" "$DATA/Documents/Recipe Books/Old book.azw3"
+echo "== 1d. After a restart the book recipes are still there, and the books aren't read again"
+probe "await new Promise(r => { const t = setInterval(() => { if (recipeDBReady) { clearInterval(t); r(); } }, 200); });
+  const before = activityLog.length; await indexLibrary();
+  return JSON.stringify({ count: recipeDB.count(), plan: libraryRecipes().length, saved: activityLog.slice(before).filter(l => /Saved \\d+ recipe/.test(l.msg)).length });" 120
+python3 - "$PROBE" <<'PY' || fail "the book recipes didn't survive a restart"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+v = json.loads(r["value"]); print(v)
+assert v["count"] >= 5 and v["plan"] >= 4 and v["saved"] == 0, v
+PY
+rm -f "$RB/Easy Mornings (2nd ed) – Recetas.epub" "$RB/Puerto Rican Cookery (Sample).pdf" "$RB/Old book.azw3"
 
 echo "== 2. Saved data survives a restart"
 probe "return localStorage.getItem('probe_saved');" 60

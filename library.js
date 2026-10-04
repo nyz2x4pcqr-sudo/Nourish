@@ -119,19 +119,25 @@
     // books.js), ocr(image) → text (optional), readStructured, readText, sleep(ms) }.
     // opts.progress(path, done, total, chapter) is told how far a book is; opts.cancelled() → true
     // stops reading (the book is read again from the start next time).
-    // index: { files: { path: { sig, recipes, note } } }. Returns { index, changed, read, errors, cancelled }.
-    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled } = {}) {
+    // opts.known(fingerprint) → { id, count } when a file with these contents was already imported
+    // into the recipe database (renamed or moved): it isn't read again. opts.force: paths to read
+    // again even though they haven't changed ("Read again", "Try again").
+    // index: { files: { path: { sig, fp, recipes, count, note, failed, title, author } } }.
+    // Returns { index, changed, read, errors, cancelled, removed: [{ path, fp }] }.
+    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled, known, force } = {}) {
         const idx = index && index.files ? index : { files: {} };
         const listed = (await io.list()).filter(f => kindOf(f.path) && !isReadme(f.path));
         const seen = new Set(listed.map(f => f.path));
         let changed = 0;
-        Object.keys(idx.files).forEach(p => { if (!seen.has(p)) { delete idx.files[p]; changed++; } });
-        const todo = listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).slice(0, maxFiles);
+        const removed = [];
+        Object.keys(idx.files).forEach(p => { if (!seen.has(p)) { removed.push({ path: p, fp: idx.files[p].fp, bookId: idx.files[p].bookId }); delete idx.files[p]; changed++; } });
+        const again = new Set(force || []);
+        const todo = listed.filter(f => again.has(f.path) || !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).slice(0, maxFiles);
         let read = 0;
         const errors = [];
         let stopped = false;
         // Books are read one at a time, after the other files (they take longer).
-        const BOOK = { epub: 1, docx: 1 };
+        const BOOK = { epub: 1, docx: 1, pdf: 1 };
         const books = todo.filter(f => BOOK[kindOf(f.path)]);
         const groups = [];
         const rest = todo.filter(f => !BOOK[kindOf(f.path)]);
@@ -143,6 +149,21 @@
                 const entry = { sig: `${f.size}:${f.mtime}`, recipes: [], note: '' };
                 try {
                     const kind = kindOf(f.path);
+                    // The file's fingerprint (its size and first and last 64 KB): a book already saved
+                    // under another name isn't read again.
+                    if (io.range && f.size > 0 && kind !== 'kindle') {
+                        try {
+                            const n = Math.min(65536, f.size);
+                            entry.fp = fingerprintOf(f.size, await io.range(f.path, 0, n), await io.range(f.path, Math.max(0, f.size - n), n));
+                        } catch (e) { /* older app without slices: fingerprinted from its text below */ }
+                    }
+                    const hit = entry.fp && known && !again.has(f.path) ? known(entry.fp) : null;
+                    if (hit) {
+                        Object.assign(entry, { bookId: hit.id, count: hit.count || 0, title: hit.title, linked: true });
+                        idx.files[f.path] = entry;
+                        changed++;
+                        return;
+                    }
                     if (kind === 'kindle') {
                         entry.note = booksReader() ? booksReader().KINDLE_NOTE : 'Kindle books can\'t be read.';
                         idx.files[f.path] = entry;
@@ -159,6 +180,10 @@
                     if (got.kind === 'pdf' && !got.text) entry.note = got.note || 'No text could be read from this PDF.';
                     entry.recipes = got.recipes ? got.recipes : recipesFromFile(file, io.readStructured, io.readText);
                     const text = file.text || (file.html && io.readText ? io.readText(file.html) : '');
+                    if (!entry.fp) entry.fp = textFingerprint(text || got.image || f.path);
+                    entry.title = got.title || String(f.path).split('/').pop().replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
+                    if (got.author) entry.author = got.author;
+                    entry.count = entry.recipes.length;
                     // Passages for the cooking notes: a recipe file is already covered by its recipes.
                     entry.passages = passagesFrom(text, { max: entry.recipes.length > 3 || f.folder === 'Recipe Books' ? 250 : 40 })
                         .filter(p => !entry.recipes.some(r => r.name && p.indexOf(r.name) >= 0 && p.length < 900));
@@ -168,6 +193,7 @@
                 } catch (e) {
                     if (e.cancelled) { stopped = true; return; }   // not saved: read again next time
                     entry.note = e.drm && booksReader() ? booksReader().DRM_NOTE : `Couldn't read it: ${e.message}`;
+                    entry.failed = true;
                     errors.push(`${f.path}: ${e.message}`);
                 }
                 idx.files[f.path] = entry;
@@ -177,7 +203,7 @@
         }
         idx.at = Date.now();
         idx.listed = listed.map(f => ({ path: f.path, folder: f.folder, size: f.size }));
-        return { index: idx, changed, read, errors, cancelled: stopped, pending: Math.max(0, listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).length) };
+        return { index: idx, changed, read, errors, removed, cancelled: stopped, pending: Math.max(0, listed.filter(f => !idx.files[f.path] || idx.files[f.path].sig !== `${f.size}:${f.mtime}`).length) };
     }
 
     // A book (EPUB or Word) read a slice at a time. Its recipes keep the book's title and chapter:
@@ -204,7 +230,20 @@
             book: title,
             library_path: f.path,
         }));
-        return { kind, text: book.text, recipes, note: recipes.length ? '' : undefined };
+        return { kind, text: book.text, recipes, title, author: book.author || undefined, note: recipes.length ? '' : undefined };
+    }
+
+    // File fingerprints (recipedb.js), with a small copy here so this file works on its own.
+    function fingerprintOf(size, head, tail) {
+        const DB = root.NourishRecipeDB || (typeof require === 'function' ? (() => { try { return require('./recipedb.js'); } catch (e) { return null; } })() : null);
+        if (DB) return DB.fingerprint(size, head, tail);
+        let h = 0x811c9dc5;
+        [head, tail].forEach(b => { for (let i = 0; i < (b || []).length; i++) h = Math.imul(h ^ b[i], 16777619) >>> 0; });
+        return `fp-${size}-${h.toString(36)}`;
+    }
+    function textFingerprint(text) {
+        const bytes = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(String(text || '')) : Buffer.from(String(text || ''));
+        return fingerprintOf(bytes.length, bytes.subarray(0, 65536), bytes.subarray(Math.max(0, bytes.length - 65536)));
     }
 
     // === COOKING KNOWLEDGE (cookbooks as inspiration, not as a ranking) ===

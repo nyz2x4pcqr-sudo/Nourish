@@ -12,9 +12,11 @@ import threading
 import time
 from pathlib import Path
 
-SECTIONS = {"settings", "prefs", "plan", "grocery", "chat", "cookbook", "log", "taste"}
+SECTIONS = {"settings", "prefs", "plan", "grocery", "chat", "cookbook", "log", "taste", "books"}
 SECRET_FIELDS = {"claude_api_key", "openai_api_key", "spoonacular_api_key", "brave_api_key"}
 MAX_SECTION_BYTES = 2 * 1024 * 1024
+# The recipes saved from the person's books (thousands of full recipes) are allowed more room.
+MAX_SECTION_BYTES_FOR = {"books": 60 * 1024 * 1024}
 DATA_FILE = Path(os.getenv("NOURISH_DATA_FILE", "nourish-data.json"))
 
 _lock = threading.Lock()
@@ -64,7 +66,7 @@ def get_all() -> dict:
 def put(section: str, value) -> dict:
     if section not in SECTIONS:
         raise StoreError(f"Unknown section: {section}")
-    if len(json.dumps(value)) > MAX_SECTION_BYTES:
+    if len(json.dumps(value)) > MAX_SECTION_BYTES_FOR.get(section, MAX_SECTION_BYTES):
         raise StoreError("That's too much data to save")
     with _lock:
         entry = _data.get(section, {"rev": 0})

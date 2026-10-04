@@ -206,6 +206,7 @@
         if (!opf) throw new Error('this EPUB\'s contents list is missing');
         const base = dirOf(opfPath);
         const title = decode(((opf.match(/<dc:title[^>]*>([\s\S]*?)<\/dc:title>/i) || [])[1] || '').replace(/<[^>]+>/g, '')).trim();
+        const author = decode(((opf.match(/<dc:creator[^>]*>([\s\S]*?)<\/dc:creator>/i) || [])[1] || '').replace(/<[^>]+>/g, '')).trim();
         const manifest = {};
         for (const m of opf.matchAll(/<item\b[^>]*>/gi)) manifest[attr(m[0], 'id')] = { href: joinPath(base, attr(m[0], 'href')), type: attr(m[0], 'media-type'), props: attr(m[0], 'properties') };
         const spine = [...opf.matchAll(/<itemref\b[^>]*>/gi)].map(m => manifest[attr(m[0], 'idref')]).filter(x => x && /html|xml/i.test(x.type || 'html')).map(x => x.href);
@@ -226,13 +227,13 @@
                 if (!toc[file]) toc[file] = decode(m[1]).replace(/\s+/g, ' ').trim();
             }
         }
-        return { title, spine, toc };
+        return { title, author, spine, toc };
     }
     // Every recipe in an EPUB. opts: { readRange, size, inflate, progress(done, total, chapter),
     // cancelled() → bool, pause(ms) }. Returns { title, recipes, chapters, skipped, text }.
     async function readEpub(opts) {
         const zip = await openZip(opts);
-        const { title, spine, toc } = await epubOutline(zip);
+        const { title, author, spine, toc } = await epubOutline(zip);
         const recipes = [];
         let section = '';
         let skipped = 0;
@@ -255,7 +256,7 @@
             if (opts.progress) opts.progress(i + 1, spine.length, chapter);
             if (opts.pause && i % 3 === 2) await opts.pause(60);   // a short breath every few chapters: the phone stays cool
         }
-        return { title, recipes, chapters: spine.length, skipped, text: textParts.join('\n\n') };
+        return { title, author, recipes, chapters: spine.length, skipped, text: textParts.join('\n\n') };
     }
     // The section a recipe belongs to: the nearest chapter name that says what kind of food it is.
     const MEAL_SECTION = /\b(breakfast|brunch|lunch|dinner|supper|mains?|main courses?|salads?|soups?|sides?|desserts?|puddings?|baking|snacks?|starters?|small plates|drinks|sauces|weeknight|light meals)\b/i;

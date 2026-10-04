@@ -24,6 +24,7 @@ on:
       - "finder.js"
       - "library.js"
       - "books.js"
+      - "recipedb.js"
       - "foodlog.js"
       - "taste.js"
       - "builtins.js"
