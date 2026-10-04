@@ -740,7 +740,8 @@ function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
     const s = typeof settings !== 'undefined' ? settings : {};
     const split = Planner && Planner.splitOf(s);   // the person's calorie split (Settings), 25/30/45 by default
     const share = (split && split[PLAN_MEALS.indexOf(type)]) || MEAL_SHARE[type] || 0.33;
-    const kcal = Math.round((Number(s.calorie_target) || 2000) * share / 10) * 10;
+    const dayKcal = typeof dayKcalTarget === 'function' && d != null ? dayKcalTarget(d) : (Number(s.calorie_target) || 2000);
+    const kcal = Math.round(dayKcal * share / 10) * 10;
     const protein = Math.round((typeof proteinTarget === 'function' ? proteinTarget() : Number(s.protein_target) || 100) * share);
     // No day number, day name or person's name anywhere a small model could copy into the dish's name.
     return `${conversation ? conversation + '\n\n' : ''}${dish ? `Write the full recipe for "${dish}", a ${type}` : `Make one ${type} recipe`}` +

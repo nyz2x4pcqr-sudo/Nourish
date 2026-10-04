@@ -95,6 +95,9 @@ const SETTINGS_DEFAULTS = {
     protein_auto: 'on',           // 'off': use protein_target even when the body weight is known
     macro_pref: 'balanced',       // 'balanced' | 'lower-carb' | 'lower-fat'
     fat_swap: 'on',               // oil instead of butter or lard where the dish allows
+    calorie_mode: 'daily',        // 'daily' or 'weekly' (a week's budget with big days)
+    big_days: '',                 // Weekly mode: JSON [{ weekday 0–6 (Monday = 0), kcal }]
+    big_days_ok: '',              // the big days the person confirmed when they push other days to the 75% floor
     diet: 'No restriction',
     allergies: '',
     cuisines: '',
@@ -1117,7 +1120,83 @@ function bodyWeightKg() {
 }
 // The settings the planner works with: the profile plus the goal and body weight.
 function plannerSettings(extra) {
-    return Object.assign({}, settings, { goal: prefs.goal, body_weight_kg: bodyWeightKg(), budget: budgetLevel() }, extra || {});
+    const w = weekPlan();
+    return Object.assign({}, settings, { goal: prefs.goal, body_weight_kg: bodyWeightKg(), budget: budgetLevel() },
+        w && w.confirmed ? { day_kcal: w.perDay } : {}, extra || {});
+}
+// Weekly mode (Settings → Profile → Calories): the week's budget, big days and each plan day's
+// calories (planner.js weeklyTargets). Big days that push other days to the 75% floor are only
+// used once the person has confirmed them.
+function bigDays() { try { const v = JSON.parse(settings.big_days || '[]'); return Array.isArray(v) ? v.filter(b => b && b.weekday >= 0 && b.weekday <= 6 && Number(b.kcal) > 0) : []; } catch (e) { return []; } }
+function weekPlan(list) {
+    if (settings.calorie_mode !== 'weekly') return null;
+    const days = list || bigDays();
+    const w = NourishPlanner.weeklyTargets({ target: Number(settings.calorie_target) || 2000, bigDays: days, startWeekday: dayBase(), days: 7 });
+    w.confirmed = !w.floorHit || settings.big_days_ok === JSON.stringify(days);
+    return w;
+}
+function weekDayKcal(i) {
+    const w = weekPlan();
+    if (!w) return 0;
+    if (!w.confirmed) return 0;   // not confirmed yet: plain daily targets meanwhile
+    return w.perDay[i % 7] || 0;
+}
+function dayKcalTarget(i) { return weekDayKcal(i) || Number(settings.calorie_target) || 2000; }
+// Settings → Profile → Your week (Weekly mode): big days, what the other days get, and the 75% floor.
+let bigDaysDraft = null;   // big days being edited, before they're confirmed (only when they hit the floor)
+function bigDaysGroup() {
+    const list = bigDaysDraft || bigDays();
+    const w = weekPlan(list);
+    const save = next => {
+        const preview = weekPlan(next);
+        if (preview.floorHit) { bigDaysDraft = next; renderSettings(); return; }   // shown with a warning first
+        bigDaysDraft = null;
+        setSetting('big_days', JSON.stringify(next));
+        nlog('settings', `Weekly calories: big days ${next.map(b => `${NourishPlanner.WEEKDAYS[b.weekday]} ${b.kcal} kcal`).join(', ') || 'none'}`);
+        renderSettings();
+    };
+    const rows = list.map((b, k) => h('div', { class: 'settings-row big-day' },
+        selectInput(String(b.weekday), Object.fromEntries(NourishPlanner.WEEKDAYS.map((n, i) => [String(i), n])), v => save(list.map((x, j) => (j === k ? Object.assign({}, x, { weekday: Number(v) }) : x))), 'Big day'),
+        textInput(() => String(b.kcal), v => save(list.map((x, j) => (j === k ? Object.assign({}, x, { kcal: Number(v) || x.kcal }) : x))), { type: 'number', inputmode: 'numeric', min: '1000', max: '8000', label: 'Calories on that day' }),
+        h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => save(list.filter((x, j) => j !== k)) }, 'Remove')));
+    const preview = h('div', { class: 'settings-row settings-row-stack' },
+        h('span', { class: 'settings-label', text: `Budget: ${w.budget.toLocaleString()} kcal a week` }),
+        h('span', { class: 'settings-hint', text: w.weekdays.map((n, i) => `${n.slice(0, 3)} ${w.perDay[i]}`).join(' · ') }));
+    const warn = w.floorHit && !w.confirmed ? h('div', { class: 'settings-row settings-row-stack' },
+        h('span', { class: 'settings-hint warn', text: w.message }),
+        h('div', { class: 'settings-actions' },
+            h('button', { type: 'button', class: 'btn btn-primary btn-small', onclick: () => { bigDaysDraft = null; setSetting('big_days', JSON.stringify(list)); setSetting('big_days_ok', JSON.stringify(list)); nlog('settings', `Weekly calories: big days confirmed although they go over the budget (${w.message})`, null, 'warn'); renderSettings(); } }, 'Use these days anyway'),
+            h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => { bigDaysDraft = null; renderSettings(); } }, 'Change them'))) : null;
+    return settingsGroup('Your week', [
+        ...rows,
+        settingsButton('Add a big day', () => save(list.concat({ weekday: 5, kcal: Math.round((Number(settings.calorie_target) || 2000) * 1.3 / 50) * 50 }))),
+        preview, warn,
+    ], 'Your week has the budget of seven normal days. A big day gets the calories you set; the other days share what\'s left evenly. No day goes under 75% of a normal day, and protein and fiber targets stay the same every day.');
+}
+// The week view on the Plan screen (Weekly mode): budget, eaten so far, what's left, and each day.
+function weekCard() {
+    const w = weekPlan();
+    if (!w || !daysData.length) return null;
+    const today = todayIndex();
+    let eaten = 0;
+    const per = daysData.slice(0, 7).map((day, i) => {
+        const t = NourishLog.totals(day, logEntry(i));
+        const used = i < today ? (t.tracking ? t.eaten.calories : t.planned.calories) : i === today ? t.eaten.calories : 0;
+        eaten += used;
+        return { i, target: w.confirmed ? w.perDay[i] : Number(settings.calorie_target) || 2000, planned: Math.round(t.planned.calories) };
+    });
+    const budget = w.confirmed ? w.planned : (Number(settings.calorie_target) || 2000) * 7;
+    return h('section', { class: 'card week-card' },
+        h('div', { class: 'eyebrow', text: 'Your week' }),
+        h('p', { class: 'day-status' },
+            h('span', {}, 'Budget ', h('b', { class: 'num', text: `${formatCalories(budget)} kcal` })), h('span', { class: 'dot', text: '·' }),
+            h('span', {}, 'Used ', h('b', { class: 'num', text: `${formatCalories(eaten)}` })), h('span', { class: 'dot', text: '·' }),
+            h('span', {}, 'Left ', h('b', { class: 'num', text: `${formatCalories(Math.max(0, budget - eaten))}` }))),
+        h('div', { class: 'week-days' }, per.map(p => h('div', { class: 'week-day' + (p.i === today ? ' is-today' : '') + (p.target > (Number(settings.calorie_target) || 2000) * 1.05 ? ' big' : '') },
+            h('span', { class: 'd-name', text: dayName(p.i, true) }),
+            h('span', { class: 'num', text: formatCalories(p.target) }),
+            h('small', { text: `plan ${formatCalories(p.planned)}` })))),
+        !w.confirmed ? h('p', { class: 'recipe-note', text: 'Your big days aren\'t in use yet: confirm them in Settings → Profile → Your week.' }) : null);
 }
 // The day's protein target (planner.js targetsOf: from body weight when known).
 function proteinTarget() { return NourishPlanner.targetsOf(plannerSettings()).protein; }
@@ -1744,7 +1823,8 @@ const SETTINGS_RENDERERS = {
                 settingsRow('Goal', selectInput(prefs.goal, GOALS, v => { setPref('goal', v); syncChoiceButtons(); showToast('Saved ✓', false); }, 'Goal')),
             ]),
             ...settingsGroup('Daily targets', [
-                settingsRow('Calories', settingsInput('calorie_target', { type: 'number', inputmode: 'numeric', min: '1000', max: '6000' })),
+                settingsRow(settings.calorie_mode === 'weekly' ? 'Calories (normal day)' : 'Calories', settingsInput('calorie_target', { type: 'number', inputmode: 'numeric', min: '1000', max: '6000' }, () => renderSettings())),
+                settingsRow('Count calories', settingsSelect('calorie_mode', { daily: 'Daily', weekly: 'Weekly' }, { onchange: () => renderSettings() }), { hint: 'Weekly: a budget for the week, with bigger days you choose' }),
                 settingsRow(`Body weight (${unitSystem() === 'imperial' ? 'lb' : 'kg'})`, settingsInput('body_weight', { type: 'number', inputmode: 'decimal', min: '30', max: '700', placeholder: 'optional' }, () => renderSettings()), { hint: 'Protein is then set from it' }),
                 bodyWeightKg() && settings.protein_auto !== 'off'
                     ? infoRow('Protein', `${proteinTarget()} g a day (${prefs.goal === 'Cut' ? '2.0' : '1.6'} g per kg)`)
@@ -1754,6 +1834,7 @@ const SETTINGS_RENDERERS = {
                 settingsRow('Calories by meal', settingsSelect('calorie_split', Object.assign({ dinner: 'Bigger dinner', even: 'Even', breakfast: 'Bigger breakfast', frontload: 'Front-load my day' },
                     settings.calorie_split === 'custom' ? { custom: 'Custom (Advanced)' } : {}))),
             ], 'Each day of your plan is sized to land within about 5% of your calories. "Bigger dinner" gives about 25% at breakfast, 30% at lunch and 45% at dinner; "Front-load my day" moves more to breakfast and lunch (33%, 37%, 30%). Every main meal has 25–40 g protein, breakfast at least 25 g, and each day at least 30 g fiber.'),
+            ...(settings.calorie_mode === 'weekly' ? bigDaysGroup() : []),
             ...settingsGroup('Food', [
                 settingsRow('Diet', settingsSelect('diet', DIETS)),
                 settingsRow('Allergies', settingsInput('allergies', { placeholder: 'e.g. peanuts, shellfish' })),
@@ -2645,7 +2726,7 @@ function updateTodayScreen() {
     const entry = logEntry(selectedDay);
     const dayTotals = NourishLog.totals(day, entry);
     if (on('show_nutrition')) {
-        const calTarget = Number(settings.calorie_target) || 2400;
+        const calTarget = dayKcalTarget(selectedDay) || 2400;
         const known = hasNutrition(day) || entry.items.length > 0;
         const totalCal = dayTotals.planned.calories;
         const r = 56;
@@ -2768,7 +2849,7 @@ function setMealStatus(dayIndex, type, status) {
 
 // What's left today, in plain words, and a calm note (with an offer, never a change) when over.
 function dayStatus(idx, day, t) {
-    const target = Number(settings.calorie_target) || 2400;
+    const target = dayKcalTarget(idx) || 2400;
     const over = Math.round(t.planned.calories - target);
     const parts = [];
     if (t.tracking) {
@@ -3492,7 +3573,7 @@ function tasteScorer() {
 function builtinFor(type, d, taken) {
     const used = NourishPlanner.dishList(taken || []);
     const recent = NourishPlanner.dishList(recentPlanDishes());
-    const kcal = (Number(settings.calorie_target) || 2000) * (NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(type)] || 0.33);
+    const kcal = dayKcalTarget(d || 0) * (NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(type)] || 0.33);
     const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
     if (settings.builtin_mode === 'off') return null;
     const list = typeof NourishBuiltins !== 'undefined' ? NourishBuiltins.forMeal(type) : [];
@@ -4243,7 +4324,9 @@ async function runSmartPlan(likes, hates) {
         if (localPlanCancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         if (plan.missing.length) await fillMissingMeals(plan);
         const planSettings = plannerSettings();
-        let days = plan.days.map(d => NourishPlanner.fitDay(d, planSettings, servingsWanted()));
+        let days = plan.days.map((d, i) => NourishPlanner.fitDay(d, plannerSettings(dayTargetsFor(i)), servingsWanted()));
+        const wk = weekPlan();
+        if (wk) nlog('plan', wk.confirmed ? `Weekly calories: ${wk.weekdays.map((n, i) => `${n.slice(0, 3)} ${wk.perDay[i]}`).join(', ')} (budget ${wk.budget} kcal${wk.overBy ? `, ${wk.overBy} over: confirmed` : ''})` : 'Weekly calories: big days not confirmed yet (they would push other days under 75%), so every day uses the daily target', wk.message || null);
         // The last check, with or without an AI: every day within 10% of the calorie target.
         const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (plan.pools[m] || []).concat(typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off' ? NourishBuiltins.forMeal(m) : [])]));
         lastPlanPools = plan.pools;
@@ -4410,7 +4493,7 @@ async function swapFromSources(dayIndex, mealType) {
         const inWeek = NourishPlanner.dishList(daysData.flatMap(d => MEAL_TYPES.map(t => d && d[t] && d[t].name).filter(Boolean)));
         const others = MEAL_TYPES.filter(t => t !== mealType).map(t => day[t]).filter(Boolean);
         const taken = new Set(others.map(NourishPlanner.mainProtein).concat(others.map(NourishPlanner.mainVeg)).filter(Boolean));
-        const share = NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(mealType)] * (Number(settings.calorie_target) || 2000);
+        const share = NourishPlanner.splitOf(settings)[MEAL_TYPES.indexOf(mealType)] * dayKcalTarget(dayIndex);
         const scorer = tasteScorer();
         const recent = NourishPlanner.dishList(recentPlanDishes());
         const fits = (pools[mealType] || []).filter(r => !inWeek.has(r.name) && !taken.has(NourishPlanner.mainProtein(r)) && !taken.has(NourishPlanner.mainVeg(r)) && !slotCheck(r, mealType, dayIndex))

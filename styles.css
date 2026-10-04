@@ -1566,3 +1566,13 @@ a.settings-button { display: flex; text-decoration: none; }
 .learned-summary { padding: 4px 4px 14px; }
 .learned-summary p { margin: 0 0 6px; line-height: 1.5; }
 #recipeSheet .rate-row { padding: 0 var(--s-5); }
+
+/* Weekly calories: the week view on the Plan screen and the big-day rows in Settings. */
+.week-card .week-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: var(--s-2); }
+.week-day { display: flex; flex-direction: column; align-items: center; padding: 6px 2px; border-radius: 10px; background: var(--surface-2, rgba(127,127,127,.08)); font-size: var(--fs-caption, 12px); min-width: 0; }
+.week-day .num { font-weight: 600; }
+.week-day small { opacity: .7; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.week-day.is-today { outline: 2px solid var(--accent); }
+.week-day.big { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.settings-row.big-day { display: grid; grid-template-columns: 1.4fr 1fr auto; gap: var(--s-2); align-items: center; }
+.settings-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-2); }

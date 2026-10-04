@@ -646,7 +646,11 @@
         const isFav = r => favList.names().length > 0 && favList.has(r.name);
         let favUsed = 0;
         const leftovers = settings.allow_leftovers === 'on';
-        const targets = targetsOf(settings);
+        const baseTargets = targetsOf(settings);
+        // Weekly mode: each day can have its own calories (settings.day_kcal, from weeklyTargets);
+        // protein and fiber stay the same every day.
+        const targetsFor = d => (Array.isArray(settings.day_kcal) && settings.day_kcal[d] > 0 ? Object.assign({}, baseTargets, { kcal: settings.day_kcal[d] }) : baseTargets);
+        let targets = baseTargets;
         const split = splitOf(settings);
         const on = m => split[MEALS.indexOf(m)] > 0;
         const used = dishList();                 // this plan: never twice
@@ -678,6 +682,8 @@
         const missing = [];
         const report = [];
         for (let d = 0; d < days; d++) {
+            targets = targetsFor(d);
+            ctx.targets = targets;
             const top = {};
             MEALS.forEach((m, i) => {
                 const kcal = targets.kcal * split[i];
@@ -751,7 +757,7 @@
                 ctx.sourceCount[sourceKey(r)] = (ctx.sourceCount[sourceKey(r)] || 0) + 1;
                 if (isFattyFish(r)) { ctx.hadFish = true; ctx.fishDay = ctx.fishDay || `day ${d + 1} ${m}: ${r.name}`; }
             });
-            addSnacks(day, settings, d, people, exclude, snackExtras);
+            addSnacks(day, Object.assign({}, settings, { calorie_target: targets.kcal }), d, people, exclude, snackExtras);
             const snackKcal = (day.snacks || []).reduce((t, x) => t + x.nutrition.calories, 0);
             // A day with a gap is sized to its own meals' shares only (the AI fills the gap later).
             const target = items.length === MEALS.filter(on).length ? targets.kcal - snackKcal : items.reduce((t, it) => t + it.want, 0);
@@ -759,7 +765,7 @@
             out.push(day);
             report.push(dayTotals(day));
         }
-        return { days: out, missing, report, targets, split, rejected, fattyFish: ctx.fishDay || '' };
+        return { days: out, missing, report, targets: baseTargets, split, rejected, fattyFish: ctx.fishDay || '' };
     }
     // One meal made about `kcal` lighter: oil and sugar first, then a smaller portion (never below
     // 60% of what it was). Seasoning stays.
@@ -809,12 +815,14 @@
     // in the plan, always fitting the slot), then is sized again. Returns the days and what changed.
     function keepToTargets(days, { pools = {}, settings = {}, people = 1, exclude, weekday, tolerance = 0.1, already = [] } = {}) {
         const recent = dishList(already);
-        const targets = targetsOf(settings);
+        const base = targetsOf(settings);
         const split = splitOf(settings);
         const used = dishList(days.flatMap(d => MEALS.map(m => d && d[m] && d[m].name).filter(Boolean)));
         const changes = [];
         const out = days.map((day, d) => {
             if (!day) return day;
+            const targets = Array.isArray(settings.day_kcal) && settings.day_kcal[d] > 0 ? Object.assign({}, base, { kcal: settings.day_kcal[d] }) : base;
+            const daySettings = targets === base ? settings : Object.assign({}, settings, { calorie_target: targets.kcal });
             let cur = day;
             for (let round = 0; round < 3; round++) {
                 const total = dayTotals(cur).kcal;
@@ -835,7 +843,7 @@
                 if (!pick) break;
                 changes.push(`day ${d + 1}: ${Math.round(total)} kcal against ${targets.kcal}; ${worst.m} "${cur[worst.m].name}" → "${pick.r.name}"`);
                 used.add(pick.r.name);
-                cur = fitDay(Object.assign({}, cur, { [worst.m]: JSON.parse(JSON.stringify(pick.r)) }), settings, people);
+                cur = fitDay(Object.assign({}, cur, { [worst.m]: JSON.parse(JSON.stringify(pick.r)) }), daySettings, people);
             }
             return cur;
         });
@@ -852,6 +860,34 @@
         MEALS.forEach(m => add(day[m]));
         (Array.isArray(day.snacks) ? day.snacks : []).forEach(add);
         return t;
+    }
+
+    // === A WEEKLY CALORIE BUDGET ===
+    // Weekly mode: the week's budget is the daily target × 7. "Big days" (a weekday and its calories)
+    // get what was set; the other days share what's left evenly. No day goes under 75% of the normal
+    // daily target: if the big days would need that, the other days stay at 75% and the week ends up
+    // over budget, which the person is shown and must confirm. bigDays: [{ weekday 0–6 (Monday = 0), kcal }];
+    // startWeekday: the weekday of the plan's first day. Returns { perDay, budget, floor, planned, overBy, floorHit, message }.
+    const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    function weeklyTargets({ target, bigDays = [], startWeekday = 0, days = 7 }) {
+        const base = Number(target) || 2000;
+        const budget = base * days;
+        const floor = Math.round(base * 0.75);
+        const big = new Map();
+        (bigDays || []).forEach(b => { if (b && b.weekday >= 0 && b.weekday <= 6 && Number(b.kcal) > 0) big.set(Number(b.weekday), Math.round(Number(b.kcal))); });
+        const wd = i => (startWeekday + i) % 7;
+        const bigTotal = Array.from({ length: days }, (_, i) => big.get(wd(i)) || 0).reduce((a, b) => a + b, 0);
+        const others = Array.from({ length: days }, (_, i) => i).filter(i => !big.has(wd(i)));
+        let each = others.length ? Math.round((budget - bigTotal) / others.length) : 0;
+        const floorHit = others.length > 0 && each < floor;
+        if (floorHit) each = floor;
+        const perDay = Array.from({ length: days }, (_, i) => big.get(wd(i)) || each);
+        const planned = perDay.reduce((a, b) => a + b, 0);
+        const overBy = Math.max(0, planned - budget);
+        const message = floorHit
+            ? `Your big days add up to more than the week can spare: the other days would drop below ${floor} kcal (75% of your ${base} kcal). Nourish keeps them at ${floor} kcal, so this week would be ${overBy} kcal over your budget of ${budget} kcal.`
+            : big.size ? `Big days: ${[...big.entries()].map(([d, k]) => `${WEEKDAYS[d]} ${k} kcal`).join(', ')}. The other days get ${each} kcal each, so the week stays at ${budget} kcal.` : '';
+        return { perDay, budget, floor, planned, overBy, floorHit, each, message, weekdays: Array.from({ length: days }, (_, i) => WEEKDAYS[wd(i)]) };
     }
 
     // === PROTEIN IN EVERY MEAL ===
@@ -1206,7 +1242,7 @@
         }).join('');
     }
 
-    const api = { balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);
