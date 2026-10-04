@@ -789,7 +789,10 @@
                         searches++;
                         ctx.stats.searches++;
                         try {
-                            list = (await searchSite(ctx, t.site, t.q, t.meal, page)).slice(0, 12);
+                            // The whole list is kept (a category page has 20–30 recipes): only its
+                            // first 12 were ever looked at, so once those were in the library the
+                            // site gave nothing new (BBC Good Food: 77 links, 1 new recipe).
+                            list = (await searchSite(ctx, t.site, t.q, t.meal, page)).slice(0, 60);
                             siteWorked(ctx, t.site.id);
                             searchCache[key] = { at: ctx.now(), links: list };
                         } catch (e) {
