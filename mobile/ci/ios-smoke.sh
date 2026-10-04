@@ -289,11 +289,21 @@ import json; r = json.load(open('$PROBE')); assert r['ok'], r; s = json.loads(r[
 json.dump(s['days'][:2], open('saved-days.json', 'w')); print('Saved before the kill:', len(s['days']), 'days')" || fail "the plan wasn't saved day by day"
 sleep 3   # let WebKit write localStorage to disk
 
-echo "== 6b. Relaunch: the plan continues by itself from the saved day"
+echo "== 6b. Relaunch: the plan continues by itself from the saved day; part-way, Nourish goes to the background for 45 s, then is reopened and finishes"
+# One plan for both checks (being killed, and being sent to the background): a second 7-day plan
+# with the tiny test model on this Mac took another 40 minutes.
+probe "await new Promise(r => { const t = setInterval(() => { const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null'); if (!p || (p.days || []).length >= 3 || p.failed) { clearInterval(t); r(); } }, 1000); });
+  return JSON.stringify({ days: (JSON.parse(localStorage.getItem('nourish_plan_progress') || '{}').days || []).length });" 3600
+echo "-- sending Nourish to the background for 45 s"
+xcrun simctl launch "$UDID" com.apple.Preferences
+sleep 45
+sleep 3   # let WebKit write localStorage (the plan and the activity log) to disk
+echo "-- reopening Nourish; the plan should continue from its saved day"
 probe "await new Promise(r => { const t = setInterval(() => { const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null'); if ((!planJob && daysData.length === 7 && !p) || (p && p.failed)) { clearInterval(t); r(); } }, 1000); });
   const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null');
   if (p && p.failed) throw new Error('The plan stopped: ' + p.failed + ' | ' + activityLog.filter(l => l.area === 'plan').slice(-12).map(l => l.level + ' ' + l.msg).join(' | '));
-  return JSON.stringify({ days: daysData, log: activityLog.filter(l => l.area === 'plan').map(l => l.level + ' ' + l.msg) });" 3600
+  return JSON.stringify({ days: daysData, log: activityLog.filter(l => l.area === 'plan').map(l => l.level + ' ' + l.msg),
+    bg: activityLog.filter(l => /background|Background|paused|Paused|Found a plan|Day [0-9] done|Screen stays/.test(l.msg)).map(l => new Date(l.t).toISOString().slice(11, 19) + ' ' + l.level + ' ' + l.msg) });" 3600
 python3 - "$PROBE" <<'PY' || fail "the plan didn't continue correctly after the app was killed"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
@@ -322,36 +332,11 @@ for i, day in enumerate(v["days"]):
 flagged = sum(1 for d in v["days"] for t in ("breakfast", "lunch", "dinner") if d[t].get("incomplete"))
 print(f"Meals marked 'may be incomplete' (expected with this tiny test model): {flagged} of 21")
 print("Resumed after the kill at day", len(saved) + 1, "and kept the first", len(saved), "days")
+print("Background and resume lines:")
+print("\n".join(v["bg"]))
+print("Background-time lines:", sum("background" in l.lower() for l in v["bg"]))
 PY
 cp "$PROBE" shots/ios-plan-probe.json
-
-echo "== 6c. In the background part-way through a plan: the time iOS gives (logged), then the plan is finished"
-# simctl can't reliably bring a running app back to the front (earlier runs kept logging "in the
-# background" after "simctl launch"), so after 45 s away the app is reopened the way iOS would after
-# closing it: the plan continues from its last saved day.
-start_probe "localStorage.removeItem('nourish_plan_progress');
-  runPlanJob({ kind: 'plan', origin: 'sheet', messages: [{ role: 'system', content: planSystemPrompt() },
-    { role: 'user', content: 'Goal: eat balanced. Generate the 7-day meal plan JSON.' }] });
-  return 'started';"
-for i in $(seq 1 120); do [ -f "$PROBE" ] && break; sleep 1; done
-sleep 20
-echo "-- sending Nourish to the background for 45 s"
-xcrun simctl launch "$UDID" com.apple.Preferences
-sleep 45
-sleep 3   # let WebKit write localStorage (the plan and the activity log) to disk
-echo "-- reopening Nourish; the plan should continue from its saved day"
-probe "await new Promise(r => { const t = setInterval(() => { const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null'); if ((!planJob && daysData.length === 7 && !p) || (p && p.failed)) { clearInterval(t); r(); } }, 1000); });
-  const p = JSON.parse(localStorage.getItem('nourish_plan_progress') || 'null');
-  if (p && p.failed) throw new Error('The plan stopped: ' + p.failed + ' | ' + activityLog.filter(l => l.area === 'plan').slice(-12).map(l => l.level + ' ' + l.msg).join(' | '));
-  return JSON.stringify({ days: daysData.length, log: activityLog.filter(l => /background|Background|paused|Paused|Found a plan|Day [0-9] done|Screen stays/.test(l.msg)).map(l => new Date(l.t).toISOString().slice(11, 19) + ' ' + l.level + ' ' + l.msg) });" 3600
-python3 - "$PROBE" <<'PY' || fail "the plan didn't finish after a trip to the background"
-import json, sys
-r = json.load(open(sys.argv[1])); assert r["ok"], r
-v = json.loads(r["value"])
-print("\n".join(v["log"]))
-assert v["days"] == 7, v["days"]
-print("Background-time lines:", sum("background" in l.lower() for l in v["log"]))
-PY
 
 echo "== 6d. The default Generate (real recipes first, the phone's AI fills gaps): time for 7 days (not a pass/fail check: it needs the live recipe sites)"
 probe "localStorage.removeItem('nourish_plan_progress'); const t0 = Date.now();
