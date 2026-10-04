@@ -588,15 +588,73 @@ async function aiSubstitute(run, recipeName, avoid) {
 // The output format for the one-line description. Written raw: "\x00-\x1F" must reach the model as
 // those characters, not as real control characters. 0.1.10 had a plain string here, so the format
 // held a NUL byte, the phone's AI read it cut short, and every description failed in 0.0 s.
-const DESCRIBE_GRAMMAR = String.raw`root ::= [A-Z] [^"\\\x00-\x1F]{20,140} [.!]`;
+// Up to 200 characters (0.1.11 allowed 140, and a sentence that ran longer was cut off there:
+// "…topped with coarse.").
+const DESCRIBE_GRAMMAR = String.raw`root ::= [A-Z] [^"\\\x00-\x1F]{20,200} [.!]`;
+const DESCRIBE_MAX = 203;
+// Words that name a food, a kind of dish or a way of cooking: a description may only use the ones
+// the recipe itself has ("pan con tomate" is not a "savory pancake").
+const DISH_KINDS = ['pancake', 'crepe', 'omelette', 'omelet', 'frittata', 'stew', 'soup', 'curry', 'salad', 'taco', 'burrito', 'pie', 'cake', 'bread', 'toast', 'sandwich', 'wrap', 'casserole',
+    'risotto', 'pasta', 'noodle', 'dumpling', 'pizza', 'quiche', 'tart', 'muffin', 'smoothie', 'porridge', 'chili', 'flatbread', 'fritter', 'skewer', 'kebab', 'gratin', 'bake', 'burger', 'pudding'];
+const COOKING = ['grill', 'roast', 'fry', 'fried', 'bake', 'baked', 'smok', 'brais', 'steam', 'poach', 'sear', 'simmer', 'char', 'toast', 'saut', 'caramel', 'blacken', 'broil', 'barbecue', 'bbq', 'slow-cook', 'pickl', 'cur'];
+const GENERIC_FOOD = /^(herb|spice|seasoning|vegetable|veggie|green|flavor|flavour|aromatic|protein|grain|dish|meal|sauce|dressing|topping|garnish)$/;
+let foodWordsCache = null;
+function foodWords() {
+    if (foodWordsCache) return foodWordsCache;
+    const out = new Set(DISH_KINDS);
+    const N = typeof NourishNutrition !== 'undefined' ? NourishNutrition : (typeof require === 'function' ? (() => { try { return require('./nutrition.js'); } catch (e) { return null; } })() : null);
+    const foods = (N && N.FOODS) || {};
+    // Food names only: words like "toasted", "smoked" or "ground" in the table's names are how
+    // something is prepared, judged by COOKING instead.
+    Object.keys(foods).forEach(k => [k].concat(foods[k].a || []).forEach(name => String(name).toLowerCase().split(/[^a-z]+/).forEach(w => { if (w.length >= 4 && !/(ed|ing)$/.test(w) && !/^(ground|fresh|whole|light|dark|plain|sweet|large|small|baby|mini|extra|instant|frozen|canned|reduced|lean|low|free|style|blend|mix|powder|white|black|green|yellow|brown)$/.test(w)) out.add(stem(w)); })));
+    ['tomato', 'potato', 'chicken', 'beef', 'pork', 'lamb', 'fish', 'shrimp', 'salmon', 'tofu', 'egg', 'cheese', 'bean', 'lentil', 'rice', 'mushroom', 'pepper', 'onion', 'garlic', 'lemon', 'lime', 'avocado', 'corn', 'spinach', 'kale']
+        .forEach(w => out.add(stem(w)));
+    foodWordsCache = out;
+    return out;
+}
+function stem(w) { return String(w).toLowerCase().replace(/(ies)$/, 'y').replace(/(oes|ches|shes|xes)$/, m => m.slice(0, -2)).replace(/([^s])s$/, '$1'); }
+// Why a description can't be shown, or '' when it's fine: cut off, too long, or it mentions a food
+// or a way of cooking the recipe doesn't have.
+function descriptionProblem(text, meal) {
+    const t = String(text || '').trim();
+    if (t.length < 20) return 'too short';
+    if (!/[.!]$/.test(t) || t.length >= DESCRIBE_MAX) return 'cut off';
+    const last = (t.replace(/[.!]+$/, '').match(/([A-Za-z'-]+)$/) || [])[1] || '';
+    if (/^(and|or|with|of|the|a|an|in|on|to|for|by|its|their|your|until|then|plus|topped|served|coarse|fine|fresh|some|into|over|from|at|as|is|are)$/i.test(last)) return 'cut off';
+    if ((t.match(/\(/g) || []).length !== (t.match(/\)/g) || []).length) return 'cut off';
+    const recipe = `${meal.name || ''} ${(meal.ingredients || []).join(' ')} ${(meal.steps || []).join(' ')}`.toLowerCase();
+    const have = new Set(recipe.split(/[^a-z]+/).filter(Boolean).map(stem));
+    const vocab = foodWords();
+    const invented = t.toLowerCase().split(/[^a-z]+/).filter(w => w.length >= 3).map(stem)
+        .find(w => vocab.has(w) && !have.has(w) && !GENERIC_FOOD.test(w) && !recipe.includes(w));
+    if (invented) return `mentions "${invented}", which isn't in the recipe`;
+    const how = COOKING.find(c => t.toLowerCase().split(/[^a-z-]+/).some(w => w.startsWith(c)) && !recipe.includes(c));
+    if (how) return `says it's "${how}…", which the recipe doesn't do`;
+    return '';
+}
+// What the AI is given: the real ingredients (just the foods) and how it's cooked.
+function recipeFacts(meal) {
+    const foods = (meal.ingredients || []).map(l => String(l).replace(/\([^)]*\)/g, ' ').replace(/,.*$/, '')
+        .replace(/^[\d\s/.½¼¾⅓⅔⅛-]+/, '').replace(/^(cups?|tbsp|tsp|tablespoons?|teaspoons?|g|kg|ml|l|oz|lbs?|pounds?|grams?|cans?|tins?|cloves?|pinch|handful|slices?|bunch|x)\b\.?\s*(of\s+)?/i, '').trim())
+        .filter(x => x.length > 1).slice(0, 14);
+    const method = (meal.steps || []).slice(0, 4).map(st => String(st).split(/[.!]\s/)[0]).join('. ').slice(0, 320);
+    return { foods, method };
+}
 async function aiDescribe(run, meal) {
     if (!run || !meal) return '';
-    const text = await run([{ role: 'system', content: 'You write one short, appetizing sentence about a dish. No names of people or days.' },
-        { role: 'user', content: `Describe "${meal.name}" (made with ${(meal.ingredients || []).slice(0, 6).join(', ')}) in one sentence of at most 20 words.` }],
-    { grammar: DESCRIBE_GRAMMAR, maxTokens: 60, id: 'describe' });
+    const f = recipeFacts(meal);
+    const text = await run([{ role: 'system', content: 'You write one short, appetizing sentence about a dish. Use only the ingredients and cooking methods given; never add others. No names of people or days.' },
+        { role: 'user', content: `Dish: "${meal.name}"\nIngredients: ${f.foods.join(', ')}\nMethod: ${f.method}\nDescribe it in one complete sentence of at most 22 words.` }],
+    { grammar: DESCRIBE_GRAMMAR, maxTokens: 90, id: 'describe' });
     const t = String(text || '').trim();
     const people = personNames();
-    return t && !people.some(p => t.toLowerCase().indexOf(p) >= 0) && !DISH_DAY_WORDS.test(t) ? t.slice(0, 160) : '';
+    if (!t || people.some(p => t.toLowerCase().indexOf(p) >= 0) || DISH_DAY_WORDS.test(t)) return '';
+    const problem = descriptionProblem(t, meal);
+    if (problem) {
+        if (typeof logPlan === 'function') logPlan(`The AI's description of "${meal.name}" wasn't used (${problem}): ${t}`, null, 'debug');
+        return '';
+    }
+    return t;
 }
 // A description made from the recipe itself, for when no AI is set up or it fails: its main
 // ingredients, how it's cooked and how long it takes. "Chicken thighs, new potatoes and lemon,
@@ -1618,5 +1676,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { DESCRIBE_GRAMMAR, describeFromRecipe, repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
+    module.exports = { DESCRIBE_GRAMMAR, describeFromRecipe, descriptionProblem, recipeFacts, repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }

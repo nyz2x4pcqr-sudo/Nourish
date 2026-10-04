@@ -3244,7 +3244,8 @@ function normalizeMeal(m) {
         leftover: m.leftover ? true : undefined,
         builtin: m.builtin ? true : undefined,
         adapted: Array.isArray(m.adapted) && m.adapted.length ? m.adapted.map(String).slice(0, 4) : undefined,
-        description: m.description ? String(m.description).slice(0, 200) : undefined,
+        // Whole sentences only: a description is never shown cut off mid-sentence.
+        description: m.description ? (NourishImport.wholeSentences(String(m.description), 260) || undefined) : undefined,
         rating: m.rating && Number(m.rating.value) > 0 ? { value: toNumber(m.rating.value), count: toNumber(m.rating.count) || 0 } : undefined,
         cuisine: m.cuisine ? String(m.cuisine).slice(0, 30) : undefined,
         // The meal the recipe's source files it under: part of telling a breakfast from a dinner.

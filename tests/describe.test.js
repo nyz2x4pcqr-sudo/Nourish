@@ -39,3 +39,32 @@ test('a description made in code from the recipe when there is no AI or it fails
     assert.match(salad, /^Chickpeas, cherry tomatoes and (1\/2 )?cucumber, no cooking needed\./);
     assert.equal(O.describeFromRecipe({ name: 'Water', ingredients: ['1 cup water'], steps: [] }), '');
 });
+
+// 0.1.12: descriptions were cut off mid-sentence ("…topped with coarse.") and sometimes invented
+// (pan con tomate described as a "savory pancake").
+test('a description that is cut off, too long or invents foods or cooking is never shown', () => {
+    const { descriptionProblem } = require('../ondevice.js');
+    const pan = { name: 'Pan con tomate', ingredients: ['4 slices sourdough bread', '2 ripe tomatoes', '1 garlic clove', '2 tbsp olive oil', 'flaky sea salt'], steps: ['Toast the bread.', 'Rub with garlic, grate the tomatoes over it, drizzle with oil and season.'] };
+    assert.equal(descriptionProblem('Toasted sourdough rubbed with garlic and topped with grated ripe tomato and olive oil.', pan), '');
+    assert.match(descriptionProblem('A savory pancake with tomatoes and garlic.', pan), /pancake/);
+    assert.match(descriptionProblem('Crispy bread topped with coarse.', pan), /cut off/);
+    assert.match(descriptionProblem('Grilled bread with tomato, garlic and olive oil, a Spanish classic.', pan), /grill/);
+    assert.match(descriptionProblem('Toasted bread with tomato and garlic and oil and more and more and more ' + 'x'.repeat(150) + '.', pan), /cut off/);
+    assert.match(descriptionProblem('Toasted bread with tomato and', pan), /cut off/);
+});
+
+test('the source\'s own description is used when the recipe has one, as whole sentences', () => {
+    const I = require('../importer.js');
+    // Just enough of a browser's DOMParser for the importer's text cleaning (as tools/sites-diagnose.js does).
+    if (typeof global.DOMParser === 'undefined') global.DOMParser = class { parseFromString(h) { const t = String(h).replace(/<[^>]+>/g, ' '); return { body: { textContent: t }, documentElement: { textContent: t }, querySelectorAll: () => [], querySelector: () => null }; } };
+    assert.equal(I.wholeSentences('Our quick shakshuka is spicy and filling. Serve it with crusty bread for mopping up the sauce, or with rice if you prefer a heartier meal for the whole family to share.', 120),
+        'Our quick shakshuka is spicy and filling.');
+    assert.equal(I.wholeSentences('A very long first sentence that goes on and on without any end in sight because it keeps adding more and more words to it', 60), '');
+    const page = '<html><head><script type="application/ld+json">' + JSON.stringify({ '@type': 'Recipe', name: 'Lentil Soup', description: 'A warming red lentil soup with cumin and lemon. Ready in 30 minutes.',
+        recipeIngredient: ['1 cup red lentils', '1 onion', '1 tsp cumin', '1 lemon'], recipeInstructions: ['Simmer everything for 25 minutes.', 'Blend and finish with lemon.'] }) + '</script></head><body></body></html>';
+    const doc = { querySelectorAll: sel => (/ld\+json/.test(sel) ? [{ textContent: page.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1] }] : []), querySelector: () => null };
+    const r = I.structuredRecipe(doc, 'https://example.com/lentil-soup');
+    assert.equal(r.description, 'A warming red lentil soup with cumin and lemon. Ready in 30 minutes.');
+    const F = require('../finder.js');
+    assert.equal(F.tidy(Object.assign({}, r, { source_url: 'https://example.com/lentil-soup' })).description, r.description);
+});

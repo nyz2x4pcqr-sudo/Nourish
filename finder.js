@@ -89,6 +89,9 @@
             nutrition: !r.builtin && r.nutrition && Number(r.nutrition.calories) > 0 ? r.nutrition : null,
             category: Array.isArray(r.category) ? r.category.join(', ') : String(r.category || ''),
             keywords: r.keywords ? String(r.keywords).slice(0, 200) : undefined,
+            // The source's own description of the dish (whole sentences only), shown instead of one
+            // written by the AI.
+            description: r.description && !/\.\.\.$|…$/.test(String(r.description).trim()) ? String(r.description).slice(0, 240) : undefined,
             rating: r.rating && Number(r.rating.value) > 0 ? { value: Number(r.rating.value), count: Number(r.rating.count) || 0 } : undefined,
             source_url: r.source_url || r.url || undefined,
             source_name: r.source_name || (source && source.name) || undefined,

@@ -121,6 +121,8 @@
         const servings = firstNumber(recipe.recipeYield);
         return {
             name: cleanText(recipe.name).slice(0, 150), time_minutes: total,
+            // The site's own short description of the dish, as complete sentences (never cut mid-way).
+            description: wholeSentences(cleanText(recipe.description || ''), 220) || undefined,
             active_minutes: active > 0 && total && active < total ? active : undefined,
             servings: servings >= 1 && servings <= 100 ? Math.round(servings) : null,
             nutrition: Object.keys(nutrition).some(k => nutrition[k] != null) ? nutrition : null,
@@ -136,6 +138,16 @@
                 return value > 0 && value <= 5 ? { value: Math.round(value * 10) / 10, count: count > 0 ? Math.round(count) : 0 } : undefined;
             })(),
         };
+    }
+    // The first complete sentences of a text, at most `max` characters; '' when even the first
+    // sentence is longer (a cut-off sentence is never shown).
+    function wholeSentences(text, max = 220) {
+        const t = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!t) return '';
+        const parts = t.match(/[^.!?]+[.!?]+(?:["'”’)]+)?(?=\s|$)/g) || [];
+        let out = '';
+        for (const p of parts) { const next = (out + ' ' + p.trim()).trim(); if (next.length > max) break; out = next; }
+        return out.length >= 20 ? out : '';
     }
     function fromJsonLd(doc, url) {
         let recipe = null;
@@ -431,7 +443,7 @@
         return finish(recipe, 'ai', doc);
     }
 
-    const api = { importUrl, platformOf, hostOf, normalizeUrl, structuredRecipe, readableText, looksBlocked, jsonAfter, cleanText, isoMinutes, firstNumber, recipeSteps, PLATFORM_NAMES };
+    const api = { wholeSentences, importUrl, platformOf, hostOf, normalizeUrl, structuredRecipe, readableText, looksBlocked, jsonAfter, cleanText, isoMinutes, firstNumber, recipeSteps, PLATFORM_NAMES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.NourishImport = api;
 })(typeof window !== 'undefined' ? window : this);
