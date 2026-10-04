@@ -79,13 +79,55 @@ echo "== 1c. Recipe books in the Recipe Books folder (a PDF and an EPUB, names w
 RB="$DATA/Documents/Recipe Books"
 (cd "$GITHUB_WORKSPACE" 2>/dev/null || cd ../..; node tools/make-sample-epub.js "$RB/Easy Mornings (2nd ed) – Recetas.epub" && node tools/make-sample-pdf.js "$RB/Puerto Rican Cookery (Sample).pdf")
 printf 'kindle' > "$RB/Old book.azw3"
+# A scanned cookbook: pages that are only pictures (no text in the PDF), an older layout (capital
+# titles, lettered ingredient groups, numbered steps, two recipes on a page) and a page in two
+# columns. The pictures are drawn in the app's own web view; the PDF is put together here.
+probe "const pages = [
+    { cols: false, lines: ['OLD ISLAND COOKERY', '', 'ARROZ CON GANDULES', '(Rice with Pigeon Peas)', '(8 servings)', 'A', '1/4 pound salt pork, diced', '1 tablespoon annatto oil', 'B', '1 onion, chopped', '2 cups pigeon peas', '3 cups rice', '4 cups water',
+      '1. In a caldero, brown the salt pork in the annatto oil.', '2. Add the ingredients in B and bring to a boil.', '3. Cover and cook over low heat for 30 minutes.', '',
+      'SOPA DE PLATANO', '(Plantain Soup)', '2 green plantains', '6 cups chicken stock', '1 teaspoon salt', '1. Grate the plantains and stir into the boiling stock.', '2. Simmer for 20 minutes, stirring often, and serve hot.'] },
+    { cols: true, title: ['TOSTONES', '(Twice-Fried Plantains)'], left: ['3 green plantains', '4 cups water', '1 tablespoon salt', '2 cups vegetable oil'],
+      right: ['1. Peel the plantains and cut into', 'slices one inch thick.', '2. Soak the slices in the salted', 'water for 15 minutes and drain.', '3. Fry for 7 minutes, flatten each', 'slice and fry again until golden.'] }];
+  const out = [];
+  for (const p of pages) {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754; const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#111'; g.font = '30px Georgia';
+    if (!p.cols) p.lines.forEach((t, i) => g.fillText(t, 90, 110 + i * 56));
+    else { p.title.forEach((t, i) => g.fillText(t, 420, 110 + i * 56)); p.left.forEach((t, i) => g.fillText(t, 90, 300 + i * 56)); p.right.forEach((t, i) => g.fillText(t, 660, 300 + i * 56)); }
+    out.push(c.toDataURL('image/jpeg', 0.85).replace(/^data:[^,]*,/, ''));
+  }
+  return JSON.stringify(out);" 60
+python3 - "$PROBE" "$RB/Old Island Cookery (scanned).pdf" <<'PY' || fail "couldn't make the scanned sample PDF"
+import base64, json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+jpegs = [base64.b64decode(x) for x in json.loads(r["value"])]
+objs = []
+def add(b): objs.append(b); return len(objs)
+kids = []
+pages_id = 1 + len(jpegs) * 3
+for j in jpegs:
+    img = add(b"<< /Type /XObject /Subtype /Image /Width 1240 /Height 1754 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length %d >>\nstream\n" % len(j) + j + b"\nendstream")
+    draw = b"q 595 0 0 842 0 0 cm /Im0 Do Q"
+    content = add(b"<< /Length %d >>\nstream\n" % len(draw) + draw + b"\nendstream")
+    kids.append(add(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 595 842] /Contents %d 0 R /Resources << /XObject << /Im0 %d 0 R >> >> >>" % (pages_id, content, img)))
+assert add(b"<< /Type /Pages /Kids [" + b" ".join(b"%d 0 R" % k for k in kids) + b"] /Count %d >>" % len(kids)) == pages_id
+cat = add(b"<< /Type /Catalog /Pages %d 0 R >>" % pages_id)
+out = bytearray(b"%PDF-1.4\n"); offs = []
+for i, o in enumerate(objs):
+    offs.append(len(out)); out += b"%d 0 obj\n" % (i + 1) + o + b"\nendobj\n"
+x = len(out)
+out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % o for o in offs)
+out += b"trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, cat, x)
+open(sys.argv[2], "wb").write(out); print("Scanned sample PDF:", len(out), "bytes,", len(jpegs), "pages of pictures")
+PY
 probe "localStorage.removeItem(LIBRARY_KEY); libraryIndexCache = null;
   await new Promise(r => { const t = setInterval(() => { if (recipeDBReady) { clearInterval(t); r(); } }, 200); });
   await indexLibrary();
   const idx = libraryIndex().files || {};
   return JSON.stringify({ db: recipeDB.backend.kind, count: recipeDB.count(), books: recipeDB.books().map(b => b.title + ': ' + b.count),
     files: Object.keys(idx).map(f => f + ' → ' + libraryFileStatus(f)), recipes: recipeDB.all().map(r => r.name + ' | ' + r.source_name),
-    kindle: (idx['Recipe Books/Old book.azw3'] || {}).note || '', errors: libraryState.notes });" 180
+    kindle: (idx['Recipe Books/Old book.azw3'] || {}).note || '', errors: libraryState.notes,
+    tostones: (recipeDB.all().find(r => /Tostones/.test(r.name)) || {}).steps || [] });" 300
 python3 - "$PROBE" <<'PY' || fail "the phone couldn't read the recipe books"
 import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
@@ -95,8 +137,15 @@ assert v["count"] > 0, v
 names = " ".join(v["recipes"])
 assert "Spinach & Feta Omelette | From your book: Easy Mornings & Evenings" in names, "EPUB not read"
 assert "Arroz con Pollo" in names and "Habichuelas Guisadas" in names, "PDF not read"
+scanned = [f for f in v["files"] if "scanned" in f]
+print("Scanned PDF:", scanned)
+assert scanned and "scanned pages read" in scanned[0], "the scanned PDF wasn't read with text recognition"
+for dish in ("Arroz con Gandules", "Sopa de Platano", "Tostones"):
+    assert dish in names, ("not found in the scanned PDF", dish)
 assert not any("/private" in f or f.startswith("/") for f in v["files"]), "a path still starts wrong"
 assert "Kindle" in v["kindle"], v
+print("Tostones steps (a page in two columns, read column by column):", v["tostones"])
+assert len(v["tostones"]) == 3 and "Peel the plantains" in v["tostones"][0], v["tostones"]
 PY
 echo "== 1d. After a restart the book recipes are still there, and the books aren't read again"
 probe "await new Promise(r => { const t = setInterval(() => { if (recipeDBReady) { clearInterval(t); r(); } }, 200); });
@@ -108,7 +157,7 @@ r = json.load(open(sys.argv[1])); assert r["ok"], r
 v = json.loads(r["value"]); print(v)
 assert v["count"] >= 5 and v["plan"] >= 4 and v["saved"] == 0, v
 PY
-rm -f "$RB/Easy Mornings (2nd ed) – Recetas.epub" "$RB/Puerto Rican Cookery (Sample).pdf" "$RB/Old book.azw3"
+rm -f "$RB/Easy Mornings (2nd ed) – Recetas.epub" "$RB/Puerto Rican Cookery (Sample).pdf" "$RB/Old book.azw3" "$RB/Old Island Cookery (scanned).pdf"
 
 echo "== 2. Saved data survives a restart"
 probe "return localStorage.getItem('probe_saved');" 60
