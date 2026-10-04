@@ -35,10 +35,24 @@
     function textOf(r) { return `${r.name || ''} ${(r.category || []).join ? (r.category || []).join(' ') : r.category || ''}`; }
 
     // Which meals a recipe can be: { breakfast, lunch, dinner, why }.
+    // Articles and guides ("How To Build a Better Smoothie", "15 Easy Breakfast Ideas", "A Guide to
+    // Meal Prep") are not recipes, even when the page carries recipe data.
+    const ARTICLE = /^(how to (build|choose|store|stock|plan|meal prep|pick|use|start)|(a |the )?(beginner'?s |ultimate |complete |quick )?guide\b|(the )?best ways? to|ways to|tips (for|on|to)|everything you need|what (is|are|to eat)|why you should|\d+\s+(easy |quick |healthy |best |simple |delicious )*(ways|tips|ideas|recipes|things|meals|breakfasts|lunches|dinners|smoothies)\b)|\b(guide|101|tips|ideas|round-?up|meal plan)$/i;
+    // A smoothie or shake is a breakfast only when it's filling enough to be a meal; otherwise it's a drink.
+    const SMOOTHIE = /\b(smoothies?|shakes?|frappes?)\b/i;
+    const SMOOTHIE_MEAL = { calories: 250, protein_g: 10 };
     function mealFit(r) {
         const name = String(r.name || '').replace(/\([^)]*\)/g, ' ').replace(/[!?.]+/g, ' ').replace(/\s+/g, ' ').trim();
         const cat = String(Array.isArray(r.category) ? r.category.join(' ') : r.category || '').toLowerCase();
         const ings = (r.ingredients || []).join(' ').toLowerCase();
+        if (ARTICLE.test(name)) return { breakfast: false, lunch: false, dinner: false, why: 'an article or guide, not a recipe' };
+        if (SMOOTHIE.test(name) && !/\bbowls?\b/i.test(name)) {
+            const n = r.nutrition;
+            if (n && Number(n.calories) > 0 && (Number(n.calories) < SMOOTHIE_MEAL.calories || Number(n.protein_g || 0) < SMOOTHIE_MEAL.protein_g)) {
+                return { breakfast: false, lunch: false, dinner: false, why: `a drink (a smoothie of ${Math.round(n.calories)} kcal and ${Math.round(n.protein_g || 0)} g protein is too light to be a meal)` };
+            }
+            return { breakfast: true, lunch: false, dinner: false, why: '' };
+        }
         const sweetHeavy = /\b(sugar|honey|maple|chocolate|syrup)\b/.test(ings) && !/\b(salt|garlic|onion|soy|pepper)\b/.test(ings);
         // Judged by what the dish is: a site's "Dessert" tag doesn't count when it also files it under a meal.
         const mealCat = /breakfast|brunch|lunch|dinner|main|entr[eé]e|supper/.test(cat);
@@ -48,13 +62,16 @@
         // dish itself counts, not what it comes with or in.
         const dish = name.replace(/\s+(with|in|on|over|served with|and a side of)\s+.*$/i, '').trim();
         if (NOT_A_MEAL.test(dish) || /\b(sauce|drink|beverage|condiment|dressing)\b/.test(cat)) return { breakfast: false, lunch: false, dinner: false, why: 'not a meal' };
+        // A dish that says it's a breakfast and is made with eggs ("Breakfast Enchiladas", "Breakfast
+        // Casserole") is a breakfast, whatever else it is.
+        const eggBreakfast = /\b(breakfast|brunch)\b/i.test(name) && (/\beggs?\b/.test(ings) || /\beggs?\b/i.test(name));
         const savoryPorridge = SAVORY_PORRIDGE.test(name) && MEAT_WORD.test(name);
         // A complete egg dish ("Eggs in Spicy Tomato Sauce", "Baked Eggs with Spinach") is a breakfast too.
         const eggDish = /\beggs?\b/i.test(dish) && !COMPONENT.test(name);
-        const brk = !savoryPorridge && (BREAKFAST.test(name) || eggDish || /breakfast|brunch/.test(cat));
+        const brk = eggBreakfast || (!savoryPorridge && (BREAKFAST.test(name) || eggDish || /breakfast|brunch/.test(cat)));
         // A recipe the site files under breakfast only stays at breakfast.
         // But a roast or a pasta bake on a brunch list is still a main dish: judged by what it is.
-        const heavy = DINNER_ONLY.test(name);
+        const heavy = DINNER_ONLY.test(name) && !eggBreakfast;
         const mainDish = heavy || HEAVY_LUNCH.test(name);
         const brkOnlyCat = /breakfast|brunch/.test(cat) && !/lunch|dinner|main|entr[eé]e|supper/.test(cat) && !mainDish;
         const onlyBrk = !savoryPorridge && (ONLY_BREAKFAST.test(name) || (brk && sweetHeavy) || brkOnlyCat || /\bbreakfast\b/i.test(name));

@@ -122,6 +122,7 @@
         const dish = name.replace(/\s+(with|in|on|over|served with)\s+.*$/i, '').replace(/[^\x00-\x7f]+/g, ' ').replace(/\s+/g, ' ').trim();
         const mealish = /\b(main( course| dish)?|entr[eé]e|dinner|lunch|breakfast|brunch|supper)\b/i.test(cat);
         // Smoothies stay: they're a breakfast here (the breakfast check decides).
+        // Smoothies and shakes are judged by planner.mealFit: a breakfast when filling enough, else a drink.
         if ((DRINK.test(dish) && !/smoothie|shake/i.test(dish)) || (/\b(drinks?|beverages?|cocktails?)\b/i.test(cat) && !mealish)) return 'a drink';
         if (/\bcurd\b|\b(applesauce|apple sauce|jam|jelly|compote)$/i.test(dish) || (/\b(desserts?|sweets?|baking|baked goods|treats?)\b/i.test(cat) && !mealish)) return 'a dessert';
         if ((CONDIMENT.test(dish.split(/\s+/).slice(-1)[0] || '') && !/\b(bowls?|pasta|noodles|chicken|salmon|tofu|steak|shrimp)\b/i.test(dish)) || (/\b(sauces?|condiments?|dressings?|dips?|spreads?|marinades?|seasonings?)\b/i.test(cat) && !mealish)) return 'a sauce or condiment';
@@ -687,8 +688,15 @@
         let sites = S.usable().filter(s => enabled(s.id));
         (o.customSites || []).forEach(d => {
             const domain = String(d).toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+            // A site that was checked and left out (its terms forbid automated apps, or it refuses
+            // them) stays out even when typed in here: its reason is logged instead.
+            const known = S.SITES.find(s => S.hostMatches(s, domain));
+            if (known && known.status === 'dropped') { (ctx.stats.notUsed || (ctx.stats.notUsed = [])).push(`${known.name}: ${known.why}`); return; }
             if (domain && !sites.some(s => s.domain === domain)) sites.push({ id: 'custom:' + domain, name: domain, domain, search: 'wp', custom: true });
         });
+        // Every site that isn't searched, and why ("Allrecipes: terms forbid scrapers and robots"), for the log.
+        ctx.stats.notUsed = (ctx.stats.notUsed || []).concat(S.SITES.filter(s => s.status === 'dropped').map(s => `${s.name}: ${s.why}`)).filter((x, i, a) => a.indexOf(x) === i);
+        ctx.stats.switchedOff = S.usable().filter(s => !enabled(s.id)).map(s => s.name);
         ctx.stats.blocked = sites.filter(s => !siteOk(ctx, s.id)).map(s => `${s.id} (${(ctx.failures[s.id] || {}).why || 'failed'})`);
         sites = sites.filter(s => siteOk(ctx, s.id));
         const seed = Math.floor(ctx.now() / DAY);

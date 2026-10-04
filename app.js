@@ -1786,6 +1786,9 @@ const SETTINGS_RENDERERS = {
                 'Real recipes have been cooked and tested by people, and most sites list their own nutrition, which Nourish checks against USDA data. On a phone, writing a whole week with the AI can take 20 minutes or more; finding recipes takes seconds.')),
             ...settingsGroup('Recipe sites', NourishSources.usable().map(sourceRow),
                 help('Switch off any site you don’t want recipes from.', 'Each site was checked: it publishes recipe data for search engines, its robots.txt allows reading recipe pages, and its terms don’t forbid it. Nourish only reads the few pages a plan needs, a few at a time, and remembers them so it doesn’t ask twice. A site that fails is skipped quietly.')),
+            ...settingsGroup('Sites Nourish doesn\'t use', NourishSources.SITES.filter(x => x.status === 'dropped').map(x => h('div', { class: 'settings-row settings-row-stack' },
+                h('span', { class: 'settings-label', text: x.name }), h('span', { class: 'settings-hint', text: `${x.domain} · ${x.why}` }))),
+                help('These sites were checked and are left alone. Allrecipes, HelloFresh and the other big names say in their terms of use that automated apps may not read them, or they turn apps away.', 'Nourish never tries to get around a site\'s rules. You can try adding a recipe from one of these sites yourself, one at a time: paste its link in "Add a recipe from a link" on the Plan screen.')),
             ...settingsGroup('Recipe databases', NourishSources.SOURCES.filter(x => x.kind === 'api').map(sourceRow).concat([
                 secretRow('spoonacular_api_key', 'Spoonacular key', 'optional, free key'),
             ]), help('TheMealDB works without a key. Spoonacular is an optional extra that needs a free key.', 'An API is a service apps can ask directly for recipes. Get a free Spoonacular key at spoonacular.com/food-api, then paste it here.')),
@@ -4121,7 +4124,7 @@ async function runSmartPlan(likes, hates) {
         const pm = st.perMeal || {};
         nlog('plan', `Found ${st.recipes} usable recipes in ${st.seconds} s (${st.searches} searches, ${st.pages} pages, ${st.fromCache} from your recipe library of ${st.library || 0}); ` +
             `good new ones per meal: breakfast ${(pm.breakfast || {}).web || 0}, lunch ${(pm.lunch || {}).web || 0}, dinner ${(pm.dinner || {}).web || 0} (plus Nourish's own); ${plan.missing.length} meals still to fill`,
-            { perSource: st.perSource, perMeal: pm, turnedAway: st.why, failed: st.failed, leftAlone: st.blocked, excluded: st.excluded, bland: st.bland });
+            { perSource: st.perSource, perMeal: pm, turnedAway: st.why, failed: st.failed, leftAlone: st.blocked, switchedOff: st.switchedOff, notUsed: st.notUsed, excluded: st.excluded, bland: st.bland });
         if (localPlanCancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         if (plan.missing.length) await fillMissingMeals(plan);
         const planSettings = Object.assign({}, settings, { goal: prefs.goal });

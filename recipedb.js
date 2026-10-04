@@ -138,7 +138,7 @@
         const kindWhy = F && F.notAMeal ? F.notAMeal(r) : '';
         const fit = PL ? PL.mealFit(r) : { breakfast: false, lunch: false, dinner: false };
         const meals = ['breakfast', 'lunch', 'dinner'].filter(m => fit[m]);
-        const kind = NOT_MEAL_KIND[kindWhy] || (meals.length ? 'meal' : /dessert/.test(fit.why || '') ? 'dessert' : 'other');
+        const kind = NOT_MEAL_KIND[kindWhy] || (meals.length ? 'meal' : /dessert/.test(fit.why || '') ? 'dessert' : /drink/.test(fit.why || '') ? 'drink' : /article/.test(fit.why || '') ? 'article' : 'other');
         const prof = PL ? PL.recipeProfile(r) : null;
         const out = Object.assign(r, {
             meal_types: meals,

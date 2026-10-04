@@ -58,3 +58,35 @@ test('a vegetable curry, stew or veggie pie is a dinner even without meat or fis
     const sauce = PL.mealFit({ name: 'Hollandaise sauce', category: '', ingredients: ['3 egg yolks', '150g butter', '1 tbsp lemon juice'] });
     assert.ok(!sauce.breakfast && !sauce.lunch && !sauce.dinner && sauce.why);
 });
+
+// 0.1.12
+test('articles and guides are not recipes, even with recipe data', () => {
+    for (const name of ['How To Build a Better Smoothie', '15 Easy Breakfast Ideas', 'A Beginner\'s Guide to Meal Prep', 'Healthy Lunch Tips', 'The Best Ways to Cook Salmon']) {
+        const f = PL.mealFit({ name, ingredients: ['1 cup milk', '1 banana', '2 tbsp oats'], steps: ['Blend.'] });
+        assert.ok(!f.breakfast && !f.lunch && !f.dinner, name);
+        assert.match(f.why, /article or guide/, name);
+    }
+    assert.ok(PL.mealFit({ name: 'Smoked Salmon Bagel', ingredients: ['1 bagel', '2 oz smoked salmon', '1 tbsp cream cheese'] }).breakfast);
+});
+
+test('smoothies follow one rule: a breakfast only when filling enough to be a meal, otherwise a drink', () => {
+    const smoothie = (name, calories, protein_g) => PL.mealFit({ name, ingredients: ['1 cup milk', '1 banana'], nutrition: { calories, protein_g, carbs_g: 30, fat_g: 5 } });
+    assert.ok(smoothie('Peanut Butter Banana Protein Smoothie', 420, 28).breakfast);
+    assert.ok(smoothie('Green Smoothie', 310, 14).breakfast);
+    const light = smoothie('Strawberry Smoothie', 140, 4);
+    assert.ok(!light.breakfast && !light.lunch && !light.dinner);
+    assert.match(light.why, /a drink .*too light to be a meal/);
+    const shake = smoothie('Mango Lassi Shake', 180, 6);
+    assert.ok(!shake.breakfast);
+    // Never a lunch or dinner either way.
+    assert.ok(!smoothie('Big Protein Shake', 600, 40).dinner);
+});
+
+test('a dish that says breakfast and is made with eggs is a breakfast (Breakfast Enchiladas were turned away as a dinner dish)', () => {
+    const f = PL.mealFit({ name: 'Breakfast Enchiladas', ingredients: ['8 eggs', '6 flour tortillas', '1 cup salsa', '1 cup cheddar', '1/2 lb sausage'], steps: ['Bake.'] });
+    assert.ok(f.breakfast, JSON.stringify(f));
+    assert.ok(!f.dinner);
+    // Enchiladas without the word breakfast are still a dinner.
+    const d = PL.mealFit({ name: 'Chicken Enchiladas', ingredients: ['2 cups chicken', '8 tortillas', '2 cups enchilada sauce'] });
+    assert.ok(d.dinner && !d.breakfast);
+});
