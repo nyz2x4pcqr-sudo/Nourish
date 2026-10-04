@@ -211,7 +211,7 @@
             // Recipes the planner may use: complete meals, not duplicates, not waiting for review.
             forPlanning() { return [...recipes.values()].filter(r => r.kind === 'meal' && !r.review && !r.duplicate_of && r.meal_types && r.meal_types.length); },
             // Everything else that's still food: drinks, desserts, sauces, sides (for snacks, extras, browsing and chat).
-            extras() { return [...recipes.values()].filter(r => r.kind !== 'meal' && !r.duplicate_of); },
+            extras() { return [...recipes.values()].filter(r => r.kind !== 'meal' && r.kind !== 'article' && !r.duplicate_of); },
             // Simple word search over names, ingredients, book and chapter.
             search(q, limit = 30) {
                 const words = String(q || '').toLowerCase().split(/[^a-z0-9à-ÿ]+/).filter(w => w.length > 2);

@@ -397,7 +397,8 @@ probe "const rows = [];
     let res = null, err = '';
     try { res = await NourishFinder.findRecipes(o); } catch (e) { err = e.message; }
     const f = store.nourish_source_failures ? (JSON.parse(store.nourish_source_failures)[site.id] || {}) : {};
-    rows.push({ id: site.id, recipes: res ? res.stats.recipes : 0, pages: res ? res.stats.pages : 0, seconds: Math.round((Date.now() - t0) / 1000), why: err || f.why || '', blocked: !!f.blocked });
+    rows.push({ id: site.id, recipes: res ? res.stats.recipes : 0, pages: res ? res.stats.pages : 0, seconds: Math.round((Date.now() - t0) / 1000), why: err || f.why || '', blocked: !!f.blocked,
+      away: res && res.stats.why ? Object.entries(res.stats.why).map(([k, n]) => k + ' ' + n).join(', ') : '' });
   }
   return JSON.stringify(rows);" 900
 python3 - "$PROBE" <<'PY' || echo "(site table skipped)"
@@ -405,7 +406,26 @@ import json, sys
 r = json.load(open(sys.argv[1])); assert r["ok"], r
 print("SITES FROM THE IPHONE APP (simulator on a cloud Mac, so a datacenter address, not a phone network):")
 for row in json.loads(r["value"]):
-    print(f"  {row['id']:<18} {row['recipes']:>3} recipes from {row['pages']:>2} pages in {row['seconds']:>3} s" + (f"  FAILED: {row['why']}{' (refuses the app)' if row['blocked'] else ''}" if row['why'] else ""))
+    print(f"  {row['id']:<18} {row['recipes']:>3} recipes from {row['pages']:>2} pages in {row['seconds']:>3} s" + (f"  FAILED: {row['why']}{' (refuses the app)' if row['blocked'] else ''}" if row['why'] else "") + (f"  | turned away: {row['away']}" if row.get('away') else ""))
+PY
+
+echo "== 6f. The big sites Nourish leaves alone (their terms forbid automated apps, or they refuse them): only their robots.txt is read, from inside the iPhone app, to report what they say (not pass/fail)"
+probe "const o = finderOptions('', ''); const rows = [];
+  for (const site of NourishSources.SITES.filter(s => s.status === 'dropped' && /mealkit|general/.test(s.group))) {
+    let status = 0, rules = '';
+    try { const r = await o.fetchPage('https://' + (site.domain.startsWith('www.') ? site.domain : 'www.' + site.domain) + '/robots.txt'); status = r.status; const body = String(r.body || '');
+      const star = (body.split(/\\n(?=user-agent)/i).find(b => /user-agent:\\s*\\*/i.test(b)) || '');
+      rules = /disallow:\\s*\\/\\s*(\\n|$)/i.test(star) ? 'all robots: everything off limits' : /disallow:/i.test(star) ? 'all robots: some paths off limits' : body ? 'no rule for all robots' : '';
+      if (/gptbot|claudebot|anthropic|ccbot|google-extended/i.test(body)) rules += '; names AI crawlers'; } catch (e) { rules = e.message; }
+    rows.push({ name: site.name, status, rules, why: site.why });
+  }
+  return JSON.stringify(rows);" 300
+python3 - "$PROBE" <<'PY' || echo "(big-site table skipped)"
+import json, sys
+r = json.load(open(sys.argv[1])); assert r["ok"], r
+print("BIG SITES NOURISH LEAVES ALONE (robots.txt read from inside the iPhone app):")
+for row in json.loads(r["value"]):
+    print(f"  {row['name']:<22} robots.txt HTTP {row['status']}: {row['rules'] or '-'} | left alone because: {row['why']}")
 PY
 
 echo "== 7. Screen headers stay below the status bar on all five tabs"
