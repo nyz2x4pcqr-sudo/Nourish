@@ -59,6 +59,7 @@ async function diagnose(site) {
         console.log(`\n=== ${site.id} (${site.domain}): ${stats.recipes} recipes [${got}] from ${stats.searches} searches, ${stats.pages} pages${fail}`);
         lines.forEach(l => console.log('  ' + l));
         if (stats.why) console.log('  turned away: ' + JSON.stringify(stats.why));
+        if (stats.unread) console.log('  lines the calculator could not read:\n    ' + stats.unread.join('\n    '));
         summary.push(`${site.id.padEnd(20)} ${String(stats.recipes).padStart(3)} recipes  ${got}${fail}`);
     }
     console.log('\n=== SUMMARY\n' + summary.join('\n'));

@@ -133,7 +133,11 @@
             } catch (e) { r.nutrition = null; }
         }
         if (!r.nutrition || !(Number(r.nutrition.calories) > 0)) why.push('nutrition could not be worked out');
-        else if (unmatched > r.ingredients.length * 0.4) why.push('the calculator can\'t read several ingredients');
+        else {
+            const major = (r.nutrition_unmatched || []).filter(l => !(N.isMinor && N.isMinor(l)));
+            if (major.length >= 3 || major.length > r.ingredients.length * 0.25) why.push(`the calculator can't read: ${major.slice(0, 3).join('; ')}`);
+            else if (unmatched) r.nutrition_approximate = true;
+        }
         // What kind of dish it is, and which meals it suits.
         const kindWhy = F && F.notAMeal ? F.notAMeal(r) : '';
         const fit = PL ? PL.mealFit(r) : { breakfast: false, lunch: false, dinner: false };

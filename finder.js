@@ -156,9 +156,19 @@
         // The source's numbers are per serving of the recipe as written; settle() checks them.
         if (r.nutrition && !(r.nutrition.calories > 0)) r.nutrition = null;
         N.settle(r);
+        // Lines the calculator can't read: kept in the log word for word. When they're all small
+        // (a teaspoon of something, a garnish, a sweetener), the recipe stays, its nutrition marked
+        // approximate; it's turned away only when real amounts of food can't be read.
+        const unread = r.nutrition_unmatched || [];
+        if (unread.length) {
+            const site = r.source_name || r.source_id || '?';
+            const list = ctx.stats.unread || (ctx.stats.unread = []);
+            unread.forEach(l => { if (list.length < 60) list.push(`${site}: ${l}`); });
+        }
+        const major = unread.filter(l => !N.isMinor(l));
+        if (r.nutrition_basis === 'calculated' && major.length && (major.length >= 3 || major.length > r.ingredients.length * 0.25)) { ctx.stats.unsure++; return turnedAway(ctx, 'ingredients the calculator can\'t read'); }
+        if (unread.length) r.nutrition_approximate = true;
         if (!r.nutrition || !(r.nutrition.calories > 40)) return turnedAway(ctx, 'too few calories to be a meal');
-        const unmatched = (r.nutrition_unmatched || []).length;
-        if (r.nutrition_basis === 'calculated' && unmatched > r.ingredients.length * 0.4) { ctx.stats.unsure++; return turnedAway(ctx, 'ingredients the calculator can\'t read'); }
         const fit = PL.mealFit(r);
         if (!fit.breakfast && !fit.lunch && !fit.dinner) return turnedAway(ctx, fit.why || 'not a meal');
         r._fit = fit;

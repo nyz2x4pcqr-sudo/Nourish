@@ -14,7 +14,7 @@
     // Words that describe how an ingredient is cut or prepared, not what it is.
     const PREP = /\b(chopped|finely|roughly|coarsely|thinly|thickly|diced|minced|sliced|grated|shredded|crushed|peeled|seeded|deseeded|cored|trimmed|halved|quartered|cubed|julienned|torn|packed|loosely|lightly|heaping|level|rounded|softened|melted|room temperature|cold|warm|hot|cooked|uncooked|raw|fresh|freshly|frozen|thawed|drained|rinsed|and rinsed|divided|optional|to taste|for serving|for garnish|garnish|plus more|or more|as needed|about|approximately|large|medium|small|extra|boneless|skinless|skin-on|bone-in|organic|good quality|low[- ]sodium|reduced[- ]sodium|unsalted|salted|whole|ground|dried|toasted|roasted|fat[- ]free|lean|of|the|a|an)\b/g;
     // Herbs, spices and seasonings: almost no calories, so a missing amount doesn't matter.
-    const FREE = /\b(salt|pepper|cumin|paprika|chili powder|chilli|cayenne|flakes|turmeric|coriander|cinnamon|oregano|basil|thyme|rosemary|parsley|cilantro|dill|mint|chives|bay lea|garlic powder|onion powder|nutmeg|cloves|cardamom|allspice|star anise|anise|cinnamon sticks?|seasoning|spice|herbs?|zest|vanilla|water|ice|cooking spray|nonstick spray|baking soda|baking powder|yeast)\b/;
+    const FREE = /\b(salt|pepper|cumin|paprika|chili powder|chilli|cayenne|flakes|turmeric|coriander|cinnamon|oregano|basil|thyme|rosemary|parsley|cilantro|dill|mint|chives|bay lea|garlic powder|onion powder|nutmeg|cloves|cardamom|allspice|star anise|anise|cinnamon sticks?|seasoning|spice|herbs?|zest|vanilla|water|ice|cooking spray|nonstick spray|baking soda|bicarbonate of soda|baking powder|yeast|stevia|splenda|truvia|sweetener|sucralose|erythritol|monk fruit|mrs dash|msg|food colou?ring|liquid smoke|bitters)\b/;
 
     // Everyday names the USDA table doesn't have, read as the closest food it does.
     const EXTRA = {
@@ -22,9 +22,32 @@
         'sub rolls': 'bread', 'sub roll': 'bread', 'hoagie rolls': 'bread', 'dinner rolls': 'bread', 'crusty bread': 'bread', 'baguette': 'bread',
         'bean sprouts': 'cabbage', 'red chilies': 'jalapeno', 'red chili': 'jalapeno', 'thai chilies': 'jalapeno', 'green chilies': 'jalapeno', 'chilies': 'jalapeno',
         'chili bean paste': 'miso', 'doubanjiang': 'miso', 'arugula': 'lettuce', 'rocket': 'lettuce',
+        // British names.
+        'natural yogurt': 'yogurt', 'stock cube': 'chicken broth', 'stock pot': 'chicken broth', 'gem lettuce': 'lettuce', 'little gem': 'lettuce',
+        'plain flour': 'flour', 'self raising flour': 'flour', 'self-raising flour': 'flour', 'wholemeal flour': 'flour', 'caster sugar': 'sugar', 'demerara sugar': 'brown sugar',
+        'icing sugar': 'powdered sugar', 'beetroot': 'beet', 'beetroots': 'beet', 'back bacon': 'bacon', 'streaky bacon': 'bacon', 'gammon': 'ham', 'prawns': 'shrimp', 'king prawns': 'shrimp',
+        'single cream': 'half and half', 'soured cream': 'sour cream', 'mince': 'ground beef', 'beef mince': 'ground beef', 'pork mince': 'ground pork', 'turkey mince': 'ground turkey', 'lamb mince': 'ground lamb',
+        'tenderstem': 'broccoli', 'sweetcorn': 'corn', 'mangetout': 'snow peas', 'sugar snap peas': 'snow peas', 'chestnut mushrooms': 'mushrooms', 'baby plum tomatoes': 'cherry tomatoes',
     };
+    // Common foods the USDA extract doesn't carry (per 100 g: kcal, protein, carbs, fat; USDA SR
+    // Legacy values or a product's label), added when missing. British names map onto them below.
+    const SUPPLEMENT = {
+        rutabaga: { n: [37, 1.1, 8.6, 0.2], a: ['swede', 'swedes'], u: [[386, 'medium'], [140, 'cup']] },
+        turnip: { n: [28, 0.9, 6.4, 0.1], a: ['turnips'], u: [[122, 'medium'], [130, 'cup']] },
+        'vegetable spread': { n: [535, 0.2, 0.7, 59], a: ['margarine', 'buttery spread', 'light spread', 'spread', 'smart balance', 'flora'], u: [[14, 'tbsp'], [5, 'tsp']] },
+        buttermilk: { n: [40, 3.3, 4.8, 0.9], a: [], u: [[245, 'cup']] },
+        'swiss chard': { n: [19, 1.8, 3.7, 0.2], a: ['chard', 'rainbow chard'], u: [[36, 'cup'], [48, 'leaf']] },
+        molasses: { n: [290, 0, 74.7, 0.1], a: ['black treacle', 'treacle'], u: [[20, 'tbsp']] },
+        'golden syrup': { n: [325, 0, 81, 0], a: ['cane syrup'], u: [[21, 'tbsp']] },
+        quark: { n: [72, 12, 4, 0.2], a: [], u: [[225, 'cup']] },
+        'yeast extract': { n: [260, 39, 24, 0.5], a: ['marmite', 'vegemite'], u: [[5, 'tsp']] },
+        'creme fraiche': { n: [292, 2.4, 2.8, 30], a: ['crème fraîche'], u: [[15, 'tbsp']] },
+        'double cream': { n: [340, 2.8, 2.7, 36], a: ['heavy cream', 'whipping cream'], u: [[15, 'tbsp'], [238, 'cup']] },
+    };
+    Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });
+
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
-    const EACH = { 'rice cake': 9, ginger: 8, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20 };
+    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20 };
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
     // A cup of something light and airy (chips, flakes) weighs far less than a cup of water.
     const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60 };
@@ -48,7 +71,8 @@
         return word.endsWith('s') ? word.slice(0, -1) : word;
     }
     function clean(text) {
-        return String(text || '').toLowerCase()
+        return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')   // crème fraîche → creme fraiche
+            .replace(/\byoghurts?\b/g, 'yogurt').replace(/\b(courgettes?)\b/g, 'zucchini').replace(/\baubergines?\b/g, 'eggplant')
             .replace(/\([^)]*\)/g, ' ').replace(/,.*$/, ' ')        // "(about 2 cups)", ", chopped"
             .replace(/[^a-z0-9%' -]+/g, ' ').replace(/\s+/g, ' ').trim();
     }
@@ -119,13 +143,37 @@
         return hit ? { grams: hit[2], label: hit[3] } : null;
     }
 
+    // Amounts without a number: "small bunch coriander", "a handful of rocket", "a knob of butter".
+    const WORD_AMOUNT = [
+        [/^(?:a\s+)?(?:small\s+|large\s+)?bunch(?:\s+of)?\s+/i, 1, 'bunch'], [/^(?:a\s+(?:small\s+|large\s+)?|small\s+|large\s+)?handful(?:\s+of)?\s+/i, 1, 'handful'],
+        [/^(?:a\s+)?(?:small\s+|large\s+)?knob(?:\s+of)?\s+/i, 10, 'g'], [/^(?:a\s+)?splash(?:\s+of)?\s+/i, 15, 'ml'], [/^(?:a\s+)?drizzle(?:\s+of)?\s+/i, 5, 'ml'],
+        [/^(?:a\s+)?(?:few\s+)?sprigs?(?:\s+of)?\s+/i, 2, 'sprig'], [/^(?:a\s+)?pinch(?:\s+of)?\s+/i, 1, 'pinch'], [/^(?:a\s+)?dash(?:\s+of)?\s+/i, 1, 'dash'],
+    ];
+    // "Juice of 1 lemon", "juice of ½ lime": the juice, about 45 g a lemon, 30 g a lime, 80 g an orange.
+    const JUICE = /^(?:the\s+)?juice\s+(?:of|from)\s+(\d+(?:\.\d+)?|½|half|a|an|one|two|1\/2)\s+(?:\w+\s+)?(lemons?|limes?|oranges?)\b/i;
     function readLine(line, servings = 1) {
-        const raw = String(line || '').trim();
+        let raw = String(line || '').trim();
         if (!raw) return null;
-        const item = Units ? Units.splitIngredient(raw) : { qty: null, unit: '', text: raw };
+        const juice = raw.match(JUICE);
+        if (juice) {
+            const n = { '½': 0.5, half: 0.5, '1/2': 0.5, a: 1, an: 1, one: 1, two: 2 }[juice[1].toLowerCase()] || Number(juice[1]) || 1;
+            const fruit = juice[2].toLowerCase().replace(/s$/, '');
+            const key = `${fruit} juice`;
+            if (FOODS[key]) return { grams: n * ({ lemon: 45, lime: 30, orange: 80 }[fruit]), key, free: false };
+        }
+        if (/^(?:the\s+)?(?:finely\s+)?(?:grated\s+)?zest\s+(?:of|from)\b/i.test(raw)) return { grams: 0, key: null, free: true };
+        let item = Units ? Units.splitIngredient(raw) : { qty: null, unit: '', text: raw };
+        if (item.qty == null) {
+            const w = WORD_AMOUNT.find(([re]) => re.test(raw));
+            if (w) item = { qty: w[1], unit: w[2], text: raw.replace(w[0], '') };
+        }
+        // A range ("2-3 cloves", "200-250 g") counts as its middle.
+        if (item.qtyHigh) item = Object.assign({}, item, { qty: (item.qty + item.qtyHigh) / 2 });
         const words = (item.text || raw) + (item.note ? ' ' + item.note : '');
-        const m = matchFood(words) || matchFood(raw);
-        const free = FREE.test(clean(words)) && (!m || (FOODS[m.key].n[0] < 400 && /salt|pepper|spice|seasoning|herb|water|zest|vanilla|powder|flakes|leaves/.test(m.key + ' ' + clean(words))));
+        // "fat-free, reduced-sodium chicken broth": the words after a comma can be the food itself.
+        const m = matchFood(words) || matchFood(raw) || matchFood(words.replace(/,/g, ' '));
+        const low = !m || FOODS[m.key].n[0] < 400 || /spray/.test(m.key);
+        const free = FREE.test(clean(words)) && low;
         if (!m) return free ? { grams: 0, key: null, free: true } : { unmatched: true, line: raw };
         const food = m.food;
         let qty = item.qty;
@@ -145,7 +193,7 @@
             else if (unit === 'can') grams = qty * (portionGrams(food, ['can']) || 400);
             else if (unit === 'slice') grams = qty * (portionGrams(food, ['slice']) || 30);
             else if (unit === 'pinch' || unit === 'dash') grams = qty * 0.4;
-            else if (unit === 'handful') grams = qty * 30;
+            else if (unit === 'handful') grams = qty * (FOODS[m.key].n[0] < 60 ? 20 : 30);
             else if (unit === 'bunch') grams = qty * 100;
             else if (unit === 'sprig') grams = qty * 1;
             else if (unit === 'head') grams = qty * (portionGrams(food, ['head']) || 500);
@@ -165,6 +213,21 @@
             return { unmatched: true, line: raw, key: m.key };
         }
         return { grams: Math.max(0, grams), key: m.key, free };
+    }
+
+    // A line that hardly changes a recipe's calories when it can't be read: no amount, a small one
+    // (a teaspoon, a pinch, a few grams), or a garnish, seasoning or sweetener. A recipe whose only
+    // unreadable lines are like this is kept, with its nutrition marked approximate.
+    function isMinor(line) {
+        const raw = String(line || '');
+        const t = clean(raw);
+        if (FREE.test(t) || /\b(to taste|for (serving|garnish|garnishing|decoration|dusting|greasing)|optional|to serve|as needed|garnish)\b/i.test(raw)) return true;
+        const item = Units ? Units.splitIngredient(raw) : { qty: null };
+        if (item.qty == null) return !/\b(cups?|lbs?|pounds?|kg|chicken|beef|pork|lamb|fish|salmon|rice|pasta|noodles|potato(es)?|beans|cheese|cream|butter|oil)\b/i.test(t);
+        if (['tsp', 'pinch', 'dash', 'sprig'].indexOf(item.unit) >= 0) return item.qty <= 3;
+        if (item.unit === 'g' || item.unit === 'ml') return item.qty <= 10;
+        if (item.unit === 'tbsp') return item.qty <= 1 && !/\b(oil|butter|sugar|honey|syrup|cream|mayo|peanut|nut butter|tahini)\b/.test(t);
+        return false;
     }
 
     // { calories, protein_g, carbs_g, fat_g } per serving, the lines that couldn't be matched, and
@@ -230,7 +293,7 @@
         } catch (e) { return null; }
     }
 
-    const api = { calculate, settle, readLine, matchFood, lookupOnline, FOODS };
+    const api = { calculate, settle, readLine, matchFood, isMinor, lookupOnline, FOODS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishNutrition = api;
 })(typeof window !== 'undefined' ? window : globalThis);

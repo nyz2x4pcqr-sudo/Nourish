@@ -23,13 +23,16 @@
     const IMPERIAL = ['tsp', 'tbsp', 'cup', 'fl oz', 'pint', 'quart', 'oz', 'lb'];
     const METRIC = ['ml', 'l', 'g', 'kg'];
 
-    // "1 1/2", "1/2", "1.5", "1½", "½", "2-3" (→ 2) at the start of text.
+    // "1 1/2", "1/2", "1.5", "1½", "½", "2-3" (→ 2, high 3) at the start of text.
     function parseNumber(text) {
         const frac = text.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)/);
         if (frac && Number(frac[3])) return { value: (frac[1] ? Number(frac[1]) : 0) + Number(frac[2]) / Number(frac[3]), length: frac[0].length };
-        const m = text.match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?(?:\s*(?:-|–|to)\s*\d+(?:\.\d+)?)?/);
+        const m = text.match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)(?![\d/]))?/);
         if (!m || !(m[1] || m[2])) return null;
-        return { value: (m[1] ? Number(m[1]) : 0) + (m[2] ? FRACTIONS[m[2]] : 0), length: m[0].length };
+        const value = (m[1] ? Number(m[1]) : 0) + (m[2] ? FRACTIONS[m[2]] : 0);
+        const out = { value, length: m[0].length };
+        if (m[3] && Number(m[3]) > value) out.high = Number(m[3]);
+        return out;
     }
 
     // "1/2 cup green curry paste" → { qty: 0.5, unit: 'cup', text: 'green curry paste' }.
@@ -49,8 +52,9 @@
             const key = word.toLowerCase().replace(/[.\s]/g, '');
             if (UNITS[key]) { unit = UNITS[key]; rest = rest.slice(word.length).replace(/^\.?\s*(of\s+)?/i, ''); }
         }
-        if (colon > 0) return { qty: num.value, unit, text: name, note: rest };
-        return { qty: num.value, unit, text: rest };
+        const high = num.high ? { qtyHigh: num.high } : {};
+        if (colon > 0) return Object.assign({ qty: num.value, unit, text: name, note: rest }, high);
+        return Object.assign({ qty: num.value, unit, text: rest }, high);
     }
 
     function formatQty(n) {
@@ -108,8 +112,15 @@
         const item = typeof line === 'object' && line ? line : splitIngredient(line);
         if (item.qty == null) return item.text;
         const c = convert(item.qty, item.unit, system);
-        const amount = formatAmount(c.qty, c.unit);
-        return item.note !== undefined ? `${item.text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${item.text}`.trim();
+        let amount = formatAmount(c.qty, c.unit);
+        // A range keeps both ends: "2–3 garlic cloves", "200–250 g" → "7–9 oz".
+        if (item.qtyHigh) {
+            const hi = convert(item.qtyHigh, item.unit, system);
+            amount = hi.unit === c.unit ? `${formatAmount(c.qty, '')}–${formatAmount(hi.qty, hi.unit)}` : `${amount}–${formatAmount(hi.qty, hi.unit)}`;
+        }
+        // An amount inside the words ("1 x 400g tin tomatoes") is shown in the chosen units too.
+        const text = /\d\s*(?:g|kg|ml|l|oz|lb)\b/i.test(item.text) ? convertText(item.text, system) : item.text;
+        return item.note !== undefined ? `${text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${text}`.trim();
     }
 
     const NUM = '(\\d+(?:\\.\\d+)?(?:\\s+\\d+\\/\\d+)?|\\d+\\/\\d+|\\d*[½¼¾⅓⅔⅛])';

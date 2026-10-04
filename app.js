@@ -4124,7 +4124,7 @@ async function runSmartPlan(likes, hates) {
         const pm = st.perMeal || {};
         nlog('plan', `Found ${st.recipes} usable recipes in ${st.seconds} s (${st.searches} searches, ${st.pages} pages, ${st.fromCache} from your recipe library of ${st.library || 0}); ` +
             `good new ones per meal: breakfast ${(pm.breakfast || {}).web || 0}, lunch ${(pm.lunch || {}).web || 0}, dinner ${(pm.dinner || {}).web || 0} (plus Nourish's own); ${plan.missing.length} meals still to fill`,
-            { perSource: st.perSource, perMeal: pm, turnedAway: st.why, failed: st.failed, leftAlone: st.blocked, switchedOff: st.switchedOff, notUsed: st.notUsed, excluded: st.excluded, bland: st.bland });
+            { perSource: st.perSource, perMeal: pm, turnedAway: st.why, failed: st.failed, leftAlone: st.blocked, switchedOff: st.switchedOff, notUsed: st.notUsed, unreadIngredients: st.unread, excluded: st.excluded, bland: st.bland });
         if (localPlanCancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         if (plan.missing.length) await fillMissingMeals(plan);
         const planSettings = Object.assign({}, settings, { goal: prefs.goal });
