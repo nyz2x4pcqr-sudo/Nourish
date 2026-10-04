@@ -3612,8 +3612,10 @@ function favoriteRecipes() {
 
 // === WHAT GOES WITH EVERY AI MEAL REQUEST ===
 // Called by mealAsk (ondevice.js) for every meal the AI writes or rewrites, on every AI.
-function mealGuidance({ type, d, cuisine, dish }) {
+function mealGuidance({ type, d, cuisine, dish, meal }) {
     const parts = [];
+    const technique = techniqueNotesFor(meal || { name: dish || '', ingredients: [] }, { type, cuisine });
+    if (technique) parts.push(technique);
     const notes = cookbookNotes([type, cuisine, dish, prefs.likes].filter(Boolean).join(' '));
     if (notes) parts.push(notes);
     // What the app has learned: only for AIs on this phone or the person's own PC, never a cloud AI.
@@ -3642,6 +3644,26 @@ function saveLibraryIndex(index) {
         const copy = keep === Infinity ? index : Object.assign({}, index, { files: Object.fromEntries(Object.entries(index.files || {}).map(([p, e]) => [p, Object.assign({}, e, { passages: (e.passages || []).slice(0, keep) })])) });
         try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(copy)); if (keep !== Infinity) nlog('library', `Storage is nearly full: keeping ${keep} cooking passages per file`, null, 'warn'); return; } catch (e) { /* try smaller */ }
     }
+}
+// Technique notes from the person's technique books for the AI writing or adapting a dish: the
+// 3–5 notes that match its ingredients, cooking methods and kind of dish, so its steps use the right
+// technique. '' when there are none.
+const NOTE_METHODS = { sear: /\bsear/, roast: /\broast/, braise: /\bbrais/, 'stir-fry': /\bstir[- ]?fr/, fry: /\bfr(y|ied)/, saute: /\bsaut/, grill: /\b(grill|bbq|barbecue)/, bake: /\bbak/, boil: /\bboil/,
+    simmer: /\bsimmer/, poach: /\bpoach/, steam: /\bsteam/, marinate: /\bmarinat/, season: /\bseason/, rest: /\brest\b/, knead: /\bknead/, whisk: /\bwhisk/, toast: /\btoast/, brown: /\bbrown/ };
+const NOTE_DISHES = { soup: /\bsoup/, stew: /\b(stew|casserole)/, sauce: /\bsauce/, salad: /\bsalad/, steak: /\bsteak/, roast: /\broast/, pasta: /\b(pasta|noodle|spaghetti)/, rice: /\b(rice|risotto|pilaf)/,
+    bread: /\b(bread|toast|flatbread)/, cake: /\b(cake|muffin|pancake)/, eggs: /\b(egg|omelet)/, fish: /\b(fish|salmon|cod|trout)/, curry: /\bcurr/, beans: /\b(bean|lentil|chickpea)/, vegetables: /\bvegetable/ };
+function techniqueNotesFor(meal, { type } = {}) {
+    if (!recipeDBReady || !recipeDB.noteCount || !recipeDB.noteCount()) return '';
+    const text = `${meal.name || ''} ${(meal.ingredients || []).join(' ')} ${(meal.steps || []).join(' ')}`.toLowerCase();
+    const ingredients = text.split(/[^a-z]+/).map(w => w.replace(/(es|s)$/, '')).filter(w => w.length > 2);
+    const methods = Object.keys(NOTE_METHODS).filter(k => NOTE_METHODS[k].test(text));
+    const dishes = Object.keys(NOTE_DISHES).filter(k => NOTE_DISHES[k].test(text));
+    const k = settings.active_provider === 'local' ? 3 : 5;
+    const found = recipeDB.notesFor({ words: text, ingredients, methods, dishes }, k);
+    if (!found.length) return '';
+    nlog('plan', `Technique notes for "${meal.name || type}": ${found.length} from ${[...new Set(found.map(n => n.book))].join(', ')}`, found.map(n => n.text), 'debug');
+    const max = settings.active_provider === 'local' ? 200 : 320;
+    return 'Technique notes from their own technique books (follow them in the steps where they apply): ' + found.map((n, i) => `(${i + 1}) ${n.text.slice(0, max)}`).join(' ');
 }
 // Notes from the person's cookbooks for the AI writing or adapting a meal: the 2–3 passages most
 // related to it (pairings, seasoning, technique), short so the prompt stays small on a phone.
@@ -3733,7 +3755,7 @@ function libraryKnown(fp) {
     return {
         id: b ? b.id : undefined, count: b ? b.count : (r.count || 0), title: (b && b.title) || r.title, author: (b && b.author) || r.author,
         note: r.stopped ? 'Stopped before the end. Tap Read again to read it.' : r.partial ? `Paused at ${r.partial.unit || 'part'} ${r.partial.at} of ${r.partial.total}` : (b ? '' : r.note),
-        failed: !b && r.failed, passages: r.passages, partial: r.partial,
+        failed: !b && r.failed, passages: r.passages, partial: r.partial, bookType: r.bookType,
     };
 }
 // A pause between pages of a scanned book when the phone gets hot (text recognition works hard).
@@ -3788,8 +3810,8 @@ async function indexLibrary({ quiet = true } = {}) {
             // A file already read (renamed or moved, or the list of files was lost): not read again.
             known: libraryKnown,
             // A big book: how far it has got, shown in Settings → Recipes (at most once a second).
-            progress: (path, done, total, chapter) => {
-                libraryState.progress = { path, done, total, chapter };
+            progress: (path, done, total, chapter, notes) => {
+                libraryState.progress = { path, done, total, chapter, notes };
                 if (settingsPage === 'sources' && Date.now() - shown > 1000) { shown = Date.now(); renderSettings(); }
             },
             cancelled: () => libraryState.cancel,
@@ -3799,6 +3821,11 @@ async function indexLibrary({ quiet = true } = {}) {
                 if (!recipeDBReady || !fp) return;
                 await recipeDB.recordFile(fp, { path, partial: state, stopped: undefined });
                 nlog('library', `${path}: paused at ${state.unit || 'part'} ${state.at} of ${state.total}`);
+            },
+            // Every so often, how far a big book got: if the app is closed, it carries on from there.
+            onCheckpoint: async (path, fp, state) => {
+                if (!recipeDBReady || !fp) return;
+                await recipeDB.recordFile(fp, { path, partial: state, stopped: undefined });
             },
             // Stopped: not read again by itself (Read again starts it over).
             onCancel: async (path, fp) => {
@@ -3843,7 +3870,13 @@ async function indexLibrary({ quiet = true } = {}) {
 // and in every case the record that it was read, so it's never read twice.
 async function saveLibraryEntry(path, e) {
     if (!recipeDBReady) return;
-    if (e.recipes && e.recipes.length) {
+    if (e.bookKind === 'technique' && Array.isArray(e.notes) && !e.saved) {
+        const book = await recipeDB.saveTechniqueBook({ id: e.fp, title: e.title, author: e.author, path, kind: NourishLibrary.kindOf(path) }, e.notes);
+        delete e.notes;
+        delete e.recipes;
+        e.bookId = book.id;
+        nlog('library', `"${book.title}" is a technique book: ${book.notes} technique notes saved for the AI to use${e.noText ? `; ${e.noText} pages or chapters without readable text were skipped` : ''}`);
+    } else if (e.recipes && e.recipes.length) {
         const book = await saveBookRecipes(path, e);
         nlog('library', `Saved ${book.count} recipe${book.count === 1 ? '' : 's'} from "${book.title}"${book.author ? ` by ${book.author}` : ''} into the recipe database` +
             ` (${book.meals || 0} meals for plans${book.others ? `, ${book.others} drinks, desserts, sauces and others` : ''}${book.review ? `, ${book.review} need review` : ''}${book.duplicates ? `, ${book.duplicates} already saved elsewhere` : ''})` +
@@ -3859,7 +3892,8 @@ async function saveLibraryEntry(path, e) {
         if (e.empty && /\.(epub|pdf|docx)$/i.test(path)) nlog('library', `${path}: no recipes saved. ${e.note}`, null, 'warn');
     }
     if (e.fp && !e.saved && !e.paused) {
-        await recipeDB.recordFile(e.fp, { path, title: e.title, author: e.author, count: e.count || 0, note: e.note || undefined, failed: e.failed || undefined, empty: e.empty || undefined,
+        if (e.noText && e.bookKind !== 'technique') nlog('library', `${path}: ${e.noText} pages or chapters had no readable text (pictures) and were skipped`);
+        await recipeDB.recordFile(e.fp, { path, title: e.title, author: e.author, count: e.count || 0, note: e.note || undefined, failed: e.failed || undefined, empty: e.empty || undefined, bookKind: e.bookKind || undefined, noteCount: e.noteCount || undefined,
             passages: e.passages && e.passages.length ? e.passages.slice(0, 250) : undefined, partial: undefined, stopped: undefined });
     }
     e.saved = true;
@@ -3963,10 +3997,11 @@ async function libraryLocation() {
 function libraryFileStatus(path) {
     const entry = (libraryIndex().files || {})[path];
     const p = libraryState.progress;
-    if (p && p.path === path) return `Reading… ${/^page /.test(p.chapter || '') ? p.chapter : `part ${p.done} of ${p.total}${p.chapter ? ` (${String(p.chapter).slice(0, 40)})` : ''}`}`;
+    if (p && p.path === path) return `Reading… ${p.total ? Math.round(p.done / p.total * 100) + '% · ' : ''}${/^page /.test(p.chapter || '') ? p.chapter : `part ${p.done} of ${p.total}${p.chapter ? ` (${String(p.chapter).slice(0, 40)})` : ''}`}${p.notes ? ` · ${p.notes} technique notes so far` : ''}`;
     if (!entry || libraryForce.has(path)) return libraryState.busy ? 'Reading…' : 'Waiting to be read';
     if (entry.failed) return `Failed: ${String(entry.note || 'it couldn\'t be read').replace(/^Couldn't read it: /, '')}`;
     if (entry.paused) return `${entry.note || 'Paused'}. Tap Carry on to continue.`;
+    if (entry.bookKind === 'technique') return `Done · technique book · ${entry.noteCount || 0} technique notes${entry.noText ? ` · ${entry.noText} picture pages skipped` : ''}`;
     const count = entry.count != null ? entry.count : (entry.recipes || []).length;
     const book = entry.bookId && recipeDBReady ? recipeDB.book(entry.bookId) : null;
     if (count) return `Done · ${count} recipe${count > 1 ? 's' : ''} saved${book ? ` (${book.meals || 0} meal${book.meals === 1 ? '' : 's'}${book.others ? `, ${book.others} other` : ''}${book.review ? `, ${book.review} to review` : ''})` : entry.review ? ` (${entry.review} need${entry.review === 1 ? 's' : ''} review)` : ''}${entry.scanned ? ` · ${entry.scanned} scanned pages read` : ''}`;
@@ -4004,8 +4039,12 @@ function libraryGroup() {
             const entry = (libraryIndex().files || {})[f.path];
             const reading = libraryState.busy && (!entry || (libraryState.progress && libraryState.progress.path === f.path));
             const book = /\.(epub|pdf|docx)$/i.test(f.path);
+            const typeSelect = book && entry && entry.fp && !reading && recipeDBReady ? selectInput((recipeDB.file(entry.fp) || {}).bookType || 'auto',
+                { auto: `Book type: ${entry.bookKind === 'technique' ? 'technique (found)' : 'recipes (found)'}`, recipes: 'It\'s a recipe book', technique: 'It\'s a technique book' },
+                async v => { await recipeDB.recordFile(entry.fp, { bookType: v }); nlog('library', `${f.path}: book type set to ${v}`); readLibraryFileAgain(f.path); }, 'Book type') : null;
             return h('div', { class: 'settings-row settings-row-stack library-file' },
                 h('span', { class: 'settings-label', text: f.path.split('/').pop() }),
+                typeSelect,
                 h('span', { class: 'settings-hint' + (entry && entry.failed ? ' warn' : ''), text: `${f.folder || ''}${f.folder ? ' · ' : ''}${libraryFileStatus(f.path)}` }),
                 entry && entry.failed && !reading ? h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => readLibraryFileAgain(f.path) }, icon('i-refresh'), 'Try again')
                     : entry && entry.paused && !reading ? h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => readLibraryFileAgain(f.path) }, icon('i-refresh'), 'Carry on')
@@ -4079,7 +4118,9 @@ function renderMyBooks() {
         const rows = [
             h('button', { type: 'button', class: 'settings-row settings-row-stack settings-nav', onclick: () => { booksOpen = open ? null : b.id; renderSettings(); } },
                 h('span', { class: 'settings-label', text: b.title + (b.author ? ` · ${b.author}` : '') }),
-                h('span', { class: 'settings-hint', text: [`${b.count || 0} recipes found`, `${b.meals || 0} meals`, others ? `${others} other (drinks, desserts, sauces, sides)` : '', b.review ? `${b.review} need review` : '', b.duplicates ? `${b.duplicates} already saved elsewhere` : '', open ? 'tap to close' : 'tap to see them'].filter(Boolean).join(' · ') })),
+                h('span', { class: 'settings-hint', text: b.type === 'technique'
+                    ? [`Technique book: ${b.notes || 0} technique notes`, 'used by the AI when it writes or changes a recipe', open ? 'tap to close' : 'tap to see them'].join(' · ')
+                    : [`${b.count || 0} recipes found`, `${b.meals || 0} meals`, others ? `${others} other (drinks, desserts, sauces, sides)` : '', b.review ? `${b.review} need review` : '', b.duplicates ? `${b.duplicates} already saved elsewhere` : '', open ? 'tap to close' : 'tap to see them'].filter(Boolean).join(' · ') })),
             b.path && !b.missing && fileEntry ? h('div', { class: 'settings-row' },
                 h('span', { class: 'settings-hint', text: b.path.split('/').pop() }),
                 h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => { readLibraryFileAgain(b.path); openSettingsPage('sources'); } }, icon('i-refresh'), 'Read again')) : null,
@@ -4087,6 +4128,9 @@ function renderMyBooks() {
                 h('span', { class: 'settings-hint warn', text: `The file (${b.path || 'unknown'}) was removed. Its recipes are kept.` }),
                 h('button', { type: 'button', class: 'btn btn-secondary btn-small danger', onclick: () => removeBookRecipes(b) }, icon('i-trash'), 'Remove its recipes')) : null,
             ...recipes.map(bookRecipeRow),
+            ...(open && b.type === 'technique' ? recipeDB.notesOf(b.id).slice(0, 60).map(n => h('div', { class: 'settings-row settings-row-stack' },
+                h('span', { class: 'settings-hint', text: n.text }),
+                h('span', { class: 'settings-hint', text: [n.methods.join(', '), n.ingredients.join(', '), n.dishes.join(', ')].filter(Boolean).join(' · ') }))) : []),
         ];
         out.push(settingsGroup('', rows));
     });

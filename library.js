@@ -308,7 +308,7 @@
     // a finished book is saved even if the app is closed before the others are read.
     // index: { files: { path: { sig, fp, recipes, count, note, failed, title, author } } }.
     // Returns { index, changed, read, errors, cancelled, paused, removed: [{ path, fp }] }.
-    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled, paused, onPause, onCancel, known, force, onFile } = {}) {
+    async function refresh(index, io, { batch = 3, pause = 400, maxFiles = 60, progress, cancelled, paused, onPause, onCancel, onCheckpoint, known, force, onFile } = {}) {
         const idx = index && index.files ? index : { files: {} };
         const listed = (await io.list()).filter(f => kindOf(f.path) && !isReadme(f.path));
         const seen = new Set(listed.map(f => f.path));
@@ -344,7 +344,9 @@
                         } catch (e) { /* older app without slices: fingerprinted from its text below */ }
                     }
                     const hit = entry.fp && known ? known(entry.fp) : null;
-                    if (hit && !again.has(f.path)) {
+                    // Reading that was interrupted (the app closed part-way) carries on by itself.
+                    const interrupted = hit && hit.partial && hit.partial.checkpoint;
+                    if (hit && !again.has(f.path) && !interrupted) {
                         Object.assign(entry, { bookId: hit.id, count: hit.count || 0, title: hit.title, linked: !!hit.id, note: hit.note || '', failed: hit.failed || undefined, paused: hit.partial ? true : undefined });
                         if (hit.author) entry.author = hit.author;
                         if (hit.passages) entry.passages = hit.passages;
@@ -363,7 +365,7 @@
                         done = true;
                         return;
                     }
-                    const how = { progress, cancelled, paused, resume };
+                    const how = { progress, cancelled, paused, resume, checkpoint: onCheckpoint && entry.fp ? state => onCheckpoint(f.path, entry.fp, state) : null };
                     let got;
                     if (kind === 'epub' || kind === 'docx') got = await readBook(f, await io.read(f.path), kind, io, how);
                     else if (kind === 'pdf' && io.pdf) got = await readPdf(f, io, how);
@@ -382,13 +384,21 @@
                     if (got.pages) entry.pages = got.pages;
                     if (got.scanned) entry.scanned = got.scanned;
                     entry.count = entry.recipes.length;
+                    // Mostly recipes, or mostly technique (the person can say otherwise: hit.bookType).
+                    if (/^(epub|pdf|docx)$/.test(kind)) {
+                        const notes = got.notes || [];
+                        entry.bookKind = (hit && hit.bookType && hit.bookType !== 'auto') ? hit.bookType : bookKind(entry.recipes.length, notes.length, got.chapters || got.pages);
+                        if (entry.bookKind === 'technique') { entry.notes = notes; entry.noteCount = notes.length; entry.recipes = []; entry.count = 0; }
+                        if (got.noText) entry.noText = got.noText;
+                    }
                     // Passages for the cooking notes: a recipe file is already covered by its recipes.
                     entry.passages = passagesFrom(text, { max: entry.recipes.length > 3 || f.folder === 'Recipe Books' ? 250 : 40 })
                         .filter(p => !entry.recipes.some(r => r.name && p.indexOf(r.name) >= 0 && p.length < 900));
                     if (!entry.passages.length) delete entry.passages;
                     // Never a silent nothing: why no recipe came out of it, in plain words.
+                    if (entry.bookKind === 'technique') entry.note = `Technique book: ${entry.noteCount} technique notes${entry.noText ? `; ${entry.noText} pages without readable text skipped` : ''}`;
                     if (!entry.recipes.length && !entry.note) entry.note = got.why || 'No recipe found (it needs a title, an ingredients list and steps).';
-                    if (!entry.recipes.length) entry.empty = true;
+                    if (!entry.recipes.length && entry.bookKind !== 'technique') entry.empty = true;
                     read++;
                     done = true;
                 } catch (e) {
@@ -436,22 +446,35 @@
     // A PDF a few pages at a time (io.pdf), with progress, pauses so the phone stays cool, and a
     // way to stop or pause: a scanned book is read with the phone's text recognition, which takes
     // about a second a page. Its recipes keep their page number.
-    async function readPdf(f, io, { progress, cancelled, paused, resume } = {}) {
+    async function readPdf(f, io, { progress, cancelled, paused, resume, checkpoint } = {}) {
         const info = await io.pdf(f.path, 0, 0);
         const total = Math.min(Number(info.pages) || 0, 1500);
         const texts = resume && Array.isArray(resume.texts) ? resume.texts.slice() : [];
         let scanned = resume ? resume.scanned || 0 : 0;
+        const notes = resume && Array.isArray(resume.notes) ? resume.notes.slice() : [];
+        let noText = resume ? resume.noText || 0 : 0;
+        let saved = page0(resume);
+        function page0(r) { return r ? r.at || 0 : 0; }
         let page = resume ? Math.min(resume.at || 0, total) : 0;
         let size = 3;   // a small first step: scanned pages take a second each
         while (page < total) {
             if (cancelled && cancelled()) { const e = new Error('stopped'); e.cancelled = true; throw e; }
-            if (paused && paused()) { const e = new Error('paused'); e.paused = true; e.state = { kind: 'pdf', at: page, total, unit: 'page', texts, scanned }; throw e; }
+            if (paused && paused()) { const e = new Error('paused'); e.paused = true; e.state = { kind: 'pdf', at: page, total, unit: 'page', texts, scanned, notes, noText }; throw e; }
+            // Every 30 pages, how far it got is saved: if the app is closed, reading carries on from here.
+            if (checkpoint && page - saved >= 30) { saved = page; await checkpoint({ kind: 'pdf', at: page, total, unit: 'page', texts, scanned, notes, noText, checkpoint: true }); }
             const r = await io.pdf(f.path, page, size);
             const got = (r && r.texts) || [];
             if (!got.length) break;
-            got.forEach(t => { texts.push(String((t && t.text) || '')); if (t && t.ocr) scanned++; });
+            got.forEach(t => {
+                const text = String((t && t.text) || '');
+                texts.push(text);
+                if (t && t.ocr) scanned++;
+                // A page with no readable text (a photo, or a scan the phone couldn't read) is skipped.
+                if ((text.match(/[a-z]/gi) || []).length < 20) noText++;
+                else if (notes.length < 2000) techniqueNotes(text, { book: f.path, max: 2000 - notes.length }).forEach(n => notes.push(Object.assign(n, { page: texts.length })));
+            });
             page += got.length;
-            if (progress) progress(f.path, page, total, `page ${page} of ${total}${scanned ? ' (reading scanned pages)' : ''}`);
+            if (progress) progress(f.path, page, total, `page ${page} of ${total}${scanned ? ' (reading scanned pages)' : ''}`, notes.length);
             // Scanned pages are slow to read: smaller steps with a longer breath in between.
             const ocr = got.some(t => t && t.ocr);
             size = ocr ? 3 : 12;
@@ -469,7 +492,8 @@
                 : letters < total * 40 ? `No text could be read from its ${total} pages${scanned ? ' (they are pictures, and the text recognition found almost nothing on them)' : ''}.`
                     : `Read all ${total} pages${scanned ? ` (${scanned} scanned)` : ''}, but no recipe was recognised: no ingredient lists followed by steps were found.`;
         }
-        return { kind: 'pdf', text, recipes, title, author: info.author || undefined, pages: total, scanned, why };
+        notes.forEach(n => { n.book = title; });
+        return { kind: 'pdf', text, recipes, title, author: info.author || undefined, pages: total, scanned, why, notes, noText };
     }
 
     // A book (EPUB or Word) read a slice at a time. Its recipes keep the book's title and chapter:
@@ -479,14 +503,14 @@
         if (root.NourishBooks) return root.NourishBooks;
         try { return typeof require === 'function' ? require('./books.js') : null; } catch (e) { return null; }
     }
-    async function readBook(f, got, kind, io, { progress, cancelled, paused, resume } = {}) {
+    async function readBook(f, got, kind, io, { progress, cancelled, paused, resume, checkpoint } = {}) {
         const Books = booksReader();
         if (!Books || !io.range) throw new Error('books can\'t be read here yet');
         const size = got.size || f.size;
         const opts = {
             size, readRange: (offset, length) => io.range(f.path, offset, length),
-            progress: progress ? (done, total, chapter) => progress(f.path, done, total, chapter) : null,
-            cancelled, paused, resume, pause: io.sleep,
+            progress: progress ? (done, total, chapter, notes) => progress(f.path, done, total, chapter, notes) : null,
+            cancelled, paused, resume, checkpoint, pause: io.sleep,
         };
         const book = kind === 'epub' ? await Books.readEpub(opts) : await Books.readDocx(opts);
         const fileName = titleFromFileName(f.path);
@@ -498,7 +522,8 @@
             book: title,
             library_path: f.path,
         }));
-        return { kind, text: book.text, recipes, title, author: book.author || undefined, note: recipes.length ? '' : undefined, why: book.why };
+        const notes = (book.notes || (book.text ? techniqueNotes(book.text) : [])).map(n => Object.assign(n, { book: title }));
+        return { kind, text: book.text, recipes, title, author: book.author || undefined, note: recipes.length ? '' : undefined, why: book.why, notes, noText: book.imageOnly || 0, chapters: book.chapters };
     }
 
     // File fingerprints (recipedb.js), with a small copy here so this file works on its own.
@@ -512,6 +537,65 @@
     function textFingerprint(text) {
         const bytes = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(String(text || '')) : Buffer.from(String(text || ''));
         return fingerprintOf(bytes.length, bytes.subarray(0, 65536), bytes.subarray(Math.max(0, bytes.length - 65536)));
+    }
+
+    // === TECHNIQUE BOOKS: SHORT TECHNIQUE NOTES ===
+    // A book about how to cook (searing, braising, seasoning, bread…) rather than a book of recipes
+    // becomes short notes: what to do and why, 1–3 sentences, each tagged with the ingredients,
+    // cooking methods and kinds of dish it's about. Found in code, offline: a sentence that tells
+    // the cook to do something with a technique, kept with the sentence that says why.
+    const T_METHODS = { sear: /\bsear/, roast: /\broast/, braise: /\bbrais/, 'stir-fry': /\bstir[- ]?fr/, fry: /\b(fry|fried|frying|deep[- ]fr|shallow[- ]fr)/, saute: /\bsaut[eé]/, grill: /\b(grill|barbecue|bbq|char)/,
+        bake: /\bbak(e|ed|ing)\b/, boil: /\bboil/, simmer: /\bsimmer/, poach: /\bpoach/, steam: /\bsteam/, blanch: /\bblanch/, brine: /\bbrin(e|ing)/, marinate: /\bmarinat/,
+        rest: /\b(rest|resting)\b/, season: /\b(season|salt(ing|ed)?)\b/, emulsify: /\bemulsi/, deglaze: /\bdeglaz/, reduce: /\breduc(e|ing|tion)\b/, caramelize: /\bcarameli[sz]/,
+        heat: /\b(preheat|heat the (pan|oven|oil|grill))\b/, dry: /\b(pat (it |them |the \w+ )?dry|dry (the|it|them) (well|thoroughly)?)/, brown: /\bbrown(s|ed|ing)?\b/, knead: /\bknead/, proof: /\b(proof|prove|rise)\b/, whisk: /\bwhisk/, fold: /\bfold/, temper: /\btemper/, toast: /\btoast/, smoke: /\bsmok(e|ing)\b/, cure: /\bcur(e|ing)\b/, ferment: /\bferment/, sweat: /\bsweat/, slice: /\b(slice|dice|chop|julienne|knife)\b/ };
+    const T_DISHES = { soup: /\bsoups?\b/, stew: /\b(stews?|casserole)\b/, sauce: /\b(sauces?|gravy|vinaigrette|dressing|mayonnaise|emulsion)\b/, salad: /\bsalads?\b/, steak: /\bsteaks?\b/, roast: /\broasts?\b/,
+        pasta: /\b(pasta|noodles?|spaghetti)\b/, rice: /\b(rice|risotto|pilaf)\b/, bread: /\b(bread|dough|loaf|loaves)\b/, cake: /\b(cakes?|batter|pastry|pie crust)\b/, eggs: /\b(eggs?|omelet+e?)\b/,
+        vegetables: /\bvegetables?\b/, fish: /\b(fish|fillets?)\b/, curry: /\bcurr(y|ies)\b/, stock: /\b(stock|broth)\b/, beans: /\b(beans|lentils|pulses|legumes)\b/ };
+    const T_FOODS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'salmon', 'shrimp', 'egg', 'eggs', 'onion', 'onions', 'garlic', 'tomato', 'tomatoes', 'potato', 'potatoes', 'rice', 'pasta', 'flour',
+        'butter', 'oil', 'cream', 'milk', 'cheese', 'mushroom', 'mushrooms', 'carrot', 'carrots', 'spinach', 'cabbage', 'beans', 'lentils', 'tofu', 'lemon', 'vinegar', 'salt', 'sugar', 'herbs',
+        'pepper', 'peppers', 'steak', 'duck', 'turkey', 'bread', 'dough', 'yeast', 'chocolate', 'nuts', 'squash', 'broccoli', 'cauliflower', 'zucchini', 'eggplant', 'corn', 'peas', 'stock', 'wine', 'ginger', 'chili', 'soy'];
+    const T_REASON = /\b(because|so (that|the|it|you|they|their|your|its)|instead of|which (helps|keeps|stops|means|lets)|this (helps|keeps|stops|means|lets|prevents|ensures)|prevents?|otherwise|to (keep|stop|avoid|prevent|help|get|make sure|ensure)|ensures?|allows?|helps?|that way|the reason)\b/i;
+    const T_IMPERATIVE = /^(always|never|don'?t|do not|make sure|be sure|try to|remember to|avoid|use|let|keep|add|pat|dry|salt|season|sear|rest|cook|heat|preheat|start|finish|toast|whisk|fold|stir|taste|bring|reduce|simmer|cut|slice|chop|soak|rinse|chill|cool|brown|place|turn|leave|wait|press|baste|cover|uncover|remove|strain|warm|knead|proof|deglaze|blanch|marinate|grill|roast|bake|steam|poach)\b/i;
+    function techniqueNotes(text, { book = '', max = 2000 } = {}) {
+        const out = [];
+        const seen = new Set();
+        const paras = String(text || '').split(/\n\s*\n|\f/).map(p => p.replace(/\s+/g, ' ').trim()).filter(p => p.length > 40);
+        for (const para of paras) {
+            const sentences = para.match(/[^.!?]+[.!?]+(?=\s|$)/g) || [];
+            for (let i = 0; i < sentences.length && out.length < max; i++) {
+                const a = sentences[i].trim();
+                if (a.length < 30 || a.length > 280) continue;
+                const low = a.toLowerCase();
+                const methods = Object.keys(T_METHODS).filter(k => T_METHODS[k].test(low));
+                if (!methods.length) continue;
+                const why = T_REASON.test(a);
+                const doIt = T_IMPERATIVE.test(a) || /\b(you should|you want|you need|it'?s best|the key|the trick|the secret)\b/i.test(a);
+                if (!(doIt && why) && !(doIt && T_REASON.test(sentences[i + 1] || '')) && !(why && /\b(should|must|best|always|never)\b/i.test(a))) continue;
+                let note = a;
+                if (!why && sentences[i + 1] && T_REASON.test(sentences[i + 1]) && (a + sentences[i + 1]).length <= 400) { note += ' ' + sentences[i + 1].trim(); i++; }
+                const all = note.toLowerCase();
+                const key = all.replace(/[^a-z]+/g, ' ').trim().slice(0, 120);
+                if (seen.has(key)) continue;
+                seen.add(key);
+                const words = new Set(all.split(/[^a-z]+/));
+                out.push({
+                    text: note,
+                    ingredients: T_FOODS.filter(f => words.has(f)).map(f => f.replace(/(es|s)$/, '').replace(/^tomato$/, 'tomato')).filter((x, k, arr) => arr.indexOf(x) === k).slice(0, 8),
+                    methods: Object.keys(T_METHODS).filter(k => T_METHODS[k].test(all)).slice(0, 6),
+                    dishes: Object.keys(T_DISHES).filter(k => T_DISHES[k].test(all)).slice(0, 4),
+                    book: book || undefined,
+                });
+            }
+        }
+        return out;
+    }
+    // Mostly recipes, or mostly technique? A book with plenty of recipes is a recipe book; one with
+    // few recipes and many technique notes is a technique book. The person can say otherwise.
+    function bookKind(recipeCount, noteCount, chapters) {
+        if (recipeCount >= 15 && recipeCount * 4 >= noteCount) return 'recipes';
+        if (noteCount >= 25 && recipeCount * 6 < noteCount) return 'technique';
+        if (recipeCount === 0 && noteCount >= 5) return 'technique';
+        return recipeCount >= Math.max(3, (chapters || 0) * 0.3) ? 'recipes' : noteCount >= 10 ? 'technique' : 'recipes';
     }
 
     // === COOKING KNOWLEDGE (cookbooks as inspiration, not as a ranking) ===
@@ -624,7 +708,7 @@
         return out;
     }
 
-    const api = { cleanTitle, cleanAuthor, titleFromFileName, parseRecipeText, parseLooseRecipes, findRecipesInText, prepareLines, recipesFromFile, refresh, allRecipes, kindOf, isReadme, passagesFrom, retrieve, pairingScore, terms };
+    const api = { techniqueNotes, bookKind, cleanTitle, cleanAuthor, titleFromFileName, parseRecipeText, parseLooseRecipes, findRecipesInText, prepareLines, recipesFromFile, refresh, allRecipes, kindOf, isReadme, passagesFrom, retrieve, pairingScore, terms };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishLibrary = api;
 })(typeof window !== 'undefined' ? window : globalThis);

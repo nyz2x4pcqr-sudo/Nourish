@@ -295,13 +295,20 @@
         let section = r0 ? r0.section || '' : '';
         let skipped = r0 ? r0.skipped || 0 : 0, missing = r0 ? r0.missing || 0 : 0, recipeLike = r0 ? r0.recipeLike || 0 : 0;
         const textParts = r0 ? (r0.textParts || []).slice() : [];
+        // Technique notes (library.js techniqueNotes), kept as the book is read; chapters that are
+        // only pictures (no readable text) are counted and skipped.
+        const notes = r0 ? (r0.notes || []).slice() : [];
+        let imageOnly = r0 ? r0.imageOnly || 0 : 0;
+        const stateAt = i => ({ kind: 'epub', at: i, total: spine.length, unit: 'chapter', recipes, section, skipped, missing, recipeLike, textParts: textParts.slice(0, 120), notes, imageOnly });
         for (let i = r0 ? r0.at : 0; i < spine.length; i++) {
             if (opts.cancelled && opts.cancelled()) { const e = new Error('stopped'); e.cancelled = true; throw e; }
             if (opts.paused && opts.paused()) {
                 const e = new Error('paused'); e.paused = true;
-                e.state = { kind: 'epub', at: i, total: spine.length, unit: 'chapter', recipes, section, skipped, missing, recipeLike, textParts: textParts.slice(0, 120) };
+                e.state = stateAt(i);
                 throw e;
             }
+            // Every 15 chapters, how far it got is saved: if the app is closed, reading carries on from here.
+            if (opts.checkpoint && i > 0 && i % 15 === 0) await opts.checkpoint(Object.assign(stateAt(i), { checkpoint: true }));
             const file = spine[i];
             const label = toc[file] || '';
             if (label) section = label;
@@ -310,6 +317,7 @@
             // A chapter the book lists but doesn't contain is counted (and said), never skipped silently.
             if (!html) { missing++; if (opts.progress) opts.progress(i + 1, spine.length, label || file); continue; }
             const blocks = blocksOf(html);
+            if (blocks.reduce((n, b) => n + b.text.length, 0) < 40 && /<(img|image|svg)\b/i.test(html)) { imageOnly++; if (opts.progress) opts.progress(i + 1, spine.length, label || 'a page of pictures (skipped)'); continue; }
             // A chapter label like "Breakfast" or "Mains" stays the section for the chapters under it.
             const heading = (blocks.find(b => b.kind === 'h' && b.level <= 2) || {}).text || '';
             const chapter = sectionName(label || heading || section, section);
@@ -326,7 +334,8 @@
             if (!found.length) { skipped++; if (blocks.filter(b => /^(?:[-*•]\s*)?(?:\d|½|¼|¾|⅓|⅔)/.test(b.text) && b.text.length < 90).length >= 3) recipeLike++; }
             found.forEach(r => recipes.push(r));
             if (textParts.length < 400) textParts.push(blocks.map(b => b.text).join('\n'));
-            if (opts.progress) opts.progress(i + 1, spine.length, chapter);
+            if (L && notes.length < 2000) L.techniqueNotes(blocks.map(b => b.text).join('\n\n'), { book: title, max: 2000 - notes.length }).forEach(n => notes.push(Object.assign(n, { chapter: label || heading || undefined })));
+            if (opts.progress) opts.progress(i + 1, spine.length, chapter, notes.length);
             if (opts.pause && i % 3 === 2) await opts.pause(60);   // a short breath every few chapters: the phone stays cool
         }
         let why = '';
@@ -337,7 +346,7 @@
                     : recipeLike ? `Read ${read} chapters: ${recipeLike} have ingredient amounts, but no complete recipe (a title, an ingredient list and steps) was recognised in them.`
                         : `Read ${read} chapters, but none of them has an ingredient list with amounts.`;
         }
-        return { title, author, recipes, chapters: spine.length, skipped, missing, text: textParts.join('\n\n'), why };
+        return { title, author, recipes, chapters: spine.length, skipped, missing, text: textParts.join('\n\n'), why, notes, imageOnly };
     }
     // The same recipe found twice (by its headings and by its shape): mostly the same ingredients.
     function sameRecipe(a, b) {

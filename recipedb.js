@@ -26,10 +26,11 @@
         const open = () => dbp || (dbp = new Promise((ok, bad) => {
             // Version 2 adds 'files': every file read, by fingerprint (also the ones with no recipes),
             // so a book is never read twice; and how far a paused book got.
-            const req = idb.open(name, 2);
+            // Version 3 adds 'notes': technique notes from technique books.
+            const req = idb.open(name, 3);
             req.onupgradeneeded = () => {
                 const db = req.result;
-                ['recipes', 'books', 'files'].forEach(store => { if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath: 'id' }); });
+                ['recipes', 'books', 'files', 'notes'].forEach(store => { if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath: 'id' }); });
             };
             req.onsuccess = () => ok(req.result);
             req.onerror = () => bad(req.error || new Error('the recipe database could not be opened'));
@@ -49,14 +50,15 @@
         return {
             kind: 'IndexedDB',
             async load() {
-                let recipes = [], books = [], files = [];
-                await tx(['recipes', 'books', 'files'], 'readonly', t => {
-                    const a = getAll(t, 'recipes'), b = getAll(t, 'books'), c = getAll(t, 'files');
+                let recipes = [], books = [], files = [], notes = [];
+                await tx(['recipes', 'books', 'files', 'notes'], 'readonly', t => {
+                    const a = getAll(t, 'recipes'), b = getAll(t, 'books'), c = getAll(t, 'files'), n = getAll(t, 'notes');
                     a.onsuccess = () => { recipes = a.result || []; };
                     b.onsuccess = () => { books = b.result || []; };
                     c.onsuccess = () => { files = c.result || []; };
+                    n.onsuccess = () => { notes = n.result || []; };
                 });
-                return { recipes, books, files };
+                return { recipes, books, files, notes };
             },
             put: (store, items) => tx([store], 'readwrite', t => { const s = t.objectStore(store); items.forEach(x => s.put(x)); }),
             del: (store, ids) => tx([store], 'readwrite', t => { const s = t.objectStore(store); ids.forEach(id => s.delete(id)); }),
@@ -66,23 +68,23 @@
         let data = null;
         const read = () => {
             if (!data) { try { data = JSON.parse(storage.getItem(key) || 'null') || {}; } catch (e) { data = {}; } }
-            ['recipes', 'books', 'files'].forEach(k => { if (!data[k]) data[k] = {}; });
+            ['recipes', 'books', 'files', 'notes'].forEach(k => { if (!data[k]) data[k] = {}; });
             return data;
         };
         const write = () => { storage.setItem(key, JSON.stringify(data)); };
         return {
             kind: 'localStorage',
-            async load() { const d = read(); return { recipes: Object.values(d.recipes), books: Object.values(d.books), files: Object.values(d.files) }; },
+            async load() { const d = read(); return { recipes: Object.values(d.recipes), books: Object.values(d.books), files: Object.values(d.files), notes: Object.values(d.notes) }; },
             async put(store, items) { const d = read(); items.forEach(x => { d[store][x.id] = x; }); write(); },
             async del(store, ids) { const d = read(); ids.forEach(id => { delete d[store][id]; }); write(); },
         };
     }
     function memoryBackend() {
-        const d = { recipes: {}, books: {}, files: {} };
+        const d = { recipes: {}, books: {}, files: {}, notes: {} };
         const copy = store => Object.values(d[store]).map(x => JSON.parse(JSON.stringify(x)));
         return {
             kind: 'memory',
-            async load() { return { recipes: copy('recipes'), books: copy('books'), files: copy('files') }; },
+            async load() { return { recipes: copy('recipes'), books: copy('books'), files: copy('files'), notes: copy('notes') }; },
             async put(store, items) { items.forEach(x => { d[store][x.id] = JSON.parse(JSON.stringify(x)); }); },
             async del(store, ids) { ids.forEach(id => { delete d[store][id]; }); },
         };
@@ -173,6 +175,7 @@
         const recipes = new Map();
         const books = new Map();
         const files = new Map();
+        const notes = new Map();
         let ready = null;
         const listeners = [];
         const changed = what => listeners.forEach(fn => { try { fn(what); } catch (e) { /* keep going */ } });
@@ -195,6 +198,7 @@
                         (d.books || []).forEach(b => books.set(b.id, b));
                         (d.recipes || []).forEach(r => recipes.set(r.id, r));
                         (d.files || []).forEach(f => files.set(f.id, f));
+                        (d.notes || []).forEach(n => notes.set(n.id, n));
                         return api;
                     });
                 }
@@ -231,8 +235,12 @@
                 const book = Object.assign({}, old, {
                     id, title: meta.title || old.title || 'Untitled book', author: meta.author || old.author || undefined,
                     path: meta.path || old.path, paths: [...new Set([].concat(old.paths || [], meta.path ? [meta.path] : []))],
-                    kind: meta.kind || old.kind, label: meta.label || old.label, at: Date.now(), missing: false,
+                    kind: meta.kind || old.kind, label: meta.label || old.label, at: Date.now(), missing: false, type: 'recipes', notes: 0,
                 });
+                // A book that was read as a technique book before: its notes go.
+                const oldNotes = api.notesOf ? api.notesOf(id).map(n => n.id) : [];
+                oldNotes.forEach(k => notes.delete(k));
+                if (oldNotes.length) await backend.del('notes', oldNotes);
                 const removed = api.recipesOf(id).map(r => r.id);
                 removed.forEach(rid => recipes.delete(rid));
                 const knownKeys = new Set(known.map(keyOf));
@@ -279,6 +287,60 @@
                 return rec;
             },
             async forgetFile(fp) { if (files.delete(fp)) await backend.del('files', [fp]); },
+            // === TECHNIQUE NOTES (technique books) ===
+            // Saves a technique book's notes (replacing what was saved for it before) and the book.
+            async saveTechniqueBook(meta, list) {
+                await api.open();
+                const id = meta.id;
+                const old = [...notes.values()].filter(n => n.book_id === id).map(n => n.id);
+                old.forEach(k => notes.delete(k));
+                if (old.length) await backend.del('notes', old);
+                const fresh = (list || []).slice(0, 2000).map((n, i) => ({ id: `${id}:n${i}`, book_id: id, book: meta.title, text: String(n.text).slice(0, 420),
+                    ingredients: n.ingredients || [], methods: n.methods || [], dishes: n.dishes || [], chapter: n.chapter, page: n.page }));
+                fresh.forEach(n => notes.set(n.id, n));
+                if (fresh.length) await backend.put('notes', fresh);
+                const prev = books.get(id) || {};
+                const book = Object.assign({}, prev, { id, title: meta.title || prev.title || 'Untitled book', author: meta.author || prev.author, path: meta.path || prev.path,
+                    paths: [...new Set([].concat(prev.paths || [], meta.path ? [meta.path] : []))], kind: meta.kind || prev.kind, type: 'technique', notes: fresh.length, count: 0, meals: 0, review: 0, others: 0, at: Date.now(), missing: false });
+                books.set(id, book);
+                // A book that was a recipe book before: its recipes go.
+                const recipeIds = api.recipesOf(id).map(r => r.id);
+                recipeIds.forEach(k => recipes.delete(k));
+                if (recipeIds.length) await backend.del('recipes', recipeIds);
+                await backend.put('books', [book]);
+                changed('notes');
+                return book;
+            },
+            notesOf(bookId) { return [...notes.values()].filter(n => n.book_id === bookId); },
+            noteCount() { return notes.size; },
+            // The notes most related to a dish: shared ingredients, cooking methods and kinds of dish,
+            // then shared words. q: { words, ingredients, methods, dishes }. At most one note in three
+            // from the same chapter, so the AI gets a mix.
+            notesFor(q, k = 5) {
+                if (!notes.size) return [];
+                const ing = new Set((q.ingredients || []).map(x => String(x).toLowerCase())), met = new Set(q.methods || []), dis = new Set(q.dishes || []);
+                const words = new Set(String(q.words || '').toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3));
+                const scored = [];
+                notes.forEach(n => {
+                    let sc = 0;
+                    (n.ingredients || []).forEach(x => { if (ing.has(x)) sc += 2; });
+                    (n.methods || []).forEach(x => { if (met.has(x)) sc += 2.5; });
+                    (n.dishes || []).forEach(x => { if (dis.has(x)) sc += 2; });
+                    if (sc === 0) return;
+                    String(n.text).toLowerCase().split(/[^a-z]+/).forEach(w => { if (words.has(w)) sc += 0.3; });
+                    scored.push({ n, sc: sc / Math.sqrt(1 + n.text.length / 200) });
+                });
+                scored.sort((a, b) => b.sc - a.sc);
+                const out = [], per = {};
+                for (const x of scored) {
+                    const key = `${x.n.book_id}|${x.n.chapter || x.n.page || ''}`;
+                    if ((per[key] || 0) >= 2) continue;
+                    per[key] = (per[key] || 0) + 1;
+                    out.push(x.n);
+                    if (out.length >= k) break;
+                }
+                return out;
+            },
             // A book's file is in a new place (renamed or moved): just remembered.
             async linkPath(id, path) {
                 const b = books.get(id);
@@ -299,6 +361,9 @@
             async removeBook(id) {
                 const ids = api.recipesOf(id).map(r => r.id);
                 ids.forEach(rid => recipes.delete(rid));
+                const nids = api.notesOf(id).map(n => n.id);
+                nids.forEach(k => notes.delete(k));
+                if (nids.length) await backend.del('notes', nids);
                 books.delete(id);
                 await backend.del('recipes', ids);
                 await backend.del('books', [id]);
