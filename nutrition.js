@@ -353,6 +353,8 @@
         (ingredients || []).forEach((line, i) => {
             if (i in out || isHeader(line)) return;
             const t = clean(line);
+            // A cheese rind or a bay leaf simmered for flavour and lifted out: only a trace is eaten.
+            if (/\b(parmesan|parmigiano|pecorino|grana padano|cheese)\b[^,]*\brinds?\b|\brinds?\b[^,]*\b(parmesan|parmigiano|pecorino|grana padano|cheese)\b/.test(t)) { out[i] = 0.1; return; }
             // The salt, sugar and water of a brine the steps make ("dissolve the salt in the water to make a brine").
             if (brined && /\b(salt|sugar|brown sugar|water|peppercorns|bay)\b/.test(t) && /\b(cups?|quarts?|gallons?|litres?|liters?|l)\b|\b[2-9]\d* ?(tbsp|tablespoons?)\b|\b\d+\s*\/\s*\d+\s*cups?\b/.test(String(line).toLowerCase())) { out[i] = 0; return; }
             liquids.forEach(liq => { if (new RegExp(`\\b${liq.split(' ')[0]}\\b`).test(t) && !/\b(oil)\b/.test(t)) out[i] = /brine|water|soaking/.test(liq) ? 0 : 0.2; });

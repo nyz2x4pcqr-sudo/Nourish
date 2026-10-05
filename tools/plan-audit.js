@@ -48,6 +48,7 @@ const BASE = { calorie_target: '2200', protein_target: '140', body_weight: '', s
 const CASES = [
     { id: 'lose-1500', goal: 'Cut', settings: { calorie_target: '1500', body_weight: '70' } },
     { id: 'lose-1800-nobooks', goal: 'Cut', books: false, settings: { calorie_target: '1800', body_weight: '85' } },
+    { id: 'high-protein-1500', goal: 'Cut', settings: { calorie_target: '1500', protein_target: '150', protein_auto: 'off' } },
     { id: 'lose-1600-veg', goal: 'Cut', settings: { calorie_target: '1600', diet: 'Vegetarian' } },
     { id: 'lose-2000-shellfish', goal: 'Cut', settings: { calorie_target: '2000', allergies: 'shellfish' } },
     { id: 'lose-1700-budget', goal: 'Cut', settings: { calorie_target: '1700', budget: 'Budget-friendly' } },
@@ -113,7 +114,7 @@ DIET_WORDS.Vegan = new RegExp(DIET_WORDS.Vegetarian.source.slice(0, -4) + '|eggs
 const lc = s => String(s || '').toLowerCase();
 const words = s => lc(s).split(/[^a-z]+/).filter(w => w.length >= 3).map(w => w.replace(/(ies)$/, 'y').replace(/([^s])s$/, '$1'));
 // Pairs where the table's food has another name than the line (checked by hand).
-const SAME_FOOD = [[/\bpepitas?\b/, /pumpkin seed/], [/potstickers?|pot stickers|gyoza|wontons?|dim sum|mandu|momos/, /dumpling/], [/\bmince\b/, /ground/], [/\bprawns?\b/, /shrimp/], [/\bswede\b/, /rutabaga/], [/\bmangetout|sugar snap/, /snow peas/], [/\bpanko|bread ?crumbs/, /breadcrumb/], [/\bkimchi/, /sauerkraut|cabbage/], [/\bhot sauce|habanero|piri piri|peri peri/, /sriracha|hot sauce/], [/\bcourgette/, /zucchini/], [/\baubergine/, /eggplant/], [/\bscallions?|spring onions?|green onions?/, /onion/],
+const SAME_FOOD = [[/parmigiano|grana padano|parmesan/, /parmesan/], [/coleslaw mix|slaw mix/, /cabbage/], [/\bpepitas?\b/, /pumpkin seed/], [/potstickers?|pot stickers|gyoza|wontons?|dim sum|mandu|momos/, /dumpling/], [/\bmince\b/, /ground/], [/\bprawns?\b/, /shrimp/], [/\bswede\b/, /rutabaga/], [/\bmangetout|sugar snap/, /snow peas/], [/\bpanko|bread ?crumbs/, /breadcrumb/], [/\bkimchi/, /sauerkraut|cabbage/], [/\bhot sauce|habanero|piri piri|peri peri/, /sriracha|hot sauce/], [/\bcourgette/, /zucchini/], [/\baubergine/, /eggplant/], [/\bscallions?|spring onions?|green onions?/, /onion/],
     [/\bbuns?|rolls?|baguette|crusty/, /bread/], [/\bstock\b|bouillon/, /broth/], [/\bchilli|chili|jalape/, /pepper|jalapeno|chili/], [/\bcilantro|coriander/, /coriander|cilantro|parsley/], [/\bpasta|spaghetti|penne|macaroni|fusilli|linguine|rigatoni|orzo/, /pasta|spaghetti|macaroni/],
     [/\byoghurt/, /yogurt/], [/\bpassata|crushed tomatoes|tomato puree/, /tomato/], [/\bsalt pork|fatback|pancetta|guanciale|pork belly/, /bacon/], [/\bpigeon peas|gandules|black-eyed/, /chickpea|pea/], [/\bsplit peas/, /lentil/], [/\bcornstarch|cornflour/, /corn/],
     [/\bflank|skirt|sirloin|steak|chuck|round/, /beef|steak/], [/\bwraps?\b/, /tortilla/], [/\bmayo\b/, /mayonnaise/], [/\bromaine|little gem|iceberg|salad leaves|greens|spring mix/, /lettuce/],
@@ -127,6 +128,12 @@ function wrongFood(line, key) {
     if (SAME_FOOD.some(([a, b]) => a.test(l) && b.test(k))) return false;
     return true;
 }
+// Drinks and sides, judged independently of the app: "Chocomil (Mexican Chocolate Milk)", horchata,
+// a baked sweet potato, rice, roasted vegetables.
+const DRINK_NAME = /\b(milk|hot chocolate|cocoa|horchata|agua fresca|lassi|milkshake|atole|champurrado|chai|latte|tea|coffee|lemonade|juice|punch|eggnog|kombucha|drink|beverage|mocktail|cocktail)\s*\)?\s*$/i;
+const SIDE_ONLY = /^(?:(?:the |my )?(?:best|easy|simple|perfect|classic|crispy|quick|healthy|homemade|garlic|herb|lemon|honey|roasted|baked|mashed|steamed|sauteed|sautéed|grilled|smashed|air[- ]fryer|instant pot|buttery|creamy|cheesy|spicy|seasoned|fluffy)\s+)*(?:sweet potato(?:es)?|potato(?:es)?|fries|wedges|rice|white rice|brown rice|cilantro lime rice|vegetables|veggies|green beans|asparagus|broccoli|brussels sprouts|carrots|corn|zucchini|squash|mushrooms|spinach|garlic bread|cornbread|coleslaw|slaw|polenta|quinoa|couscous|mac and cheese|baked beans|refried beans|cauliflower)$/i;
+const SPREAD_NAME = /\b(hummus|houmous|tapenade|tzatziki|baba ganoush|guacamole|dip|spread|p[âa]t[ée]|crostini|bruschetta|bone marrow)\b/i;
+const EGG_BREAKFAST_DISH = /\b(scrambled? eggs?|egg scramble|scramble|omelet+e?s?|huevos|eggs? benedict|breakfast burritos?|breakfast tacos?|egg (muffins?|cups?|bites?)|migas|chilaquiles|egg sandwich)\b/i;
 function minutesOf(meal) { return Number(meal.active_minutes) || Number(meal.time_minutes) || 0; }
 
 function checkMeal(meal, slot, ctx) {
@@ -145,14 +152,23 @@ function checkMeal(meal, slot, ctx) {
     else {
         // A smoothie is a breakfast when it's filling (at least 250 kcal and 10 g protein), else a drink; chia pudding is a breakfast.
         const filling = /smoothie|shake/i.test(name) && kcal >= 250 && p >= 10;
-        const nm = filling || /chia( seed)? pudding|overnight oats|protein pudding|bread pudding|savou?ry/i.test(name) ? null : NOT_MEAL_WORDS.find(([re]) => re.test(name));
+        // Judged on the dish itself: "Sweetcorn Fritters with Salsa" is fritters, not salsa.
+        const dishPart = name.replace(/\s+(with|in|on|over|served with|and a side of)\s+.*$/i, '').trim();
+        const nm = filling || /chia( seed)? pudding|overnight oats|protein pudding|bread pudding|savou?ry/i.test(name) ? null : NOT_MEAL_WORDS.find(([re]) => re.test(dishPart));
         const isMealish = MEAL_WORDS.test(name.replace(nm ? nm[0] : /$^/, ''));
         if (nm && !(isMealish && !/a starter|an article/.test(nm[1]))) add('not a meal', 'problem', `looks like ${nm[1]}`);
         else if (kcal > 0 && f * 9 / kcal > 0.7 && p * 4 / kcal < 0.12) add('not a meal', 'problem', `${Math.round(f * 9 / kcal * 100)}% of its calories are fat and only ${Math.round(p * 4 / kcal * 100)}% protein: a starter or spread, not a meal`);
     }
+    if (!meal.protein_extra && !meal.snack) {
+        const plain = name.replace(/\brecipe\b/ig, ' ').replace(/\s+/g, ' ').trim();
+        if (DRINK_NAME.test(name) && !/smoothie|shake|soup|stew|chili|curry|porridge|oats/i.test(name)) add('not a meal', 'problem', `a drink ("${name}")`);
+        if (SIDE_ONLY.test(plain.replace(/\([^)]*\)/g, '').trim())) add('not a meal', 'problem', `a side dish ("${name}")`);
+        if (SPREAD_NAME.test(name.replace(/\s+(with|on|over|served with)\s+.*$/i, '')) && !/\b(chicken|beef|turkey|pork|tuna|salmon|shrimp|tofu|eggs?|lentils?|beans|chickpeas|steak|fish|bowls?|wraps?|sandwich|pasta|salad|pizza|toast)\b/i.test(name)) add('not a meal', 'problem', `an appetizer or spread ("${name}")`);
+    }
     // 2. Wrong meal slot.
     if (truth && truth.is === 'dinner' && slot !== 'dinner') add('wrong slot', 'problem', `a dinner dish at ${slot}`);
-    else if (truth && truth.is === 'breakfast' && slot === 'dinner') add('wrong slot', 'note', 'a breakfast dish at dinner');
+    else if (truth && truth.is === 'breakfast' && slot === 'dinner') add('wrong slot', 'problem', 'a breakfast dish at dinner');
+    else if (slot === 'dinner' && EGG_BREAKFAST_DISH.test(name)) add('wrong slot', 'problem', `a breakfast egg dish ("${name.match(EGG_BREAKFAST_DISH)[0]}") at dinner`);
     else if (slot !== 'dinner' && DINNER_DISH.test(name)) add('wrong slot', 'problem', `a dinner dish ("${name.match(DINNER_DISH)[0]}") at ${slot}`);
     const steps = (meal.steps || []).join(' ');
     const lim = ctx.limits && ctx.limits[slot];
@@ -187,24 +203,22 @@ function checkMeal(meal, slot, ctx) {
     if (kcal > 0 && p * 4 / kcal > 0.85 && !meal.protein_added) add('implausible nutrition', 'problem', `${Math.round(p * 4 / kcal * 100)}% of the calories from protein: leaner than plain chicken breast`);
     if (kcal > 0 && (kcal < 120 || kcal > 2000)) add('implausible nutrition', 'problem', `${kcal} kcal for a ${slot}`);
 
-    // 3b. Protein in each meal (Nourish's own rule: breakfast never under 25 g, main meals 25–40 g).
-    if (slot === 'breakfast' && p < 24.5) add('meal low in protein', 'problem', `breakfast with ${p} g protein (the rule is at least 25 g)`);
-    if (slot !== 'breakfast' && p < 20) add('meal low in protein', 'problem', `${slot} with ${p} g protein`);
+    // 3b. Protein in each meal: information since 0.1.14 (the day's protein is checked below; no
+    // recipe is ever patched with added protein).
+    if (slot === 'breakfast' && p < 20) add('meal low in protein', 'note', `breakfast with ${p} g protein`);
+    if (slot !== 'breakfast' && p < 20) add('meal low in protein', 'note', `${slot} with ${p} g protein`);
+    // 3c. Nutrition confidence: never a meal whose sources disagree.
+    if (meal.nutrition_check && meal.nutrition_check.level === 'low') add('low nutrition confidence', 'problem', meal.nutrition_check.note || 'its nutrition sources disagree');
 
-    // 4. Added by the app to make it pass.
-    if (meal.protein_added) {
-        const added = meal.protein_added;
-        // More than a person would eat as an add-on (the app's own limits: 4 eggs, 6 oz chicken, 2 scoops…).
-        const MOST = [[/\begg whites\b/, 1], [/\beggs?\b/, 4], [/\boz\b/, 6], [/\bscoops?\b/, 2], [/\bcups?\b/, 1.5]];
-        [].concat(added).map(String).filter(a => (meal.ingredients || []).includes(a)).forEach(l => {
-            const q = Number((String(l).match(/^(\d+(?:\.\d+)?)/) || [])[1]) / servings;
-            const lim = MOST.find(([re]) => re.test(l.toLowerCase()));
-            if (lim && q > lim[1] * 1.01) add('ingredient added by the app', 'problem', `"${l}": more than a person would add (${q} a serving)`);
-        });
-        const bad = (truth && !['breakfast', 'lunch', 'dinner', 'main'].includes(truth.is)) || (origProtein < 8 && slot !== 'breakfast');
-        add('ingredient added by the app', bad ? 'problem' : 'note', `${added.line || added.food || 'protein'} added for protein (${Math.round(origProtein)} g of its own)`);
+    // 4. The recipe as written: nothing added, removed or swapped (0.1.13 added chicken, eggs, powder,
+    // fiber foods and oil swaps to recipes). Its foods must be the original's (amounts follow the portion).
+    if (meal.protein_added || meal.fiber_added || meal.fat_swapped || meal.trimmed || meal.reseasoned || meal.adapted) add('recipe changed', 'problem', `${meal.protein_added ? `added ${[].concat(meal.protein_added).join(', ')}` : meal.fiber_added ? `added ${[].concat(meal.fiber_added).join(', ')}` : meal.fat_swapped ? 'oil swapped for butter' : meal.trimmed ? 'oil or sugar cut' : meal.reseasoned ? 'seasoning added' : 'an ingredient swapped'}`);
+    const orig = ctx.original && ctx.original(meal);
+    if (orig && !meal.builtin && !meal.quick) {
+        const now = PL.ingredientFoods(meal);
+        const missing = orig.filter(x => !now.includes(x)), extra = now.filter(x => !orig.includes(x));
+        if (missing.length || extra.length) add('recipe changed', 'problem', `${extra.length ? `added: ${extra.slice(0, 3).join(', ')}` : ''}${extra.length && missing.length ? '; ' : ''}${missing.length ? `missing: ${missing.slice(0, 3).join(', ')}` : ''}`);
     }
-    if (meal.fiber_added) add('ingredient added by the app', 'note', `${meal.fiber_added.line || meal.fiber_added.food || 'fiber'} added for fiber`);
 
     // 5. Repeats and luxury.
     if (slot !== 'dinner' && PL.pricey(meal)) add('luxury ingredient', 'problem', `${PL.pricey(meal)} at ${slot}`);
@@ -223,6 +237,7 @@ function checkMeal(meal, slot, ctx) {
     if (/^(with|and|or|in|on|of|for|to|the)\b|^[a-z]|\b(and|with|or|of|the|in)$|^\W|\d{2,}$/.test(name.trim()) ) add('chopped title', 'problem', `"${name}"`);
     const portion = meal.scaled ? Number(meal.scaled.portion) : 1;
     if (portion && Math.abs(portion * 4 - Math.round(portion * 4)) > 0.02) add('odd serving size', 'problem', `${portion} servings`);
+    if (portion && !meal.protein_extra && !meal.snack && (portion < 0.749 || portion > 1.501)) add('portion out of range', 'problem', `${portion} servings (the allowed range is ¾ to 1½)`);
 
     // 7. Avoided foods and allergens.
     const avoid = String(ctx.avoid || '').split(',').concat(String(ctx.settings.allergies || '').split(',')).map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -245,8 +260,21 @@ function checkPlan(res, c) {
     days.forEach((d, i) => MEALS.forEach(slot => {
         const m = d && d[slot];
         if (!m) { push({ day: dayNames[i] || `Day ${i + 1}`, slot, meal: '—' }, { check: 'empty slot', severity: 'problem', what: 'no meal' }); return; }
-        checkMeal(m, slot, { limits: res.limits && res.limits[i], settings: Object.assign({}, BASE, c.settings), avoid: c.avoid }).forEach(f => push({ day: dayNames[i] || `Day ${i + 1}`, slot, meal: m.name, source: res.sourceOf[`${i}:${slot}`] }, f));
+        checkMeal(m, slot, { limits: res.limits && res.limits[i], settings: Object.assign({}, BASE, c.settings), avoid: c.avoid, original: x => (res.originals || {})[x.name] || null }).forEach(f => push({ day: dayNames[i] || `Day ${i + 1}`, slot, meal: m.name, source: res.sourceOf[`${i}:${slot}`] }, f));
     }));
+    // Protein extras: at most two a day, items of their own.
+    days.forEach((d, i) => {
+        const extras = ((d && d.snacks) || []).filter(x => x.protein_extra);
+        if (extras.length > 2) push({ day: dayNames[i] }, { check: 'more than two protein extras', severity: 'problem', what: `${extras.length}: ${extras.map(x => x.name).join(', ')}` });
+        // The day's numbers as the app shows them must be the real total of what's on the day.
+        const real = { kcal: 0, protein: 0 };
+        MEALS.forEach(t => { const m = d && d[t]; if (m && m.nutrition) { real.kcal += Number(m.nutrition.calories) || 0; real.protein += Number(m.nutrition.protein_g) || 0; } });
+        ((d && d.snacks) || []).forEach(m => { if (m.nutrition) { real.kcal += Number(m.nutrition.calories) || 0; real.protein += Number(m.nutrition.protein_g) || 0; } });
+        const shown = (res.shown || [])[i];
+        if (shown && (Math.abs(shown.kcal - real.kcal) > 1 || Math.abs(shown.protein - real.protein) > 1)) push({ day: dayNames[i] }, { check: 'shown totals don\'t match', severity: 'problem', what: `shown ${Math.round(shown.kcal)} kcal / ${Math.round(shown.protein)} g, real ${Math.round(real.kcal)} kcal / ${Math.round(real.protein)} g` });
+        const gap = d && d.protein_gap;
+        if (gap && Math.abs(gap.have - Math.round(real.protein)) > 1) push({ day: dayNames[i] }, { check: 'shown totals don\'t match', severity: 'problem', what: `the protein note says ${gap.have} g, the day has ${Math.round(real.protein)} g` });
+    });
     // Repeats and sources.
     const seen = new Map();
     days.forEach((d, i) => MEALS.forEach(slot => { const m = d && d[slot]; if (!m || m.leftover) return; const k = PL.dishKey ? PL.dishKey(m.name) : lc(m.name); if (seen.has(k)) push({ day: dayNames[i], slot, meal: m.name }, { check: 'repeat', severity: 'problem', what: `also on ${seen.get(k)}` }); else seen.set(k, `${dayNames[i]} ${slot}`); }));
@@ -269,7 +297,9 @@ function checkPlan(res, c) {
         const target = res.targets[i];
         if (!t || !target) return;
         if (Math.abs(t.kcal / target.kcal - 1) > 0.1) push({ day: dayNames[i] }, { check: 'day off target', severity: 'problem', what: `${Math.round(t.kcal)} kcal against ${target.kcal}` });
-        if (t.protein < target.protein * 0.9) push({ day: dayNames[i] }, { check: 'day off target', severity: 'problem', what: `${Math.round(t.protein)} g protein against ${target.protein}` });
+        // Short of protein: fine only when the day says so honestly (real recipes and up to two extras can't reach it).
+        if (t.protein < target.protein * 0.9) push({ day: dayNames[i] }, (d && d.protein_gap) ? { check: 'protein short, said honestly', severity: 'note', what: `${Math.round(t.protein)} g of ${target.protein} with ${d.protein_gap.extras} extra(s)` }
+            : { check: 'day off target', severity: 'problem', what: `${Math.round(t.protein)} g protein against ${target.protein}, with no note` });
     });
     return findings;
 }
@@ -370,6 +400,10 @@ async function main() {
                 limits: daysData.map((d, i) => Object.fromEntries(MEALS.map(t => [t, slotLimitsFor(t, i)]))),
                 sourceOf, spareWeb, spareNames,
                 split: planSourceSplit(daysData),
+                // The recipes as written (the pool the plan was made from), to check nothing was changed.
+                originals: Object.fromEntries(MEALS.flatMap(t => ((lastPlanPools || {})[t] || []).map(r => [r.name, NourishPlanner.ingredientFoods(r)]))),
+                // The day's numbers as the app shows them.
+                shown: daysData.map(d => ({ kcal: sumNutrient(d, 'calories'), protein: sumNutrient(d, 'protein_g') })),
                 log: activityLog.filter(l => l.t >= since && l.area === 'plan').map(l => l.msg + (l.details ? ` ${l.details.slice(0, 400)}` : '')),
             };
         }, { c, BASE, MEALS });
@@ -421,6 +455,21 @@ function report({ version, books, files, results, snapshotSize, live, pageErrors
     lines.push(`${plans} full 7-day plans (${plans * 21} meals), made by the app from ${live ? 'the live recipe sites' : `${snapshotSize} saved web recipes (no internet)`}, the audit's test books and Nourish's own recipes.`, '');
     lines.push(problems.length ? `**${problems.length} problems found.**` : '**Clean: no problems found.**', '');
     lines.push(`Where the meals came from: ${splitTotal.web} web, ${splitTotal.books} books, ${splitTotal.builtin} Nourish recipes${splitTotal.ai ? `, ${splitTotal.ai} AI` : ''}.`, '');
+    // Nutrition checks and protein (0.1.14): how many meals were checked by two or more sources, how
+    // close days get to their protein with real recipes, and how many protein extras they need.
+    const allMeals = results.flatMap(r => (r.res.days || []).flatMap(d => MEALS.map(t => d && d[t]).filter(Boolean)));
+    const multi = allMeals.filter(m => m.nutrition_check && m.nutrition_check.sources >= 2).length;
+    const levels = {};
+    allMeals.forEach(m => { const l = (m.nutrition_check && m.nutrition_check.level) || 'none'; levels[l] = (levels[l] || 0) + 1; });
+    lines.push(`Nutrition checked by two or more sources: ${multi} of ${allMeals.length} meals (${Math.round(multi / Math.max(1, allMeals.length) * 100)}%). Confidence: ${Object.entries(levels).map(([k, n]) => `${k} ${n}`).join(', ')}.`, '');
+    const dayStats = results.flatMap(r => (r.res.days || []).map((d, i) => ({ c: r.case, p: (r.res.totals[i] || {}).protein || 0, t: (r.res.targets[i] || {}).protein || 1, x: ((d && d.snacks) || []).filter(m => m.protein_extra).length })));
+    const avg = f => dayStats.length ? Math.round(dayStats.reduce((a, d) => a + f(d), 0) / dayStats.length * 10) / 10 : 0;
+    lines.push(`Protein: days reach ${Math.round(avg(d => Math.min(1.2, d.p / d.t)) * 100)}% of their target on average; ${dayStats.filter(d => d.p >= d.t * 0.95).length} of ${dayStats.length} days reach 95% or more; protein extras a day: ${avg(d => d.x)} on average (most ${Math.max(0, ...dayStats.map(d => d.x))}).`, '');
+    const hp = results.filter(r => r.case.id === 'high-protein-1500');
+    if (hp.length) {
+        const d = (hp[0].res.days || []).map((x, i) => `${Math.round((hp[0].res.totals[i] || {}).protein || 0)} g${((x && x.snacks) || []).some(m => m.protein_extra) ? ` (${x.snacks.filter(m => m.protein_extra).length} extra)` : ''}`);
+        lines.push(`1,500 kcal with a 150 g protein target, day by day: ${d.join(', ')}.`, '');
+    }
     if (Object.keys(byCheck).length) {
         lines.push('| Check | Problems |', '|---|---|');
         Object.entries(byCheck).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => lines.push(`| ${k} | ${n} |`));

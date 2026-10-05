@@ -516,8 +516,14 @@
         if (!before || before.from !== from || before.list !== r.ingredients) { before = { from, list: r.ingredients, n: N.calculate(r.ingredients, from, r.steps).nutrition }; baseCalc.set(r, before); }
         before = before.n;
         const after = N.calculate(out.ingredients, people, r.steps).nutrition;
-        const ratio = key => (before[key] > 0 && after[key] >= 0 ? after[key] / before[key] : factor);
-        const kcalRatio = before.calories > 0 && after.calories > 0 ? after.calories / before.calories : factor;
+        // Worked out again from the scaled amounts, unless that strays more than 15% from the portion
+        // itself (a rescaled "(about 4 pounds)" read another way than the rack it belongs to, which
+        // made 1½ portions of ribs 1.9 times the calories): then the portion decides.
+        const off = r2 => !(r2 > 0) || Math.abs(r2 / factor - 1) > 0.15;
+        const kcalRatio0 = before.calories > 0 && after.calories > 0 ? after.calories / before.calories : factor;
+        const linear = off(kcalRatio0);
+        const ratio = key => (linear ? factor : before[key] > 0 && after[key] >= 0 ? after[key] / before[key] : factor);
+        const kcalRatio = linear ? factor : kcalRatio0;
         // Lines the calculator can't see (unmatched) keep scaling with the portion.
         const seen = before.calories / Math.max(1, Number(n.calories) || 1);
         const change = key => (key === 'calories' ? kcalRatio : ratio(key)) * Math.min(1, seen) + factor * Math.max(0, 1 - Math.min(1, seen));
@@ -1081,12 +1087,19 @@
     // A recipe's foods without amounts or units (what the cook buys, whatever the portion), to check
     // that a planned meal is the recipe as written: scaling changes amounts, never the foods.
     function ingredientFoods(r) {
-        return (r && r.ingredients || []).map(l => {
+        // Each line's food as the food table knows it (onion, white beans, black pepper), else its
+        // plain words: two lines of one food (merged for display) count once, the wording doesn't matter.
+        const out = new Set();
+        (r && r.ingredients || []).forEach(l => {
+            if (N.isHeader && N.isHeader(String(l))) return;
             const item = U.splitIngredient(String(l));
-            return String(item.text || '').toLowerCase().replace(/\([^)]*\)/g, ' ')
-                .replace(/^\s*(x\s+)?(cans?|tins?|jars?|packages?|packets?|bags?|boxes?|cartons?|blocks?|bunch(es)?|heads?|stalks?|cloves?|slices?|scoops?|pinch(es)?|dash(es)?|sprigs?|of)\b\.?/g, ' ')
-                .replace(/[^a-z ]+/g, ' ').replace(/\b(\w{3,}?)(es|s)\b/g, '$1').replace(/\s+/g, ' ').trim();
-        }).filter(Boolean).sort();
+            const text = String(item.text || l);
+            const m = N.matchFood(text);
+            if (m && m.key) { out.add(m.key.replace(/^cooked /, '')); return; }
+            const words = text.toLowerCase().replace(/\([^)]*\)?/g, ' ').split(/,| - /)[0].replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+            if (words) out.add(words.split(' ').slice(-2).join(' '));
+        });
+        return [...out].sort();
     }
     // === PROTEIN EXTRAS ===
     // Protein is reached by choosing recipes that have it. When a day is still short, up to two simple

@@ -76,3 +76,13 @@ test('tofu: a block is 14 oz, and calcium is what supermarket tofu has (0.1.13 c
     assert.equal(block.lines[0].grams, 396);
     assert.ok(block.nutrition.micros.ca < 1000, `${block.nutrition.micros.ca} mg`);
 });
+
+test('a bigger portion means proportionally more calories, even when a rescaled weight reads differently (ribs at 1½ were 1.9×)', () => {
+    const ribs = recipe('Sticky Oven Baby Back Ribs', ['2 racks baby back pork ribs (about 4 pounds)', '2 tablespoons brown sugar', '1 cup barbecue sauce', '4 cups coleslaw mix', '2 tablespoons mayonnaise'], 4);
+    for (const p of [0.75, 1.25, 1.5]) {
+        const k = PL.scaleRecipe(ribs, p, 1).nutrition.calories / ribs.nutrition.calories;
+        assert.ok(Math.abs(k / p - 1) <= 0.15, `${p}: ×${k.toFixed(2)}`);
+    }
+    // A Parmesan rind simmered in a broth is lifted out: hardly any of it is eaten.
+    assert.ok(N.calculate(['¼ Parmigiano Reggiano rind'], 4, ['Simmer with the rind, then remove it.']).nutrition.calories < 10);
+});
