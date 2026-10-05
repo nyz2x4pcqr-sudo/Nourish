@@ -246,7 +246,9 @@
             const size = Number(pack[1]);
             const unit = pack[2].toLowerCase();
             const each = /^(oz|ounce)/.test(unit) ? size * 28.35 : /^(lb|pound)/.test(unit) ? size * 453.6 : size;
-            const count = qty != null && raw.indexOf(pack[0]) > raw.search(/\d/) ? qty : 1;
+            // How many packs: the amount in front ("2 (15 oz) cans", "½ (15 oz.) can"), unless that
+            // amount is the pack's own size ("15 oz can tomatoes").
+            const count = qty != null && !(G[item.unit] || ML[item.unit]) ? qty : 1;
             grams = each * (count || 1);
         } else if (qty != null) {
             const unit = item.unit;

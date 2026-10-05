@@ -117,7 +117,7 @@
     const PASSIVE = /\b(overnight|refrigerate|chill|soak|marinate|rest|set|freeze|cool)\b/i;
     function countIngredients(r) {
         return (r.ingredients || []).filter(l => {
-            const name = String(l).toLowerCase().replace(/\([^)]*\)/g, '').replace(/^[\d\s/.½¼¾⅓⅔-]+(cups?|tbsp|tsp|tablespoons?|teaspoons?|g|ml|oz|lb|pinch|dash)?\s*(of\s+)?/, '').replace(/,.*$/, '').trim();
+            const name = String(l).toLowerCase().replace(/\([^)]*\)/g, '').replace(/^[\d\s/.½¼¾⅓⅔⅛⅜⅝⅞-]+(cups?|tbsp|tsp|tablespoons?|teaspoons?|g|ml|oz|lb|pinch|dash)?\s*(of\s+)?/, '').replace(/,.*$/, '').trim();
             return name && !STAPLES.test(name) && !/\bto taste\b|for serving|for garnish|optional/.test(String(l).toLowerCase());
         }).length;
     }
@@ -416,23 +416,26 @@
         if (unit === 'tsp' && q >= 0.5 && item.unit !== 'tsp') q = Math.max(0.5, Math.round(q * 2) / 2);
         // A small share of a can: by weight when the can's size is given ("1¾ oz light coconut milk",
         // not "½ can", four times too much for one portion of a 4-serving recipe); else quarter cans.
-        if (unit === 'can') {
+        // "2 (15 oz.) cans white beans": a can too, with its size written first.
+        const canFirst = !unit && /^\(?\s*\d+(\.\d+)?\s*-?\s*(oz|ounces?|g|grams?|ml)\.?\s*\)?\s*(cans?|tins?|jars?|cartons?)\b/i.test(String(item.text || ''));
+        if (unit === 'can' || canFirst) {
             const pack = String(line).match(/(\d+(?:\.\d+)?)\s*-?\s*(oz|ounces?|ounce|g|grams?|ml)\b/i);
             if (q < 0.5 && pack) {
                 const u = /^(oz|ounce)/i.test(pack[2]) ? 'oz' : /^g/i.test(pack[2]) ? 'g' : 'ml';
                 let w = q * Number(pack[1]);
                 w = u === 'oz' ? Math.max(0.25, Math.round(w * 4) / 4) : Math.max(5, Math.round(w / 5) * 5);
-                const text = String(item.text || '').replace(/\(+[^()]*\d[^()]*\)+/g, ' ').replace(/^\s*(cans?|tins?)\s+(of\s+)?/i, '').replace(/[()]/g, ' ')
+                const text = String(item.text || '').replace(/\(+[^()]*\d[^()]*\)+/g, ' ').replace(/^\s*\d+(\.\d+)?\s*-?\s*(oz|ounces?|g|grams?|ml)\.?\s*/i, '').replace(/^\s*(cans?|tins?|jars?|cartons?)\s+(of\s+)?/i, '').replace(/[()]/g, ' ')
                     .replace(/\s+,/g, ',').replace(/\s+/g, ' ').replace(/,\s*$/, '').trim();
                 return `${U.formatAmount(w, u)} ${text}`.trim();
             }
             q = Math.max(0.25, Math.round(q * 4) / 4);
-            const amount = U.formatAmount(q, unit);
+            const amount = U.formatAmount(q, unit || '');
             return item.note !== undefined ? `${item.text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${item.text}`.trim();
         }
         // Things you can't cook half of (eggs, tortillas, slices, fillets…) stay whole.
         if ((!unit || unit === 'slice' || unit === 'piece' || unit === 'fillet') && WHOLE.test(item.text || '')) q = Math.max(1, Math.round(q));
-        else if (!unit || unit === 'clove' || unit === 'can' || unit === 'slice' || unit === 'piece' || unit === 'fillet') q = Math.max(0.5, Math.round(q * 2) / 2);
+        else if (!unit) q = q >= 0.75 ? Math.round(q * 2) / 2 : Math.max(0.25, Math.round(q * 4) / 4);   // ¼ onion, ½ avocado, 1½ peppers
+        else if (unit === 'clove' || unit === 'slice' || unit === 'piece' || unit === 'fillet') q = Math.max(0.5, Math.round(q * 2) / 2);
         else if (unit === 'g' || unit === 'ml') q = Math.max(5, Math.round(q / 5) * 5);
         else if (unit === 'oz' && q >= 2) q = Math.round(q);
         else if (unit === 'cup' && q >= 0.25) {
@@ -1012,10 +1015,10 @@
     // protein-less breakfast: a smoothie or oats get protein powder or Greek yogurt, an egg breakfast
     // more eggs or egg whites, a lunch or dinner lean chicken, tofu or tuna. Anything the person
     // avoids, is allergic to or doesn't eat (diet) is never used. `need`: grams of protein per person.
-    const BOOST_MOST = { tempeh: 6, 'cooked lentils': 1, eggs: 4, 'egg whites': 1, 'chicken breast': 6, 'firm tofu': 6, 'canned tuna': 5, edamame: 1, 'protein powder': 2, 'greek yogurt': 1.5, 'cottage cheese': 1 };
+    const BOOST_MOST = { 'soy yogurt': 1.5, tempeh: 6, 'cooked lentils': 1, eggs: 4, 'egg whites': 1, 'chicken breast': 6, 'firm tofu': 6, 'canned tuna': 5, edamame: 1, 'protein powder': 2, 'greek yogurt': 1.5, 'cottage cheese': 1 };
     const BOOSTERS = {
-        sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.']],
-        savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.']],
+        sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['soy yogurt', 'cup', 9, 'Serve with the soy yogurt (stirred in or on the side).']],
+        savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.'], ['firm tofu', 'oz', 4.9, 'Crumble the tofu and pan-fry it with a pinch of salt for 5 minutes; serve alongside.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.']],
         main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 4.9, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 5.4, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.'], ['tempeh', 'oz', 5.7, 'Slice the tempeh, pan-fry until golden and serve with the dish.'], ['cooked lentils', 'cup', 18, 'Warm the lentils and stir them in or serve alongside.']],
     };
     const SWEET_BREAKFAST_DISH = /\b(smoothie|shake|oat|oats|oatmeal|porridge|granola|muesli|bircher|chia|yogh?urt|parfait|pancakes?|waffles?|crepes?|muffins?|fruit|acai|bowl|toast with (jam|honey|nut))\b/i;
@@ -1027,11 +1030,12 @@
         // still short gets more of the same food.
         const already = (meal.protein_added || [])[0];
         if (already) {
-            const hit = BOOSTERS[kind].concat(BOOSTERS.main, BOOSTERS.sweet, BOOSTERS.savory).find(([food]) => already.indexOf(food) >= 0);
+            const hit = BOOSTERS[kind].concat(BOOSTERS.main, BOOSTERS.sweet, BOOSTERS.savory).find(([food]) => already.indexOf(food.replace(/s$/, '')) >= 0);
             if (!hit) return meal;
             const [food, unit, perUnit] = hit;
             // The line as it is now (a resized portion changed its amount), found by its food.
-            const idx = (meal.ingredients || []).map(String).findIndex(l => l.toLowerCase().indexOf(food) >= 0 && /^[\d½¼¾⅓⅔]/.test(l.trim()));
+            const stem = food.replace(/s$/, '');   // "1 egg" as well as "3 eggs"
+            const idx = (meal.ingredients || []).map(String).findIndex(l => l.toLowerCase().indexOf(stem) >= 0 && /^[\d½¼¾⅓⅔]/.test(l.trim()));
             if (idx < 0) return meal;
             const now = meal.ingredients[idx];
             const item = U ? U.splitIngredient(now) : null;
@@ -1277,6 +1281,25 @@
             const f2 = balanceFiber(p2.day, settings, people, exclude);
             notes.push(...p2.notes, ...f2.notes);
             again = f2;
+        }
+        // Still well short of the day's protein with every meal at its most: a protein shake as a
+        // snack, said plainly (never more chicken piled on a dish), then the day sized again.
+        const T = targetsOf(settings || {});
+        const have = dayTotals(again.day).protein;
+        if (T.protein > 0 && have < T.protein * 0.92) {
+            const scoops = Math.min(2, Math.max(1, Math.ceil((T.protein * 0.97 - have) / 24)));
+            const milk = [`${scoops} scoop${scoops > 1 ? 's' : ''} protein powder`, '1 cup skim milk'];
+            const plant = [`${scoops} scoop${scoops > 1 ? 's' : ''} protein powder`, '1 cup unsweetened soy milk'];
+            const water = [`${scoops} scoop${scoops > 1 ? 's' : ''} protein powder`, '1 cup water'];
+            const ok = list => !(exclude && exclude({ name: 'Protein Shake', ingredients: list }));
+            const ings = [milk, plant, water].find(ok);
+            if (ings) {
+                const shake = { name: 'Protein Shake', servings: 1, time_minutes: 2, ingredients: ings.slice(), steps: ['Shake or blend the protein powder with the liquid until smooth.'], snack: true, protein_snack: true,
+                    description: 'Added to reach the day\'s protein.', nutrition: N.calculate(ings, 1).nutrition, nutrition_basis: 'calculated' };
+                const day2 = Object.assign({}, again.day, { snacks: (again.day.snacks || []).concat(shake) });
+                notes.push(`the day had ${Math.round(have)} g protein of ${T.protein} g with every meal at its most; added a protein shake as a snack (${ings[0]})`);
+                again = { day: kcal > 0 && dayTotals(day2).kcal > kcal * 1.05 ? fitDay(day2, settings, people) : day2 };
+            }
         }
         return { day: again.day, notes };
     }

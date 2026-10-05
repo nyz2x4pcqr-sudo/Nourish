@@ -183,6 +183,10 @@ function checkMeal(meal, slot, ctx) {
     if (kcal > 0 && p * 4 / kcal > 0.85 && !meal.protein_added) add('implausible nutrition', 'problem', `${Math.round(p * 4 / kcal * 100)}% of the calories from protein: leaner than plain chicken breast`);
     if (kcal > 0 && (kcal < 120 || kcal > 2000)) add('implausible nutrition', 'problem', `${kcal} kcal for a ${slot}`);
 
+    // 3b. Protein in each meal (Nourish's own rule: breakfast never under 25 g, main meals 25–40 g).
+    if (slot === 'breakfast' && p < 24.5) add('meal low in protein', 'problem', `breakfast with ${p} g protein (the rule is at least 25 g)`);
+    if (slot !== 'breakfast' && p < 20) add('meal low in protein', 'problem', `${slot} with ${p} g protein`);
+
     // 4. Added by the app to make it pass.
     if (meal.protein_added) {
         const added = meal.protein_added;

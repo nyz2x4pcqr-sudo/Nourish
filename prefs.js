@@ -63,16 +63,22 @@
     };
     // Words that aren't the food they look like: "peanut butter" isn't dairy, "eggplant" isn't egg.
     const NOT = {
-        butter: ['peanut butter', 'almond butter', 'nut butter', 'cashew butter', 'apple butter', 'cocoa butter', 'butternut', 'butter bean', 'butterhead', 'sunflower butter'],
-        milk: ['coconut milk', 'almond milk', 'oat milk', 'soy milk', 'rice milk', 'cashew milk', 'milk chocolate'],
-        cream: ['coconut cream', 'cream of tartar'],
+        butter: ['peanut butter', 'almond butter', 'nut butter', 'cashew butter', 'apple butter', 'cocoa butter', 'butternut', 'butter bean', 'butterhead', 'sunflower butter', 'vegan butter', 'plant butter', 'plant-based butter'],
+        milk: ['coconut milk', 'almond milk', 'oat milk', 'soy milk', 'soya milk', 'rice milk', 'cashew milk', 'dairy-free milk', 'plant milk', 'plant-based milk', 'non-dairy milk'],
+        cream: ['coconut cream', 'cream of tartar', 'oat cream', 'soy cream', 'cashew cream'],
+        yogurt: ['soy yogurt', 'soya yogurt', 'coconut yogurt', 'oat yogurt', 'almond yogurt', 'dairy-free yogurt', 'plant-based yogurt', 'vegan yogurt'],
+        yoghurt: ['soy yoghurt', 'soya yoghurt', 'coconut yoghurt', 'oat yoghurt', 'dairy-free yoghurt', 'vegan yoghurt'],
         egg: ['eggplant'],
         nut: ['nutmeg', 'coconut', 'butternut', 'doughnut', 'donut', 'nutritional yeast', 'water chestnut'],
         corn: ['peppercorn', 'corned'],
         pepper: ['black pepper', 'white pepper', 'pepper flakes', 'peppercorn', 'salt and pepper', 'ground pepper', 'cracked pepper', 'lemon pepper'],
         fish: ['fish sauce'],
-        cheese: ['vegan cheese', 'nutritional yeast'],
+        cheese: ['vegan cheese', 'nutritional yeast', 'dairy-free cheese', 'plant-based cheese'],
+        dairy: ['dairy-free', 'dairy free', 'non-dairy', 'nondairy'],
+        gluten: ['gluten-free', 'gluten free'],
     };
+    // "Gluten-free pasta", "gluten-free buns": not the gluten food they name.
+    (GROUPS.gluten || []).forEach(t => { NOT[t] = (NOT[t] || []).concat([`gluten-free ${t}`, `gluten free ${t}`, `gluten-free ${t}s`, `gluten free ${t}s`]); });
     const CUISINES = ['italian', 'mexican', 'thai', 'indian', 'japanese', 'chinese', 'korean', 'vietnamese', 'mediterranean', 'greek', 'middle eastern', 'lebanese', 'turkish', 'moroccan', 'french', 'spanish', 'american', 'cajun', 'caribbean', 'ethiopian', 'persian', 'filipino', 'indonesian', 'malaysian', 'peruvian', 'brazilian', 'british', 'german'];
     const DIET_EXCLUDES = {
         Vegetarian: ['meat', 'fish', 'shellfish'], Vegan: ['meat', 'fish', 'shellfish', 'dairy', 'egg', 'honey'], Pescatarian: ['meat'],
