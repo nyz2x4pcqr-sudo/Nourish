@@ -4445,9 +4445,15 @@ async function fillMissingMeals(plan) {
     const run = canWrite ? (onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled: () => localPlanCancelled }) : aiRunner()) : null;
     // A small job for the AI: pick the one they'd enjoy most from a few real recipes.
     const closest = async (list, slot, skip) => {
-        // Nourish's own recipes are a backup: a web or book recipe that fits comes first.
+        // Nourish's own recipes are a backup: a web or book recipe that fits comes first, and never
+        // a source's 4th meal of the week (3 by default).
         const own = r => r && (r.builtin || r.source_id === 'builtin');
-        let few = settings.builtin_mode === 'off' || settings.builtin_mode === 'mix' ? [] : closestFew(list.filter(r => !own(r)), slot, skip);
+        const cap = Number(settings.source_cap) > 0 ? Number(settings.source_cap) : 3;
+        const used = {};
+        plan.days.forEach(d => MEAL_TYPES.forEach(t => { const m = d && d[t]; if (m) { const k = NourishPlanner.sourceKey(m); used[k] = (used[k] || 0) + 1; } }));
+        const room = r => own(r) || (used[NourishPlanner.sourceKey(r)] || 0) < cap;
+        let few = settings.builtin_mode === 'off' || settings.builtin_mode === 'mix' ? [] : closestFew(list.filter(r => !own(r) && room(r)), slot, skip);
+        if (!few.length) few = closestFew(list.filter(room), slot, skip);
         if (!few.length) few = closestFew(list, slot, skip);
         if (few.length < 2 || !run) return few[0] || null;
         try { return few[await aiChoose(run, slot.meal, few.map(r => r.name))] || few[0]; } catch (e) { return few[0]; }
