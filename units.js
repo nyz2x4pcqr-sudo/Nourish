@@ -24,18 +24,30 @@
     const METRIC = ['ml', 'l', 'g', 'kg'];
 
     // "1 1/2", "1/2", "1.5", "1½", "½", "2-3" (→ 2, high 3) at the start of text.
-    function parseNumber(text) {
+    // One amount at the start of the text: "1", "1.5", "½", "1½", "1/2", "1 1/2".
+    function readOne(text) {
         const frac = text.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)/);
-        if (frac && Number(frac[3])) return { value: (frac[1] ? Number(frac[1]) : 0) + Number(frac[2]) / Number(frac[3]), length: frac[0].length };
-        // A range may end in a fraction: "1 to 1½ tbsp", "2-2½ cups".
-        const m = text.match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?(?![\d/]))?/);
+        if (frac && Number(frac[3])) return { value: (frac[1] ? Number(frac[1]) : 0) + Number(frac[2]) / Number(frac[3]), length: frac[0].length, whole: false };
+        const m = text.match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?/);
         if (!m || !(m[1] || m[2])) return null;
-        const value = (m[1] ? Number(m[1]) : 0) + (m[2] ? FRACTIONS[m[2]] : 0);
-        const high = (m[3] ? Number(m[3]) : 0) + (m[4] ? FRACTIONS[m[4]] : 0);
-        const out = { value, length: m[0].length };
-        if (!(m[3] || m[4])) out.length = (m[0].match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?/) || [''])[0].length;
-        if (high > value) out.high = high;
-        else if (m[3] || m[4]) out.length = (m[0].match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?/) || [''])[0].length;
+        const len = m[2] ? m[0].length : m[1].length;
+        return { value: (m[1] ? Number(m[1]) : 0) + (m[2] ? FRACTIONS[m[2]] : 0), length: len, whole: !m[2] && /^\d+$/.test(m[1]) };
+    }
+    // An amount, or a range of them: "1 to 1½ tbsp", "2-2½ cups", "¼ -1/2 tsp", "1/4 - 1/2 tsp".
+    // "1-1/2 cups" (no spaces, a whole number then a fraction) is how US recipes write 1½.
+    function parseNumber(text) {
+        const first = readOne(text);
+        if (!first) return null;
+        const out = { value: first.value, length: first.length };
+        const sep = text.slice(first.length).match(/^\s*(?:-|–|to)\s*/);
+        if (!sep) return out;
+        const at = first.length + sep[0].length;
+        const second = readOne(text.slice(at));
+        if (!second || /^[\d/]/.test(text.slice(at + second.length))) return out;
+        if (first.whole && sep[0] === '-' && second.value < 1 && /\//.test(text.slice(at, at + second.length))) {
+            return { value: first.value + second.value, length: at + second.length };
+        }
+        if (second.value > first.value) { out.high = second.value; out.length = at + second.length; }
         return out;
     }
 

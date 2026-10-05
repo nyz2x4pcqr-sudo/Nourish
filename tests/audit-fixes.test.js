@@ -93,3 +93,14 @@ test('a description made from the recipe never carries amounts, units or bracket
     const n = require('../planner.js').scaleLine('4 skinless and boneless (approx. 480g) salmon fillets', 0.25);
     assert.equal(n, '1 skinless and boneless (approx. 120g) salmon fillets');
 });
+
+test('amount ranges ending in a written fraction, and frozen dumplings counted by the piece', () => {
+    const U = require('../units.js');
+    assert.deepEqual(U.splitIngredient('¼ -1/2 tsp red pepper flakes'), { qty: 0.25, unit: 'tsp', text: 'red pepper flakes', qtyHigh: 0.5 });
+    assert.equal(U.splitIngredient('1/4 - 1/2 tsp chili flakes').unit, 'tsp');
+    assert.equal(U.splitIngredient('1-1/2 cups rice').qty, 1.5);
+    assert.ok(N.calculate(['¼ -1/2 tsp red pepper flakes'], 1).nutrition.calories < 10);
+    const d = N.calculate(['24 frozen chicken potstickers'], 1).lines[0];
+    assert.equal(d.key, 'dumplings');
+    assert.ok(d.grams <= 700, `${d.grams} g`);
+});

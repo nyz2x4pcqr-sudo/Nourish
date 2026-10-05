@@ -55,6 +55,9 @@
         oxtail: { n: [196, 23, 0, 11, 0, 0, 10, 250, 18], a: ['oxtails', 'oxtail pieces'], u: [[150, 'piece']] },
         barley: { n: [352, 9.9, 77.7, 1.2, 15.6, 0, 29, 280, 79], a: ['pearl barley', 'pot barley', 'hulled barley', 'barley'], u: [[200, 'cup']] },
         plantain: { n: [122, 1.3, 31.9, 0.4, 2.3, 0, 3, 499, 37], a: ['plantains', 'green plantains', 'green plantain', 'ripe plantains', 'platanos'], u: [[179, 'medium']] },
+        // Frozen filled dumplings, counted by the piece (about 25 g each), never as the meat in them.
+        dumplings: { n: [210, 8.5, 27, 7.5, 1.5, 2.2, 25, 150, 15], a: ['dumpling', 'potstickers', 'potsticker', 'pot stickers', 'gyoza', 'wontons', 'wonton', 'dim sum', 'mandu', 'momos', 'chicken potstickers', 'pork potstickers', 'chicken dumplings', 'pork dumplings', 'shrimp dumplings', 'vegetable dumplings', 'veggie dumplings', 'chicken gyoza', 'pork gyoza', 'vegetable gyoza', 'chicken wontons', 'pork wontons', 'shrimp wontons', 'frozen potstickers', 'frozen dumplings', 'frozen gyoza', 'frozen wontons', 'chicken and vegetable potstickers', 'pork and chive dumplings'], u: [[25, 'piece'], [25, 'none']] },
+        'chili crisp': { n: [600, 4, 12, 58, 4, 8, 30, 200, 30], a: ['chili crunch', 'chilli crisp', 'chili oil crisp', 'spicy chili crisp', 'chili onion crunch'], u: [[13, 'tbsp'], [4, 'tsp']] },
         'sweet chili sauce': { n: [207, 0.4, 51, 0.6, 1, 0, 8, 90, 4], a: ['thai sweet chili sauce', 'sweet chilli sauce', 'thai sweet chilli sauce'], u: [[19, 'tbsp']] },
     };
     Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });
