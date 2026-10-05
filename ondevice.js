@@ -1008,8 +1008,14 @@ async function localSpoonacular(body) {
     if (body.diet) q.diet = body.diet;
     if (body.intolerances) q.intolerances = body.intolerances;
     if (body.max_ready_time) q.maxReadyTime = body.max_ready_time;
+    if (body.min_protein) q.minProtein = body.min_protein;
+    if (body.max_calories) q.maxCalories = body.max_calories;
+    if (body.type) q.type = body.type;
     const qs = Object.keys(q).map(k => k + '=' + encodeURIComponent(q[k])).join('&');
-    return nativeJSON(`https://api.spoonacular.com/recipes/complexSearch?${qs}`, { headers: { 'x-api-key': key } });
+    // Through nativeHttp, not nativeJSON: the activity log never sees the address (the key is a header anyway).
+    const res = await nativeHttp(`https://api.spoonacular.com/recipes/complexSearch?${qs}`, { headers: { 'x-api-key': key } });
+    if (res.status >= 400) { const e = new Error(`Spoonacular returned ${res.status}`); e.status = res.status; throw e; }
+    return JSON.parse(res.body || '{}');
 }
 
 const SKIP_HOSTS = ['youtube.com', 'pinterest.', 'facebook.com', 'instagram.com', 'tiktok.com', 'reddit.com', 'amazon.'];

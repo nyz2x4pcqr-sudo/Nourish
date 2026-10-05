@@ -19,7 +19,8 @@
     const SOURCES = [
         // --- APIs ---
         { id: 'themealdb', name: 'TheMealDB', kind: 'api', group: 'api', status: 'ok', note: 'Free recipe database, no key needed.' },
-        { id: 'spoonacular', name: 'Spoonacular', kind: 'api', group: 'api', status: 'ok', needsKey: 'spoonacular_api_key', nutrition: true, note: 'Large recipe database with nutrition. Needs a free key.' },
+        { id: 'spoonacular', name: 'Spoonacular', kind: 'api', group: 'api', status: 'ok', needsKey: 'spoonacular_api_key', nutrition: true, note: 'Finds recipes by protein and calories. Needs a free key (50 points a day).' },
+        { id: 'fatsecret', name: 'FatSecret recipes', kind: 'api', group: 'api', status: 'ok', needsKey: 'fatsecret_key', nutrition: true, note: 'Recipes with their own nutrition, searched by protein. Needs a free key.' },
 
         // --- Nourish's own recipes (builtins.js): always there, offline too ---
         { id: 'builtin', name: 'Nourish kitchen', kind: 'builtin', group: 'builtin', status: 'ok', note: 'Nourish\'s own tested recipes, built into the app. Work offline.' },

@@ -117,6 +117,9 @@
             page: r.page || undefined,
             book_id: r.book_id || undefined,
             book_recipe_id: r.from_book ? (r.book_recipe_id || r.id) : undefined,
+            // From a recipe API whose terms don't allow keeping it (FatSecret, Spoonacular): this plan only.
+            no_store: r.no_store || undefined,
+            fatsecret_id: r.fatsecret_id || undefined,
         };
         Object.keys(out).forEach(k => { if (out[k] === undefined) delete out[k]; });
         if (out.ingredients.length < 3 || !out.steps.length) return null;
@@ -620,6 +623,52 @@
         };
     }
 
+    // FatSecret's recipes: search (recipes.search.v3, or the older recipes.search where v3 isn't on
+    // the free plan), then the details of the first few (recipe.get.v2).
+    const FS_TYPES = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Main Dish' };
+    async function fatsecretRecipes(o, meal, query, { proteinShare = 0, maxKcal = 0, minKcal = 0 } = {}, ctx) {
+        const call = async q => {
+            const res = await o.service('fatsecret', { method: 'GET', url: 'https://platform.fatsecret.com/rest/server.api', query: Object.assign({ format: 'json' }, q) });
+            if (res.status !== 200) { const e = new Error(`FatSecret returned ${res.status}`); e.status = res.status; throw e; }
+            const data = JSON.parse(res.body || '{}');
+            if (data && data.error) { const e = new Error(`FatSecret: ${data.error.message || data.error.code}`); e.code = data.error.code; throw e; }
+            return data;
+        };
+        let found;
+        try {
+            const q = { method: 'recipes.search.v3', search_expression: query, max_results: '10', recipe_types: FS_TYPES[meal], must_have_images: 'false' };
+            if (proteinShare) q['protein_percentage.from'] = String(proteinShare);
+            if (maxKcal) { q['calories.to'] = String(maxKcal); q['calories.from'] = String(minKcal || 0); }
+            found = await call(q);
+        } catch (e) {
+            if (!e.code) throw e;
+            if (ctx) ctx.trace(`fatsecret: recipes.search.v3 not available (${e.message}); using recipes.search`);
+            found = await call({ method: 'recipes.search', search_expression: query, max_results: '10', recipe_type: FS_TYPES[meal] });
+        }
+        const ids = [].concat((found && found.recipes && found.recipes.recipe) || []).map(r => r && r.recipe_id).filter(Boolean).slice(0, 4);
+        const out = [];
+        for (const id of ids) {
+            try { const d = await call({ method: 'recipe.get.v2', recipe_id: String(id) }); const r = fromFatSecret(d && d.recipe); if (r) out.push(r); } catch (e) { if (ctx) ctx.trace(`fatsecret: recipe ${id}: ${e.message}`); }
+        }
+        return out;
+    }
+    function fromFatSecret(f) {
+        if (!f || !f.recipe_name) return null;
+        const list = x => (x == null ? [] : [].concat(x));
+        const serving = list(f.serving_sizes && f.serving_sizes.serving)[0] || {};
+        const num = v => (v == null || v === '' ? null : Number(v));
+        return {
+            name: String(f.recipe_name), description: f.recipe_description ? String(f.recipe_description) : undefined,
+            servings: Math.max(1, Math.round(num(f.number_of_servings) || 1)),
+            time_minutes: (num(f.preparation_time_min) || 0) + (num(f.cooking_time_min) || 0) || undefined,
+            ingredients: list(f.ingredients && f.ingredients.ingredient).map(i => String(i.ingredient_description || '')).filter(Boolean),
+            steps: list(f.directions && f.directions.direction).sort((a, b) => num(a.direction_number) - num(b.direction_number)).map(d => String(d.direction_description || '')).filter(Boolean),
+            nutrition: num(serving.calories) > 0 ? { calories: num(serving.calories), protein_g: num(serving.protein), carbs_g: num(serving.carbohydrate), fat_g: num(serving.fat) } : null,
+            category: list(f.recipe_types && f.recipe_types.recipe_type).map(String),
+            source_url: f.recipe_url ? String(f.recipe_url) : undefined, source_name: 'FatSecret', source_id: 'fatsecret', fatsecret_id: String(f.recipe_id || ''), no_store: true,
+        };
+    }
+
     // === FINDING RECIPES ===
     // o: { settings, likes, avoid, goal, days, enabled(id) → bool, fetchPage(url, {browser}) →
     //      {status, body}, readRecipe(html, url) → recipe|null, api(path, body) → json,
@@ -705,12 +754,31 @@
                 ((data && data.meals) || []).forEach(m => { if (n < 12 && add(fromMealDb(m), S.byId('themealdb'))) n++; });
             })().catch(e => { siteFailed(ctx, 'themealdb', e.message, e.blocked); }));
         }
+        // Spoonacular (free key, 50 points a day): one search per meal, with nutrient filters so the
+        // recipes already have the protein; skipped when today's points are nearly used. Its recipes
+        // are used for this plan only and never kept in the library (its terms allow an hour).
         const spoonKey = o.settings && o.settings.spoonacular_api_key;
-        if (o.api && enabled('spoonacular') && (spoonKey || o.spoonacularKeySaved) && siteOk(ctx, 'spoonacular')) {
+        const T = PL.targetsOf(Object.assign({ goal: o.goal }, o.settings || {}));
+        const split = PL.splitOf(o.settings || {});
+        const slotKcal = m => Math.round(T.kcal * split[MEALS.indexOf(m)]);
+        if (o.api && enabled('spoonacular') && (spoonKey || o.spoonacularKeySaved) && siteOk(ctx, 'spoonacular') && (!o.spoonacularRoom || o.spoonacularRoom())) {
             MEALS.filter(m => want(m)).forEach(meal => apiJobs.push((async () => {
-                const data = await o.api('/api/recipes/spoonacular', { query: queriesFor(meal, o)[0], number: 10, exclude: o.avoid || '', diet: o.spoonacularDiet, intolerances: (o.settings && o.settings.allergies) || undefined });
-                ((data && data.results) || []).forEach(r => add(fromSpoonacular(r), S.byId('spoonacular')));
+                if (o.spoonacularRoom && !o.spoonacularRoom()) return;
+                const filters = wantsProtein(o) ? { min_protein: meal === 'breakfast' ? 20 : 28 } : {};
+                const data = await o.api('/api/recipes/spoonacular', Object.assign({ query: queriesFor(meal, o)[0], number: 10, exclude: o.avoid || '', diet: o.spoonacularDiet, intolerances: (o.settings && o.settings.allergies) || undefined,
+                    max_calories: Math.round(slotKcal(meal) / 0.75), type: meal === 'breakfast' ? 'breakfast' : 'main course' }, filters));
+                if (o.spoonacularUsed) o.spoonacularUsed(data && data._quota_used);
+                ((data && data.results) || []).forEach(r => add(Object.assign(fromSpoonacular(r), { no_store: true }), S.byId('spoonacular')));
             })().catch(e => { siteFailed(ctx, 'spoonacular', e.message, e.blocked); })));
+        }
+        // FatSecret recipes (free Basic key): searched by meal type, protein share and calories, then
+        // read one by one. Their numbers are FatSecret's own (cross-checked like every other source).
+        // Only the recipe's id may be kept beyond 24 hours (their terms): used for this plan only.
+        if (o.service && o.fatsecretOn && o.fatsecretOn() && enabled('fatsecret') && siteOk(ctx, 'fatsecret')) {
+            MEALS.filter(m => want(m)).forEach(meal => apiJobs.push((async () => {
+                const list = await fatsecretRecipes(o, meal, queriesFor(meal, o)[0], { proteinShare: wantsProtein(o) ? 30 : 0, maxKcal: Math.round(slotKcal(meal) / 0.75), minKcal: Math.round(slotKcal(meal) / 1.6) }, ctx);
+                list.forEach(r => add(r, S.byId('fatsecret')));
+            })().catch(e => { siteFailed(ctx, 'fatsecret', e.message, e.blocked); })));
         }
 
         // 2b. The recipe sites, meal by meal: the meal that's furthest from enough goes first, each
@@ -921,7 +989,7 @@
         return Object.assign(plan, { stats, pools, adaptable });
     }
 
-    const api = { robotsRules, robotsAllow, linksFromHtml, matching, mainWord, searchSite, findRecipes, planFromSources, sourceCost, notAMeal, balance, siteSuits, siteQueries, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
+    const api = { fromFatSecret, fatsecretRecipes, robotsRules, robotsAllow, linksFromHtml, matching, mainWord, searchSite, findRecipes, planFromSources, sourceCost, notAMeal, balance, siteSuits, siteQueries, queriesFor, goodLink, tidy, vet, fromMealDb, fromSpoonacular, LIMITS, CACHE, QUERIES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishFinder = api;
 })(typeof window !== 'undefined' ? window : globalThis);

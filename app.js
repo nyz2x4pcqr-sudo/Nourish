@@ -2468,6 +2468,9 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
             : meal.library_path ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), `From your recipe library: ${meal.library_path}`)
             : meal.builtin ? h('div', { class: 'btn btn-secondary recipe-source', role: 'note' }, icon('i-book'), "Nourish recipe: written for this app, not from a recipe site (works offline)")
             : h('div', { style: 'height:20px' }),
+        // The credit a recipe API asks for, under its recipes.
+        meal.source_id === 'fatsecret' || meal.source_id === 'spoonacular' ? h('p', { class: 'check-credit recipe-credit' },
+            h('a', { href: NourishServices.SERVICES[meal.source_id].attribution.url, target: '_blank', rel: 'noopener', text: meal.source_id === 'fatsecret' ? 'Powered by fatsecret' : 'Recipe found with spoonacular' })) : null,
     );
     content.scrollTop = 0;
     $('recipeSheet').classList.add('active');
@@ -3503,6 +3506,8 @@ function normalizeMeal(m) {
         source_nutrition: m.source_nutrition && Number(m.source_nutrition.calories) > 0 ? { calories: toNumber(m.source_nutrition.calories), protein_g: toNumber(m.source_nutrition.protein_g), carbs_g: toNumber(m.source_nutrition.carbs_g), fat_g: toNumber(m.source_nutrition.fat_g) } : undefined,
         scaled: m.scaled && Number(m.scaled.portion) > 0 ? { from_servings: toNumber(m.scaled.from_servings), portion: toNumber(m.scaled.portion) } : undefined,
         reseasoned: Array.isArray(m.reseasoned) && m.reseasoned.length ? m.reseasoned.map(String).slice(0, 6) : undefined,
+        source_id: m.source_id ? String(m.source_id).slice(0, 60) : undefined,
+        no_store: m.no_store ? true : undefined,
         trimmed: m.trimmed ? true : undefined,
         active_minutes: toNumber(m.active_minutes) > 0 ? toNumber(m.active_minutes) : undefined,
         quick: m.quick ? true : undefined,
@@ -4422,9 +4427,14 @@ function finderOptions(likes, hates) {
         goal: prefs.goal, likes, avoid: hates, days: 7, people: servingsWanted(),
         enabled: id => !off.has(id),
         customSites: String(settings.custom_sites || '').split(/[\s,]+/).filter(Boolean),
-        spoonacularKeySaved: !isLocalMode() && !!secretsSet.spoonacular_api_key,
+        spoonacularKeySaved: serviceHasKey('spoonacular'),
         spoonacularDiet: SPOONACULAR_DIETS[settings.diet],
         nutritionCheck: nutritionCheckFor,
+        // The free recipe APIs, within their limits (services.js).
+        service: serviceSend,
+        fatsecretOn: () => serviceHasKey('fatsecret') && !NourishServices.limitReached('fatsecret'),
+        spoonacularRoom: () => !NourishServices.limitReached('spoonacular'),
+        spoonacularUsed: used => NourishServices.count('spoonacular', 1, Date.now(), Number(used) > 0 ? Number(used) : (NourishServices.usage('spoonacular').points || 0) + 1.6),
         fetchPage: (url, { browser } = {}) => fetchForImport(url, { browser }),
         readRecipe: (html, url) => { try { return NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } },
         api: (path, body) => api(path, { method: 'POST', timeoutMs: 45000, body }),
@@ -4595,7 +4605,8 @@ function crossCheckQueue() {
     // Plan meals are sized copies: their base recipe is in the library or the pools.
     const base = new Map();
     const cache = loadJSON(NourishFinder.CACHE.recipes, {}) || {};
-    const lib = Object.values(cache).map(c => c && c.r).filter(Boolean);
+    const lib = Object.values(cache).map(c => c && c.r).filter(Boolean)
+        .concat(recipeDBReady ? recipeDB.forPlanning().filter(r => r && r.from_book) : []);   // the person's books too
     lib.concat(...Object.values(lastPlanPools || {})).forEach(r => { if (r && r.name && !base.has(r.name)) base.set(r.name, r); });
     daysData.forEach(d => MEAL_TYPES.forEach(t => { const m = d && d[t]; if (m) push(base.get(m.name) || m, 'in your plan'); }));
     const settled = lib.map(r => { const x = JSON.parse(JSON.stringify(r)); NourishNutrition.settle(x); return [r, NourishCrossCheck.localCheck(x)]; });

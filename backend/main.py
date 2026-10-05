@@ -116,6 +116,10 @@ class RecipeSearchRequest(BaseModel):
     diet: Optional[str] = None
     intolerances: Optional[str] = None
     max_ready_time: Optional[int] = None
+    # Nutrient filters (Spoonacular): recipes that already have the protein, within the slot's calories.
+    min_protein: Optional[int] = None
+    max_calories: Optional[int] = None
+    type: Optional[str] = None
 
 
 def upstream_error(res: httpx.Response, who: str) -> HTTPException:
@@ -394,6 +398,12 @@ async def recipes_spoonacular(req: RecipeSearchRequest):
         params["intolerances"] = req.intolerances
     if req.max_ready_time:
         params["maxReadyTime"] = req.max_ready_time
+    if req.min_protein:
+        params["minProtein"] = req.min_protein
+    if req.max_calories:
+        params["maxCalories"] = req.max_calories
+    if req.type:
+        params["type"] = req.type
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             # Key goes in a header, not the URL, so it never appears in access logs.
@@ -402,7 +412,11 @@ async def recipes_spoonacular(req: RecipeSearchRequest):
         raise HTTPException(status_code=503, detail=f"Spoonacular not reachable ({type(e).__name__})")
     if res.status_code >= 400:
         raise upstream_error(res, "Spoonacular")
-    return res.json()
+    out = res.json()
+    # Today's points, for the free limit (Settings shows them; Nourish stops before 50).
+    if isinstance(out, dict) and res.headers.get("x-api-quota-used"):
+        out["_quota_used"] = res.headers.get("x-api-quota-used")
+    return out
 
 
 @app.post("/api/recipes/web")
