@@ -445,7 +445,12 @@
             q = whole + best;
         } else q = q >= 0.3 ? Math.max(0.25, Math.round(q * 4) / 4) : Math.max(0.125, Math.round(q * 8) / 8);   // kitchen fractions: ¼ ½ ¾ (⅛ for pinches)
         const amount = U.formatAmount(q, unit);
-        return item.note !== undefined ? `${item.text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${item.text}`.trim();
+        // A total weight written beside the amount ("4 salmon fillets (approx. 480g)", "3 bones, about
+        // 1 lb") is scaled with it, or it would still say the whole recipe's weight.
+        const ratio = item.qty > 0 ? q / item.qty : k;
+        const text = String(item.text || '').replace(/((?:\(|,\s*)(?:about|approx\.?|approximately|roughly|around|total(?:ling)?)?\s*)(\d+(?:\.\d+)?)(\s*-?\s*(?:g|grams?|kg|oz|ounces?|lbs?|pounds?)\b)/gi,
+            (m, pre, n, u) => (/^\s*-/.test(u) || /oz|ounce/i.test(u) && /\b(cans?|tins?)\b/i.test(item.text) ? m : `${pre}${Math.round(Number(n) * ratio * 10) / 10}${u}`));
+        return item.note !== undefined ? `${text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${text}`.trim();
     }
     // Cuts oil, butter and sugar (to no less than half, keeping at least a teaspoon of oil) to save
     // up to `kcal` per serving. Seasoning is never touched. Returns the calories saved per serving.
@@ -1015,6 +1020,12 @@
     // protein-less breakfast: a smoothie or oats get protein powder or Greek yogurt, an egg breakfast
     // more eggs or egg whites, a lunch or dinner lean chicken, tofu or tuna. Anything the person
     // avoids, is allergic to or doesn't eat (diet) is never used. `need`: grams of protein per person.
+    // Grams of protein per 100 kcal of an add-on food.
+    const leanCache = {};
+    function leanness([food, unit]) {
+        if (!(food in leanCache)) { const n = N.calculate([`1 ${unit} ${food}`.replace(/\s+/g, ' ')], 1).nutrition; leanCache[food] = n.calories > 0 ? n.protein_g / n.calories * 100 : 0; }
+        return leanCache[food];
+    }
     const BOOST_MOST = { 'soy yogurt': 1.5, tempeh: 6, 'cooked lentils': 1, eggs: 4, 'egg whites': 1, 'chicken breast': 6, 'firm tofu': 6, 'canned tuna': 5, edamame: 1, 'protein powder': 2, 'greek yogurt': 1.5, 'cottage cheese': 1 };
     const BOOSTERS = {
         sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['soy yogurt', 'cup', 9, 'Serve with the soy yogurt (stirred in or on the side).']],
@@ -1022,7 +1033,7 @@
         main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 4.9, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 5.4, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.'], ['tempeh', 'oz', 5.7, 'Slice the tempeh, pan-fry until golden and serve with the dish.'], ['cooked lentils', 'cup', 18, 'Warm the lentils and stir them in or serve alongside.']],
     };
     const SWEET_BREAKFAST_DISH = /\b(smoothie|shake|oat|oats|oatmeal|porridge|granola|muesli|bircher|chia|yogh?urt|parfait|pancakes?|waffles?|crepes?|muffins?|fruit|acai|bowl|toast with (jam|honey|nut))\b/i;
-    function boostProtein(meal, need, mealType, people = 1, exclude) {
+    function boostProtein(meal, need, mealType, people = 1, exclude, lean = false) {
         if (!meal || !(need > 0.5)) return meal;
         const kind = mealType !== 'breakfast' ? 'main' : SWEET_BREAKFAST_DISH.test(meal.name || '') && !/\b(eggs?|savou?ry|masala|indian|peas|tomato|cheese|spinach|bean|congee|upma|poha)\b/i.test(meal.name || '') ? 'sweet' : 'savory';
         const n = Math.max(1, Number(meal.servings) || people || 1);
@@ -1059,7 +1070,9 @@
         }
         // A vegan or vegetarian dish gets a plant protein, never chicken or tuna (whatever the person eats).
         const plantOnly = /\b(vegan|vegetarian|veggie|plant[- ]based|meatless)\b/i.test(meal.name || '');
-        for (const [food, unit, perUnit, step] of BOOSTERS[kind]) {
+        // Losing weight: the most protein for the fewest calories first (egg whites before whole eggs).
+        const options = lean ? BOOSTERS[kind].slice().sort((a, b) => leanness(b) - leanness(a)) : BOOSTERS[kind];
+        for (const [food, unit, perUnit, step] of options) {
             if (plantOnly && /chicken|tuna|eggs?|egg whites|greek yogurt|cottage cheese/.test(food) && (/vegan|plant/i.test(meal.name || '') || /chicken|tuna/.test(food))) continue;
             // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces.
             const units = Math.min(unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit), BOOST_MOST[food] || 4);
@@ -1086,6 +1099,7 @@
     // calories again. Returns { day, notes } (notes for the log: what was added where and why).
     function balanceProtein(day, settings, people = 1, exclude) {
         const T = targetsOf(settings || {});
+        const lean = (settings && (settings.goal === 'Cut' || settings.prefsGoal === 'Cut'));
         const notes = [];
         let cur = day;
         const meals = () => MEALS.filter(m => cur[m] && cur[m].nutrition && !cur[m].leftover);
@@ -1094,7 +1108,7 @@
             meals().forEach(m => {
                 const p = Number(cur[m].nutrition.protein_g) || 0;
                 if (p < T.mealProtein.min - 0.5) {
-                    const b = boostProtein(cur[m], T.mealProtein.min + (m === 'breakfast' ? 3 : 2) - p, m, people, exclude);
+                    const b = boostProtein(cur[m], T.mealProtein.min + (m === 'breakfast' ? 3 : 2) - p, m, people, exclude, lean);
                     if (b !== cur[m]) { notes.push(`${m} "${cur[m].name}": ${Math.round(p)} g protein, under 25 g; added ${b.protein_added[b.protein_added.length - 1]}`); cur = Object.assign({}, cur, { [m]: b }); changed = true; }
                 }
             });
@@ -1105,7 +1119,7 @@
                     // 40 g a meal, or more when the day's own target needs it (2 g per kg on 1,800 kcal is 170 g).
                     const room = Math.max(T.mealProtein.max, Math.ceil(T.protein / meals().length) + 5) - (Number(cur[m].nutrition.protein_g) || 0);
                     if (room < 5) return;
-                    const b = boostProtein(cur[m], Math.min(room, short + 2), m, people, exclude);
+                    const b = boostProtein(cur[m], Math.min(room, short + 2), m, people, exclude, lean);
                     if (b === cur[m]) return;
                     short -= b.nutrition.protein_g - cur[m].nutrition.protein_g;
                     notes.push(`${m} "${cur[m].name}": the day was short of its ${T.protein} g protein; added ${b.protein_added[b.protein_added.length - 1]}`);
@@ -1116,7 +1130,7 @@
             // Every meal already at its 40 g and the day still a little short: the leanest meal gets the rest (up to 15 g).
             if (!changed && short > 0 && short <= 15) {
                 const m = meals().sort((a, b) => cur[a].nutrition.protein_g - cur[b].nutrition.protein_g)[0];
-                const b = m ? boostProtein(cur[m], short + 2, m, people, exclude) : null;
+                const b = m ? boostProtein(cur[m], short + 2, m, people, exclude, lean) : null;
                 if (b && b !== cur[m]) { notes.push(`${m} "${cur[m].name}": the day was short of its ${T.protein} g protein; added ${b.protein_added[0]}`); cur = Object.assign({}, cur, { [m]: b }); changed = true; }
             }
             if (!changed) break;
@@ -1126,7 +1140,7 @@
         meals().forEach(m => {
             const p = Number(cur[m].nutrition.protein_g) || 0;
             if (p < T.mealProtein.min - 0.5) {
-                const b = boostProtein(cur[m], T.mealProtein.min + 1 - p, m, people, exclude);
+                const b = boostProtein(cur[m], T.mealProtein.min + 1 - p, m, people, exclude, lean);
                 if (b !== cur[m]) { notes.push(`${m} "${cur[m].name}": ${Math.round(p)} g protein after sizing; added ${b.protein_added[b.protein_added.length - 1]}`); cur = Object.assign({}, cur, { [m]: b }); }
             }
         });
@@ -1136,6 +1150,7 @@
     // === FIBER, FATS, FISH, VITAMINS AND MINERALS ===
     // Fiber: at least 30 g a day. A day short of it gets a high-fiber food added where it fits:
     // chia seeds or raspberries at breakfast, a side of broccoli or chickpeas at lunch or dinner.
+    const fiberPerKcal = line => { const n = N.calculate([line], 1).nutrition; return n.calories > 0 ? (n.fiber_g || 0) / n.calories : 0; };
     const FIBER_BOOSTERS = {
         breakfast: [['2 tbsp chia seeds', 'Stir in the chia seeds.'], ['1/2 cup raspberries', 'Top with the raspberries.']],
         main: [['1 cup broccoli', 'Steam the broccoli for 4 minutes and serve on the side.'], ['1/2 cup chickpeas', 'Warm the chickpeas and stir them in or serve alongside.'], ['1 cup spinach', 'Wilt the spinach into the dish at the end.']],
@@ -1166,7 +1181,10 @@
             const m = MEALS.filter(x => cur[x] && cur[x].nutrition && !cur[x].leftover && (cur[x].fiber_added || []).length < 2)
                 .sort((a, b) => (Number(cur[a].nutrition.fiber_g) || 0) - (Number(cur[b].nutrition.fiber_g) || 0))[0];
             if (!m) break;
-            const opts = FIBER_BOOSTERS[m === 'breakfast' ? 'breakfast' : 'main'].filter(([line]) => !(exclude && exclude({ name: line, ingredients: [line] })) && !(cur[m].ingredients || []).some(l => l.toLowerCase().includes(line.split(' ').slice(-1)[0])));
+            const lean = settings && settings.goal === 'Cut';
+            const pool = FIBER_BOOSTERS[m === 'breakfast' ? 'breakfast' : 'main'];
+            // Losing weight: the most fiber for the fewest calories first (berries before chia seeds).
+            const opts = (lean ? pool.slice().sort((a, b) => fiberPerKcal(b[0]) - fiberPerKcal(a[0])) : pool).filter(([line]) => !(exclude && exclude({ name: line, ingredients: [line] })) && !(cur[m].ingredients || []).some(l => l.toLowerCase().includes(line.split(' ').slice(-1)[0])));
             if (!opts.length) break;
             const before = dayTotals(cur).fiber;
             cur = Object.assign({}, cur, { [m]: addFood(cur[m], opts[0][0], opts[0][1], people, 'fiber_added') });
@@ -1228,11 +1246,15 @@
             const counts = perSource();
             const per = r => ((r.nutrition && r.nutrition.micros && Number(r.nutrition.micros[k])) || 0) / Math.max(1, (r.nutrition && r.nutrition.calories) || 1);
             let best = null;
+            // Web and book recipes first; Nourish's own recipes only when none of those helps (they're a backup).
+            const own = r => r && (r.builtin || r.source_id === 'builtin');
+            for (const pass of settings.builtin_mode === 'mix' ? ['all'] : ['web', 'all']) {
+            if (best && best.gain >= MICRO_TARGETS[k] * 0.1) break;
             out.forEach((d, i) => MEALS.forEach(m => {
                 const cur = d && d[m];
                 if (!cur || !cur.nutrition || cur.leftover) return;
                 const limits = slotLimits(settings, m, weekday ? weekday(i) : null);
-                (pools[m] || []).forEach(r => {
+                (pools[m] || []).filter(r => pass === 'all' || !own(r)).forEach(r => {
                     if (!r || !r.nutrition || used.has(r.name) || (exclude && exclude(r)) || slotProblem(r, m, limits)) return;
                     if ((counts[sourceKey(r)] || 0) >= cap && sourceKey(r) !== sourceKey(cur)) return;
                     const f = cur.nutrition.calories / r.nutrition.calories;
@@ -1241,6 +1263,7 @@
                     if (gain > 0 && (!best || gain > best.gain)) best = { gain, i, m, r };
                 });
             }));
+            }
             if (!best || best.gain < MICRO_TARGETS[k] * 0.1) return;
             const old = out[best.i][best.m];
             // Sized to that day's own calories (a big day in Weekly mode keeps its target).

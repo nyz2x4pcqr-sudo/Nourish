@@ -77,3 +77,12 @@ test('portions stay whole, half or quarter servings, and an added protein food s
     assert.equal(added.length, 1, added.join(' | '));
     assert.ok(Number(added[0].match(/^\d+/)[0]) <= 6, added[0]);
 });
+
+test('a description made from the recipe never carries amounts, units or brackets ("Sandwich made with to 4 slices bacon…")', () => {
+    const O = require('../ondevice.js');
+    const d = O.describeFromRecipe({ name: 'Chicken pasta salad', ingredients: ['4 rashers streaky bacon', '120g/4¼oz farfalle pasta', '150g/5½oz leftover roast chicken', '2 to 4 slices bacon', '1 Tbs. unsalted butter', '93% lean ground beef', '⁠1 tbsp olive oil'], steps: ['Cook the pasta.', 'Mix everything.'] });
+    assert.match(d, /^Salad made with /);
+    assert.doesNotMatch(d.replace(/About [\d.]+ (minutes|hours)\./, ''), /\d|\b(tbs|tbsp|cups?|rashers)\b|[~/()]/i, d);
+    const n = require('../planner.js').scaleLine('4 skinless and boneless (approx. 480g) salmon fillets', 0.25);
+    assert.equal(n, '1 skinless and boneless (approx. 120g) salmon fillets');
+});

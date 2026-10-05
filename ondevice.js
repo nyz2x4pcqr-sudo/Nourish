@@ -661,14 +661,19 @@ async function aiDescribe(run, meal) {
 // "Roasted beef marrow bones with crusty bread, parsley and shallots. About 35 minutes." Never the
 // ingredient list: no amounts, no staples (water, salt, oil), nothing that's thrown away (a brine).
 const DESC_STAPLE = /^(salt|pepper|black pepper|white pepper|water|ice|oil|olive oil|extra[- ]virgin olive oil|vegetable oil|canola oil|cooking oil|butter|sugar|flour|all[- ]purpose flour|plain flour|cooking spray|kosher salt|sea salt|coarse sea salt|flaky salt|salt and pepper|baking powder|baking soda|cornstarch|stock|broth|chicken stock|vegetable broth|chicken broth|vinegar)$/i;
-const DESC_UNITS = /^(cups?|tbsps?|tsps?|tablespoons?|teaspoons?|g|grams?|kg|ml|l|litres?|liters?|oz|ounces?|lbs?|pounds?|cans?|tins?|jars?|packets?|packages?|cloves?|pinch(es)?|handfuls?|slices?|thick slices?|bunch(es)?|heads?|sprigs?|stalks?|sticks?|racks?|pieces?|fillets?|gallons?|quarts?|pints?|dash(es)?|large|medium|small|whole|ears?|bags?|knobs?)\b\.?\s*/i;
+const DESC_UNITS = /^(cups?|tbsps?|tbs|tsps?|rashers?|packs?|punnets?|sachets?|tablespoons?|teaspoons?|g|grams?|kg|ml|l|litres?|liters?|oz|ounces?|lbs?|pounds?|cans?|tins?|jars?|packets?|packages?|cloves?|pinch(es)?|handfuls?|slices?|thick slices?|bunch(es)?|heads?|sprigs?|stalks?|sticks?|racks?|pieces?|fillets?|gallons?|quarts?|pints?|dash(es)?|large|medium|small|whole|ears?|bags?|knobs?)\b\.?\s*/i;
 const DESC_PROTEIN = /\b(chicken|beef|steak|pork|ribs|lamb|turkey|duck|fish|cod|salmon|tuna|trout|haddock|tilapia|halibut|mackerel|sardines?|shrimp|prawns?|scallops?|mussels|clams|crab|lobster|eggs?|tofu|tempeh|lentils|chickpeas|beans|oxtail|marrow|sausage|bacon|ham|chorizo|meatballs|mince|paneer|halloumi|cottage cheese|greek yogurt)\b/;
 const DESC_DISH = /\b(pancakes|waffles|crepes|omelette|omelet|frittata|shakshuka|scramble|porridge|overnight oats|oatmeal|granola|parfait|smoothie bowl|smoothie|chili|chilli|stew|soup|curry|stir-fry|salad|grain bowls?|bowls?|tacos|burritos?|quesadillas?|enchiladas|wraps?|sandwich(es)?|burgers?|lasagna|lasagne|risotto|paella|pasta|noodles|fried rice|casserole|pie|tart|lassi|dip|hummus|coleslaw|slaw|chimichurri|sauce|cakes?|flan)\b/;
 function descFood(line) {
-    let t = String(line).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/\b(bone-in|skin-on|boneless|skinless|shell-on|head-on|fresh|large|small|medium),\s*/g, '$1 ')
+    let t = String(line).toLowerCase().replace(/[\u200b-\u200f\u2060\ufeff]/g, '').replace(/\([^)]*\)?/g, ' ').replace(/[()]/g, ' ')
+        // "200g/7oz pasta", "1kg/2lb 4oz": the second, imperial amount; "93% lean", "0%-fat".
+        .replace(/\s*\/\s*[\d.½¼¾⅓⅔⅛]+\s*(?:fl\s*)?(?:oz|g|kg|lb|lbs|ml|l)\b(?:\s+[\d.½¼¾⅓⅔⅛]+\s*(?:oz|g))?/g, ' ').replace(/^\/\S*\s*/, '').replace(/\b\d+%[- ]?(?:lean|fat|fat-free)?\s*/g, '')
+        .replace(/^~\s*/, '').replace(/\b(bone-in|skin-on|boneless|skinless|shell-on|head-on|fresh|large|small|medium),\s*/g, '$1 ')
         .replace(/,.*$/, '').replace(/\b(for|to) (serve|serving|garnish|the brine|frying|deep[- ]frying|fry)\b.*$/, '');
-    t = t.replace(/^[\d\s/.½¼¾⅓⅔⅛-]+/, '').replace(/^x\s+/, '');
-    for (let i = 0; i < 3; i++) t = t.replace(DESC_UNITS, '').replace(/^(of|a|an)\s+/, '');
+    // "2 to 4 slices", "1-2 tbs.", "1 slice or handful": the amount, whatever its shape.
+    t = t.replace(/^[\d\s/.½¼¾⅓⅔⅛-]+(?:(?:to|or|-|–)\s*[\d/.½¼¾⅓⅔⅛]+\s*)?/, '').replace(/^x\s+/, '').replace(/^(?:slice|slices|piece|pieces)\s+or\s+\w+\s+/, '');
+    for (let i = 0; i < 3; i++) t = t.replace(DESC_UNITS, '').replace(/^(of|a|an|heaping|heaped|level|rounded|generous|scant|good|large|small)\s+/, '');
+    t = t.replace(/^(no-salt-added|low-sodium|reduced-fat|fat-free|light|lite)\s+/, '').replace(/\s+or\s+.*$/, '');
     t = t.replace(/^(fresh|freshly|chopped|sliced|diced|minced|grated|shredded|thinly|finely|roughly|boneless|skinless|bone-in|skin-on|shell-on|frozen|cooked|uncooked|dried|ground|large|medium|small|extra|plain|baby|ripe|good|quality|crusty)\s+/g, m => (/^(baby|ground|crusty|dried)\s/.test(m) ? m : ''))
         .replace(/\b(leaves|florets)\b/, m => (m === 'florets' ? m : '')).replace(/\s+(cloves?|pieces|kernels|pulp)$/, '').replace(/\s+/g, ' ').trim();
     return t;
@@ -682,7 +687,7 @@ function describeFromRecipe(meal) {
     try { thrown = Nutrition.discarded ? Nutrition.discarded(meal.ingredients || [], meal.steps || []) : {}; } catch (e) { thrown = {}; }
     const seen = new Set();
     const foods = (meal.ingredients || []).map((l, i) => ({ l, i, name: descFood(l), kcal: kcalOf.get(l) || 0 }))
-        .filter(x => x.name && x.name.length > 2 && !(x.i in thrown) && !DESC_STAPLE.test(x.name) && !(Nutrition.isHeader && Nutrition.isHeader(x.l)) && !/\b(to taste|optional)\b/i.test(x.l))
+        .filter(x => x.name && x.name.length > 2 && !/\d|[~/]/.test(x.name) && !/^(or|and|to|plus)\b/.test(x.name) && !(x.i in thrown) && !DESC_STAPLE.test(x.name) && !(Nutrition.isHeader && Nutrition.isHeader(x.l)) && !/\b(to taste|optional)\b/i.test(x.l))
         .filter(x => { const k = x.name.replace(/s$/, ''); if (seen.has(k)) return false; seen.add(k); return true; });
     if (!foods.length) return '';
     // The main food: the one that's most of the dish (by calories), unless it's a fat or a sauce.
@@ -703,7 +708,9 @@ function describeFromRecipe(meal) {
     } catch (e) { how = ''; }
     // When the name says what the dish is (pancakes, chili, a salad), that leads: "Pancakes made
     // with rolled oats, bananas, cottage cheese and eggs." Otherwise the main food and how it's cooked.
-    const dish = (String(meal.name).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/\s+(with|and a side of|served with|on|over)\s+.*$/, '').match(DESC_DISH) || [])[0];
+    // The dish is the last dish word ("chicken pasta salad" is a salad).
+    const words = String(meal.name).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/\s+(with|and a side of|served with|on|over)\s+.*$/, '').match(new RegExp(DESC_DISH.source, 'g')) || [];
+    const dish = words[words.length - 1];
     if (dish && !String(main.name).includes(dish)) {
         const all = [main.name].concat(others);
         const made = all.length > 1 ? `${all.slice(0, -1).join(', ')} and ${all[all.length - 1]}` : all[0];
