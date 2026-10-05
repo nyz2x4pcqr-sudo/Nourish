@@ -224,10 +224,24 @@ const $ = id => document.getElementById(id);
 // === ACTIVITY LOG ===
 // Everything the app does, step by step, so people can see what's going on (Settings → Activity log)
 // and send it when something goes wrong. Secrets (API keys, tokens) are blanked out before saving.
-const LOG_KEY = 'nourish_log';
+// Its own key: until 0.1.13 the activity log and the food log (Add food) were both saved as
+// "nourish_log", so the activity log wrote over the foods someone logged half a second later and
+// they were gone after a restart. The old activity log is moved once; the food log is then taken
+// again from the PC's copy, where there is one (activityLogMoved, below syncMeta).
+const LOG_KEY = 'nourish_activity_log';
 const LOG_MAX = 1500;
 let activityLog = [];
-try { activityLog = JSON.parse(localStorage.getItem(LOG_KEY) || '[]') || []; } catch (e) { activityLog = []; }
+let activityLogMoved = false;
+try {
+    activityLog = JSON.parse(localStorage.getItem(LOG_KEY) || 'null');
+    const old = JSON.parse(localStorage.getItem('nourish_log') || 'null');
+    if (Array.isArray(old)) {
+        if (!Array.isArray(activityLog)) activityLog = old;
+        localStorage.removeItem('nourish_log');
+        activityLogMoved = true;
+    }
+    if (!Array.isArray(activityLog)) activityLog = [];
+} catch (e) { activityLog = []; }
 let logSaveTimer = null;
 
 function redactSecrets(text) {
@@ -389,6 +403,8 @@ let syncFailed = false;
 let settingsStale = false;
 
 function saveSyncMeta() { store('nourish_sync', syncMeta); }
+// The food log this device kept was overwritten by the activity log (see LOG_KEY): take the PC's copy again.
+if (activityLogMoved) { syncMeta.log = { rev: 0, dirty: false, ver: 0 }; saveSyncMeta(); }
 
 // Call after changing a section: saves it here and sends it to the PC shortly after.
 function changed(section) {
