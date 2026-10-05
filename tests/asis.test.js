@@ -86,3 +86,11 @@ test('a bigger portion means proportionally more calories, even when a rescaled 
     // A Parmesan rind simmered in a broth is lifted out: hardly any of it is eaten.
     assert.ok(N.calculate(['¼ Parmigiano Reggiano rind'], 4, ['Simmer with the rind, then remove it.']).nutrition.calories < 10);
 });
+
+test('a tree-nut allergy rules out a plain "nut butter", but not peanut butter, nutmeg or butternut (the live audit found "creamy nut butter" in a no-tree-nuts plan)', () => {
+    const P = require('../prefs.js');
+    const check = P.excluder({ allergies: 'tree nuts' });
+    assert.equal(check({ name: 'Soba Noodle Veggie Stir-fry', ingredients: ['1¼ tbsp creamy nut butter'] }), 'nut butter');
+    assert.equal(check({ name: 'Trail Bowl', ingredients: ['1/4 cup mixed nuts'] }), 'mixed nuts');
+    assert.equal(check({ name: 'PB Toast', ingredients: ['2 tbsp peanut butter', '1 tsp nutmeg', '1 butternut squash'] }), null);
+});

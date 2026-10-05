@@ -34,7 +34,7 @@
         wheat: ['wheat', 'flour', 'bread', 'pasta', 'spaghetti', 'penne', 'noodle', 'couscous', 'bulgur', 'semolina', 'spelt', 'farro', 'breadcrumb', 'panko', 'tortilla', 'pita', 'naan', 'bagel', 'cracker', 'orzo', 'udon'],
         peanut: ['peanut', 'peanut butter', 'satay', 'groundnut', 'peanut oil', 'trail mix', 'snickers', 'candy bar', 'pad thai'],
         nut: ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'nut butter', 'almond butter', 'almond milk', 'almond flour', 'praline', 'marzipan', 'nutella', 'trail mix', 'nut'],
-        'tree nut': ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'almond butter', 'almond milk', 'almond flour', 'trail mix'],
+        'tree nut': ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'almond butter', 'almond milk', 'almond flour', 'trail mix', 'nut butter', 'mixed nuts', 'nut milk', 'nut flour'],
         soy: ['soy', 'soya', 'tofu', 'tempeh', 'edamame', 'miso', 'soy sauce', 'tamari', 'soy milk'],
         sesame: ['sesame', 'tahini', 'sesame oil', 'sesame seed', 'hummus'],
         cucumber: ['cucumber', 'pickle', 'gherkin', 'cornichon', 'tzatziki', 'relish'],
