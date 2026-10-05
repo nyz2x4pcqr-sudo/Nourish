@@ -103,6 +103,24 @@ final class NativeBridge: NSObject {
         case "network": return network()
         case "http": return try http(a)
         case "hfToken": return hfToken(a)
+        case "secret":
+            // Keys for the free services, in the Keychain (SecretStore.swift). Never logged.
+            let name = a["name"] as? String ?? ""
+            switch a["op"] as? String ?? "" {
+            case "list": return ["names": SecretStore.names()]
+            case "get":
+                guard SecretStore.validName(name) else { throw BridgeError(message: "Not a key name") }
+                return ["value": SecretStore.get(name) ?? ""]
+            case "set":
+                guard SecretStore.validName(name) else { throw BridgeError(message: "Not a key name") }
+                guard SecretStore.set(name, (a["value"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) else { throw BridgeError(message: "The key couldn't be saved in the Keychain.") }
+                return ["ok": true]
+            case "delete":
+                guard SecretStore.validName(name) else { throw BridgeError(message: "Not a key name") }
+                SecretStore.delete(name)
+                return ["ok": true]
+            default: throw BridgeError(message: "Unknown key request.")
+            }
         case "download": return try startDownload(a)
         case "cancelDownload":
             let file = a["file"] as? String ?? ""

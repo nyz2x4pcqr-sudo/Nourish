@@ -4,7 +4,8 @@ same settings, meal plan, grocery list and chat.
 Each section has a revision number that goes up on every save. Devices compare revision numbers
 instead of clocks (a phone's clock and the PC's clock rarely agree).
 
-API keys are stored here but never sent back out: devices only learn whether a key is set.
+API keys are stored here, encrypted (secretbox.py), and never sent back out: devices only learn
+whether a key is set.
 """
 import json
 import os
@@ -12,8 +13,15 @@ import threading
 import time
 from pathlib import Path
 
+try:
+    from . import secretbox
+except ImportError:  # run as a script (python backend/main.py)
+    import secretbox
+
 SECTIONS = {"settings", "prefs", "plan", "grocery", "chat", "cookbook", "log", "taste", "books"}
-SECRET_FIELDS = {"claude_api_key", "openai_api_key", "spoonacular_api_key", "brave_api_key"}
+SECRET_FIELDS = {"claude_api_key", "openai_api_key", "spoonacular_api_key", "brave_api_key",
+                 # The free recipe and nutrition services (Settings → Recipe and nutrition services).
+                 "edamam_app_id", "edamam_app_key", "fatsecret_key", "fatsecret_secret", "usda_api_key"}
 MAX_SECTION_BYTES = 2 * 1024 * 1024
 # The recipes saved from the person's books (thousands of full recipes) are allowed more room.
 MAX_SECTION_BYTES_FOR = {"books": 60 * 1024 * 1024}
@@ -27,11 +35,21 @@ class StoreError(Exception):
     pass
 
 
+def _keyfile() -> Path:
+    return DATA_FILE.with_name(".nourish-key")
+
+
 def _load():
     global _data
     try:
         raw = json.loads(DATA_FILE.read_text(encoding="utf-8"))
         _data = {k: v for k, v in raw.items() if k in SECTIONS and isinstance(v, dict)}
+        # Keys saved in plain text by an older version are encrypted now.
+        secrets = ((_data.get("settings") or {}).get("value") or {}).get("_secrets")
+        if isinstance(secrets, dict) and any(v and not str(v).startswith(secretbox.PREFIX) for v in secrets.values()):
+            for name, v in list(secrets.items()):
+                secrets[name] = secretbox.seal(str(v), _keyfile())
+            _save()
     except FileNotFoundError:
         _data = {}
     except (OSError, ValueError):
@@ -81,7 +99,7 @@ def put(section: str, value) -> dict:
             for name in SECRET_FIELDS:
                 new = value.pop(name, None)
                 if isinstance(new, str) and new.strip():
-                    secrets[name] = new.strip()  # an empty or missing key means "keep what's saved"
+                    secrets[name] = secretbox.seal(new.strip(), _keyfile())  # empty or missing means "keep what's saved"
             for name in value.pop("_clear", None) or []:  # explicit "remove this key"
                 if name in SECRET_FIELDS:
                     secrets.pop(name, None)
@@ -94,7 +112,8 @@ def put(section: str, value) -> dict:
 
 def secret(name: str) -> str:
     with _lock:
-        return ((_data.get("settings") or {}).get("value") or {}).get("_secrets", {}).get(name, "")
+        token = ((_data.get("settings") or {}).get("value") or {}).get("_secrets", {}).get(name, "")
+    return secretbox.open_(token, _keyfile())
 
 
 def reset_for_tests(path: Path):

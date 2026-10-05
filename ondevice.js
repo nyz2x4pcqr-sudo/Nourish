@@ -70,6 +70,7 @@ function logNative(msg, details, level = 'debug') {
 function summarizeArgs(cmd, a) {
     if (cmd === 'generate') return { model: a.model, messages: (a.messages || []).length, chars: (a.messages || []).reduce((n, m) => n + (m.content || '').length, 0), grammar: !!a.grammar, max_tokens: a.max_tokens, n_ctx: a.n_ctx, gpu: a.gpu };
     if (cmd === 'hfToken') return { action: a.action };
+    if (cmd === 'secret') return { op: a.op, name: a.name };   // never the key itself
     return a;
 }
 

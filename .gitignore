@@ -33,3 +33,6 @@ mobile/ios/llama-src/
 local.properties
 nourish-secrets*
 *.gguf
+
+# The PC key that encrypts service keys (backend/secretbox.py)
+.nourish-key

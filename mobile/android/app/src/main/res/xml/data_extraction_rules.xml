@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Service keys (SecretStore.java) stay on this phone: never in a cloud backup or a device transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="nourish_secrets.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="nourish_secrets.xml" />
+    </device-transfer>
+</data-extraction-rules>

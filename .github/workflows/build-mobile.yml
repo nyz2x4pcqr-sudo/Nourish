@@ -18,6 +18,8 @@ on:
       - "importer.js"
       - "nutrition-data.js"
       - "nutrition.js"
+      - "services.js"
+      - "crosscheck.js"
       - "prefs.js"
       - "planner.js"
       - "sources.js"

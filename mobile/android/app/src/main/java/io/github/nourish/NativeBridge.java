@@ -142,6 +142,7 @@ final class NativeBridge {
             case "network": return network();
             case "http": return http(a);
             case "hfToken": return hfToken(a);
+            case "secret": return secret(a);
             case "download": return download(a);
             case "cancelDownload": cancelledDownloads.put(a.optString("file"), true); return new JSONObject();
             case "models": return models();
@@ -153,6 +154,25 @@ final class NativeBridge {
             case "library": return library(a);
             case "appIcon": return appIcon(a.optString("name", "default"));
             default: throw new IllegalArgumentException("Unknown command: " + cmd);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------- service keys
+
+    private SecretStore secrets;
+
+    /** Keys for the free services, encrypted with the Android Keystore (SecretStore.java). Never logged. */
+    private JSONObject secret(JSONObject a) throws Exception {
+        if (secrets == null) secrets = new SecretStore(context);
+        String op = a.optString("op"), name = a.optString("name");
+        JSONObject out = new JSONObject();
+        if ("list".equals(op)) { out.put("names", new JSONArray(secrets.names())); return out; }
+        if (!SecretStore.validName(name)) throw new IllegalArgumentException("Not a key name");
+        switch (op) {
+            case "get": out.put("value", secrets.get(name)); return out;
+            case "set": secrets.set(name, a.optString("value")); out.put("ok", true); return out;
+            case "delete": secrets.delete(name); out.put("ok", true); return out;
+            default: throw new IllegalArgumentException("Unknown key request.");
         }
     }
 

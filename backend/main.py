@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 import httpx
 
 import library
+import services
 import store
 import updater
 import web_recipes
@@ -47,7 +48,7 @@ SPOONACULAR_URL = os.getenv("SPOONACULAR_URL", "https://api.spoonacular.com").rs
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", Path(__file__).resolve().parent.parent))
 # Only these files are served. Never mount the repo root as a static directory:
 # it would expose backend/.env and .git to anyone on the network.
-FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "books.js", "recipedb.js", "foodlog.js", "taste.js", "builtins.js", "theme.js", "font-inter.woff2", "font-source-serif.woff2", "font-source-sans.woff2", "font-nunito.woff2", "font-manrope.woff2", "app-icon-default.png", "app-icon-midnight.png", "app-icon-forest.png", "app-icon-plum.png", "app-icon-paper.png", "app-icon-oled.png", "styles.css", "font-fraunces.woff2", "font-figtree.woff2",
+FRONTEND_FILES = {"index.html", "app.js", "ondevice.js", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "services.js", "crosscheck.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "books.js", "recipedb.js", "foodlog.js", "taste.js", "builtins.js", "theme.js", "font-inter.woff2", "font-source-serif.woff2", "font-source-sans.woff2", "font-nunito.woff2", "font-manrope.woff2", "app-icon-default.png", "app-icon-midnight.png", "app-icon-forest.png", "app-icon-plum.png", "app-icon-paper.png", "app-icon-oled.png", "styles.css", "font-fraunces.woff2", "font-figtree.woff2",
                   "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"}
 
 @asynccontextmanager
@@ -316,6 +317,40 @@ def cancel_job(job_id: str):
     if job and job["status"] == "running":
         job["task"].cancel()
     return {"cancelled": job_id}
+
+
+class ServiceRequest(BaseModel):
+    service: str
+    method: str = "GET"
+    url: str
+    query: Optional[dict] = None
+    body: Optional[object] = None
+    headers: Optional[dict] = None
+
+
+@app.post("/api/services/request")
+async def service_request(req: ServiceRequest):
+    """One request to a free recipe or nutrition service, with the key the PC keeps (services.py).
+    The answer comes back as it is ({status, body, headers}); the app reads it."""
+    if req.method.upper() not in ("GET", "POST"):
+        raise HTTPException(status_code=400, detail="Only GET and POST")
+    keys = {name: store.secret(name) for name in services.KEYS.get(req.service, ())}
+    try:
+        url, query, headers = services.prepare(req.service, req.method, req.url, req.query, req.headers, keys)
+    except services.ServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        async with httpx.AsyncClient(timeout=25) as client:
+            if req.method.upper() == "POST":
+                res = await client.post(url, params=query, json=req.body, headers=headers)
+            else:
+                res = await client.get(url, params=query, headers=headers)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=503, detail=f"{req.service} not reachable ({type(e).__name__})")
+    # Logged without the query (it holds keys or signatures).
+    logger.info("service %s %s %s → %s", req.service, req.method.upper(), url, res.status_code)
+    return {"status": res.status_code, "body": res.text[:2_000_000],
+            "headers": {k: res.headers[k] for k in services.PASS_HEADERS if k in res.headers}}
 
 
 @app.post("/api/recipes/themealdb")

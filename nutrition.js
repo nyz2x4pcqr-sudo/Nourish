@@ -387,7 +387,7 @@
             micros.vitd += (n[5] || 0) * f; micros.ca += (n[6] || 0) * f; micros.k += (n[7] || 0) * f; micros.mg += (n[8] || 0) * f;
             grams += r.grams;
             // Per line, per serving: the breakdown people can check.
-            lines.push({ line, key: r.key, grams: Math.round(r.grams), kcal: Math.round(n[0] * f / per), assumed: r.assumed || undefined, edible: r.edible, discarded: r.discarded || undefined });
+            lines.push({ line, key: r.key, grams: Math.round(r.grams), kcal: Math.round(n[0] * f / per), protein: Math.round(n[1] * f / per * 10) / 10, assumed: r.assumed || undefined, edible: r.edible, discarded: r.discarded || undefined });
             if (r.assumed) assumed.push({ line: String(line), amount: r.assumed });
         });
         const round = v => Math.round(v / per);
@@ -408,6 +408,11 @@
         if (!recipe || !Array.isArray(recipe.ingredients)) return recipe;
         const servings = Math.max(1, Number(recipe.servings) || 1);
         const c = calculate(recipe.ingredients, servings, recipe.steps);
+        // The source's own published numbers, kept as they were the first time (settle can run again).
+        if (!recipe.source_nutrition && recipe.nutrition && Number(recipe.nutrition.calories) > 0 && recipe.nutrition_basis == null && !recipe.from_book && !recipe.builtin && !recipe.ai) {
+            const o = recipe.nutrition;
+            recipe.source_nutrition = { calories: Math.round(o.calories), protein_g: o.protein_g != null ? Math.round(o.protein_g) : null, carbs_g: o.carbs_g != null ? Math.round(o.carbs_g) : null, fat_g: o.fat_g != null ? Math.round(o.fat_g) : null };
+        }
         const own = recipe.nutrition && Number(recipe.nutrition.calories) > 0 ? recipe.nutrition : null;
         const calc = c.nutrition;
         let keepOwn = false;

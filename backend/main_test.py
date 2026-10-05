@@ -85,7 +85,7 @@ class ApiTest(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("<title>", r.text)
-        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "books.js", "recipedb.js", "foodlog.js", "taste.js", "builtins.js", "theme.js"):
+        for f in ("app.js", "ondevice.js", "styles.css", "json-repair.js", "grocery.js", "units.js", "recipes.js", "importer.js", "nutrition-data.js", "nutrition.js", "services.js", "crosscheck.js", "prefs.js", "planner.js", "sources.js", "finder.js", "library.js", "books.js", "recipedb.js", "foodlog.js", "taste.js", "builtins.js", "theme.js"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 200, f)
         for f in (".env", "README.md", "main.py", "nourish.log", "..%2Fbackend%2F.env"):
             self.assertEqual(self.client.get(f"/{f}").status_code, 404, f)
@@ -608,6 +608,63 @@ class LibraryTests(unittest.TestCase):
         self.client.get("/api/library")
         for bad in ["../nourish-data.json", "/etc/passwd", "My Recipes/../../nourish-data.json"]:
             self.assertEqual(self.client.post("/api/library/read", json={"path": bad}).status_code, 404, bad)
+
+
+class ServiceKeysTest(unittest.TestCase):
+    """Keys for the free services: encrypted at rest, added only for that service's own address,
+    and never sent back to a device."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        main.store.reset_for_tests(self.dir / "nourish-data.json")
+        self.client = TestClient(main.app)
+
+    def test_keys_are_encrypted_in_the_data_file(self):
+        self.client.put("/api/state/settings", json={"value": {"edamam_app_id": "my-id", "edamam_app_key": "secret-key-123"}})
+        raw = (self.dir / "nourish-data.json").read_text()
+        self.assertNotIn("secret-key-123", raw)
+        self.assertIn("enc1:", raw)
+        self.assertEqual(main.store.secret("edamam_app_key"), "secret-key-123")
+        state = self.client.get("/api/state").json()
+        self.assertNotIn("secret-key-123", json.dumps(state))
+        self.assertTrue(state["settings"]["value"]["_secrets_set"]["edamam_app_key"])
+
+    def test_old_plain_keys_are_encrypted_on_load(self):
+        f = self.dir / "old.json"
+        f.write_text(json.dumps({"settings": {"rev": 1, "value": {"_secrets": {"claude_api_key": "sk-old"}}}}))
+        main.store.reset_for_tests(f)
+        self.assertNotIn("sk-old", f.read_text())
+        self.assertEqual(main.store.secret("claude_api_key"), "sk-old")
+
+    def test_requests_only_go_to_the_service(self):
+        from services import prepare, ServiceError
+        with self.assertRaises(ServiceError):
+            prepare("edamam", "POST", "https://evil.example.com/api/nutrition-details", {}, {}, {"edamam_app_id": "a", "edamam_app_key": "b"})
+        with self.assertRaises(ServiceError):
+            prepare("usda", "GET", "http://api.nal.usda.gov/fdc/v1/foods/search", {}, {}, {})
+        url, q, h = prepare("usda", "GET", "https://api.nal.usda.gov/fdc/v1/foods/search", {"query": "egg"}, {"Authorization": "x"}, {})
+        self.assertEqual(q["api_key"], "DEMO_KEY")
+        self.assertNotIn("Authorization", h)
+
+    def test_fatsecret_oauth1_signature(self):
+        # Worked example checked by hand against RFC 5849's signing steps.
+        from services import oauth1_sign
+        out = oauth1_sign("GET", "https://platform.fatsecret.com/rest/server.api", {"method": "foods.search", "search_expression": "egg", "format": "json"},
+                          "key123", "secret456", nonce="abc", timestamp="1700000000")
+        import base64, hashlib, hmac
+        from urllib.parse import quote
+        p = lambda s: quote(str(s), safe="~-._")
+        params = {"method": "foods.search", "search_expression": "egg", "format": "json", "oauth_consumer_key": "key123", "oauth_signature_method": "HMAC-SHA1",
+                  "oauth_timestamp": "1700000000", "oauth_nonce": "abc", "oauth_version": "1.0"}
+        norm = "&".join(f"{p(k)}={p(v)}" for k, v in sorted(params.items()))
+        base = f"GET&{p('https://platform.fatsecret.com/rest/server.api')}&{p(norm)}"
+        want = base64.b64encode(hmac.new(b"secret456&", base.encode(), hashlib.sha1).digest()).decode()
+        self.assertEqual(out["oauth_signature"], want)
+
+    def test_missing_key_is_a_plain_message(self):
+        res = self.client.post("/api/services/request", json={"service": "edamam", "method": "POST", "url": "https://api.edamam.com/api/nutrition-details", "body": {"ingr": ["1 egg"]}})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Edamam", res.json()["detail"])
 
 
 if __name__ == "__main__":

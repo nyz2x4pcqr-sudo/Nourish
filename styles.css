@@ -1577,3 +1577,17 @@ a.settings-button { display: flex; text-decoration: none; }
 .week-day.big { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .settings-row.big-day { display: grid; grid-template-columns: 1.4fr 1fr auto; gap: var(--s-2); align-items: center; }
 .settings-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-2); }
+
+/* Nutrition cross-check (crosscheck.js): the plain-words line and the services' credits. */
+.check-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-top: var(--s-2); }
+.check-line .recipe-note { margin: 0; flex: 1 1 12rem; }
+.check-credit, .check-credit a { font-size: var(--fs-caption); color: var(--text-3); }
+.check-credit a + a { margin-left: var(--s-2); }
+.check-details { margin-top: var(--s-2); }
+.service-free { margin-left: var(--s-2); vertical-align: middle; }
+.settings-steps { display: block; }
+.settings-steps summary { cursor: pointer; font-weight: 600; }
+.settings-steps ol { margin: var(--s-2) 0 0; padding-left: 1.3em; line-height: 1.5; }
+.settings-steps li + li { margin-top: var(--s-1); }
+.settings-hint.ok { color: var(--success); }
+.settings-hint.warn { color: var(--danger); }

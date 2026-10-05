@@ -17,6 +17,7 @@
     const PL = root.NourishPlanner || req('./planner.js');
     const B = root.NourishBuiltins || req('./builtins.js');
     const N = root.NourishNutrition || req('./nutrition.js');
+    const X = root.NourishCrossCheck || req('./crosscheck.js');
 
     // Gentle and quick: a few requests at a time, caps on searches and pages, and a time limit.
     const LIMITS = { parallel: 4, searches: 36, pages: 72, seconds: 25, cachedRecipes: 1200, perSlot: 21 };
@@ -175,6 +176,15 @@
         const major = unread.filter(l => !N.isMinor(l));
         if (r.nutrition_basis === 'calculated' && major.length && (major.length >= 3 || major.length > r.ingredients.length * 0.25)) { ctx.stats.unsure++; return turnedAway(ctx, 'ingredients the calculator can\'t read'); }
         if (unread.length) r.nutrition_approximate = true;
+        // Cross-checked, never trusted from one source (crosscheck.js): a fuller check done before
+        // (with the free services) is used when there is one; otherwise Nourish's calculation against
+        // the source's own numbers. Recipes whose sources disagree stay out of plans until settled.
+        if (X) {
+            const fp = X.fingerprint(r);
+            const done = ctx.checks && ctx.checks(fp);
+            X.apply(r, done && done.level ? done : X.localCheck(r));
+            if (!X.plannable(r)) { (ctx.stats.disagree = ctx.stats.disagree || []).length < 40 && ctx.stats.disagree.push(`${r.name}: ${r.nutrition_check.note}`); return turnedAway(ctx, 'nutrition sources disagree (kept until a check settles it)'); }
+        }
         if (!r.nutrition || !(r.nutrition.calories > 40)) return turnedAway(ctx, 'too few calories to be a meal');
         const fit = PL.mealFit(r);
         if (!fit.breakfast && !fit.lunch && !fit.dinner) return turnedAway(ctx, fit.why || 'not a meal');
@@ -192,6 +202,7 @@
         const stats = { started: now(), searches: 0, pages: 0, fromCache: 0, excluded: 0, bland: 0, unsure: 0, perSource: {}, failed: [], blocked: [] };
         return {
             o, now, cache, failures, stats,
+            checks: typeof o.nutritionCheck === 'function' ? o.nutritionCheck : null,   // fingerprint → a fuller check done before
             categories: cache.get(CACHE.categories) || {},
             sitemapsRead: {},
             feeds: {},

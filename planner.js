@@ -267,6 +267,8 @@
     const MAKE_AHEAD_OK = /\b(overnight oats|chia|bircher|soaked oats|refrigerator oats|fridge oats|make[- ]ahead|meal prep|pudding)\b/i;
     function slotProblem(r, meal, limits) {
         const L = limits || slotLimits({}, meal);
+        // Nutrition whose sources disagree (crosscheck.js "low") is never planned until a check settles it.
+        if (r && r.nutrition_check && r.nutrition_check.level === 'low') return 'its nutrition sources disagree';
         const p = profileOf(r);
         if (!p.fits[meal]) {
             const fit = mealFit(r);

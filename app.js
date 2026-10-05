@@ -44,7 +44,9 @@ const CHAT_SUGGESTIONS = [
     ['i-utensils', 'What can I cook with chicken, rice and broccoli?'],
     ['i-flame', 'Plan a week of cheap meals I can batch-cook on Sunday'],
 ];
-const SECRET_FIELDS = ['claude_api_key', 'openai_api_key', 'spoonacular_api_key', 'brave_api_key'];
+const SECRET_FIELDS = ['claude_api_key', 'openai_api_key', 'spoonacular_api_key', 'brave_api_key',
+    // The free recipe and nutrition services (Settings → Recipe and nutrition services).
+    'edamam_app_id', 'edamam_app_key', 'fatsecret_key', 'fatsecret_secret', 'usda_api_key'];
 
 // Every setting, with its default. Kept as strings. Saved on this device and on the PC.
 const SETTINGS_DEFAULTS = {
@@ -118,6 +120,8 @@ const SETTINGS_DEFAULTS = {
     split_lunch: '30',
     split_dinner: '45',
     spoonacular_api_key: '',
+    edamam_app_id: '', edamam_app_key: '', fatsecret_key: '', fatsecret_secret: '', usda_api_key: '',
+    usda_live: 'on',              // USDA FoodData Central looked up live as a check (no key needed: the public demo key)
     web_engine: 'duckduckgo',
     brave_api_key: '',
     // grocery
@@ -234,7 +238,11 @@ try { activityLog = JSON.parse(localStorage.getItem(LOG_KEY) || '[]') || []; } c
 let logSaveTimer = null;
 
 function redactSecrets(text) {
-    return String(text)
+    let out = String(text);
+    // Any saved key, wherever it might appear.
+    SECRET_FIELDS.forEach(k => { const v = settings && settings[k]; if (v && String(v).length >= 6) out = out.split(String(v)).join('•••'); });
+    return out
+        .replace(/((app_id|app_key|oauth_consumer_key|oauth_signature|oauth_nonce|api_key|consumer_secret)=)[^&\s"]+/gi, '$1•••')
         .replace(/hf_[A-Za-z0-9]{6,}/g, 'hf_•••')
         .replace(/sk-(ant-)?[A-Za-z0-9_-]{6,}/g, 'sk-•••')
         .replace(/("?(api_key|apiKey|token|brave_key|x-api-key|authorization|x-subscription-token)"?\s*[:=]\s*"?)(Bearer\s+)?[^",}\s]{4,}/gi, '$1•••');
@@ -291,6 +299,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     setInterval(() => { if (!document.hidden) syncNow(); }, 15000);
     window.addEventListener('online', () => { checkBackend(); syncNow(); });
+    // Keys from the phone's secure storage, then the nutrition cross-check in the background.
+    setTimeout(() => { loadPhoneKeys().catch(startupError('keys')).then(() => { if (settingsPage === 'services') renderSettings(); }); }, 1500);
+    setTimeout(() => runCrossChecks().catch(startupError('nutrition check')), 30000);
+    setInterval(() => { if (!document.hidden) runCrossChecks().catch(() => {}); }, 20 * 60e3);
     // The recipe library: read a little after start, then when the app comes back (at most every 5 minutes).
     librarySummary(libraryIndex());
     setTimeout(libraryLocation, 2500);
@@ -346,6 +358,8 @@ function loadLocalState() {
 function persistLocal(section) {
     if (section === 'settings') {
         for (const key of Object.keys(SETTINGS_DEFAULTS)) {
+            // On a phone, keys live in the Keychain (iPhone) or the Keystore (Android), never here.
+            if (SECRET_FIELDS.includes(key) && phoneSecure()) { savePhoneKey(key, settings[key]); unstore(key); continue; }
             if (settings[key] === '' && SECRET_FIELDS.includes(key)) unstore(key);
             else store(key, settings[key]);
         }
@@ -358,6 +372,38 @@ function persistLocal(section) {
     else if (section === 'cookbook') store('nourish_cookbook', cookbook);
     else if (section === 'log') store('nourish_log', foodLog);
     else if (section === 'taste') store('nourish_taste', taste);
+}
+
+// === KEYS ON A PHONE: in the Keychain (iPhone) or Keystore (Android) ===
+function phoneSecure() { return isLocalMode() && typeof nativeAvailable === 'function' && nativeAvailable(); }
+const phoneKeysSaved = {};   // what was last written, so unchanged keys aren't written again
+let phoneKeysReady = false;   // nothing is written before the saved keys are read (an empty field would erase one)
+function savePhoneKey(key, value) {
+    if (!phoneKeysReady) return;
+    const v = String(value || '');
+    if (phoneKeysSaved[key] === v) return;
+    phoneKeysSaved[key] = v;
+    nativeCall('secret', v ? { op: 'set', name: key, value: v } : { op: 'delete', name: key })
+        .catch(e => nlog('phone', `Couldn't save the ${key.replace(/_/g, ' ')} securely: ${e.message}`, null, 'warn'));
+}
+// At start: keys an older version kept in the app's storage move into the secure store, and the
+// saved ones are read into memory (never written anywhere else).
+async function loadPhoneKeys() {
+    if (!phoneSecure()) return;
+    try {
+        for (const k of SECRET_FIELDS) {
+            const old = load(k, '');
+            if (old) { await nativeCall('secret', { op: 'set', name: k, value: old }); unstore(k); nlog('phone', `Moved the ${k.replace(/_/g, ' ')} into the phone's secure storage`); }
+        }
+        const res = await nativeCall('secret', { op: 'list' });
+        for (const name of (res && res.names) || []) {
+            if (!SECRET_FIELDS.includes(name)) continue;
+            const got = await nativeCall('secret', { op: 'get', name });
+            settings[name] = (got && got.value) || '';
+            phoneKeysSaved[name] = settings[name];
+        }
+        phoneKeysReady = true;
+    } catch (e) { nlog('phone', `Reading saved keys failed: ${e.message}`, null, 'warn'); }
 }
 
 function cleanGrocery(g) {
@@ -1423,6 +1469,7 @@ const SETTINGS_PAGES = {
     schedule: { icon: 'i-clock', color: '#C2964A', title: 'My schedule' },
     learned: { icon: 'i-sparkle', color: '#B07CC6', title: 'What Nourish has learned' },
     sources: { icon: 'i-book', color: '#C9675A', title: 'Recipes' },
+    services: { icon: 'i-globe', color: '#5E9C6A', title: 'Recipe and nutrition services' },
     books: { icon: 'i-book', color: '#A86B3C', title: 'My books' },
     advanced: { icon: 'i-gear', color: '#6E7F8E', title: 'Recipe sources & keys' },
     grocery: { icon: 'i-cart', color: '#4E9E92', title: 'Grocery list' },
@@ -1431,7 +1478,7 @@ const SETTINGS_PAGES = {
     data: { icon: 'i-shield', color: '#8B7E6E', title: 'Data & privacy' },
     logs: { icon: 'i-list', color: '#6E6862', title: 'Activity log' },
 };
-const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'schedule', 'learned', 'sources', 'books', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
+const SETTINGS_GROUPS = [['appearance', 'chat'], ['profile', 'schedule', 'learned', 'sources', 'services', 'books', 'grocery'], ['advanced', 'ai', 'server'], ['updates', 'data', 'logs']];
 const SETTINGS_GROUP_TITLES = ['', '', 'Advanced', ''];
 
 function settingsSummary(page) {
@@ -1449,6 +1496,7 @@ function settingsSummary(page) {
         case 'learned': return !taste.on ? 'Off' : taste.events.length ? `${taste.events.length} thing${taste.events.length > 1 ? 's' : ''} noted` : 'Nothing yet';
         case 'schedule': return ['breakfast', 'lunch', 'dinner'].map(m => SCHEDULE_SHORT[scheduleValue(m)] || '').join(' · ');
         case 'sources': return libraryState.count ? `${libraryState.count} of your own` : 'Automatic';
+        case 'services': { const n = ['edamam', 'fatsecret', 'usda', 'spoonacular'].filter(serviceHasKey).length; return n ? `${n} free key${n === 1 ? '' : 's'} added` : 'Optional · free'; }
         case 'books': { const n = recipeDBReady ? recipeDB.books().length : 0; return n ? `${n} book${n === 1 ? '' : 's'} · ${libraryState.count} recipes` : 'None yet'; }
         case 'advanced': {
             const off = String(s.sources_off || '').split(',').filter(Boolean).length;
@@ -1875,6 +1923,48 @@ const SETTINGS_RENDERERS = {
             ...settingsGroup('Nutrition', [infoRow('Data', 'USDA FoodData Central')], USDA_CREDIT),
         ];
     },
+    services() {
+        const S = NourishServices;
+        const counts = crossCheckCounts();
+        const pctOf = n => (counts.total ? `${n} (${Math.round(n / counts.total * 100)}%)` : String(n));
+        const card = id => {
+            const svc = S.SERVICES[id];
+            const result = h('span', { class: 'settings-hint', role: 'status', text: serviceHasKey(id) || id === 'usda' ? '' : 'No key yet' });
+            const test = h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: async e => {
+                const btn = e.currentTarget;
+                if (id !== 'usda' && !serviceHasKey(id)) { result.textContent = 'Paste the key first, then Test.'; return; }
+                btn.disabled = true; result.textContent = 'Testing…';
+                const r = await testService(id);
+                btn.disabled = false; result.textContent = r.text;
+                result.className = `settings-hint ${r.ok ? 'ok' : 'warn'}`;
+            } }, 'Test');
+            return settingsGroup(`${svc.name}`, [
+                h('div', { class: 'settings-row settings-row-stack' },
+                    h('span', { class: 'settings-label' }, svc.what, h('span', { class: 'chip ok service-free', text: 'Free' })),
+                    h('span', { class: 'settings-hint', text: svc.free })),
+                ...svc.keys.map(([f, label]) => secretRow(f, label, id === 'usda' ? 'optional: paste your free key' : 'paste your free key')),
+                id === 'usda' ? settingsToggle('usda_live', 'Look up foods on USDA live', { hint: 'Works without a key (the public demo key: a few lookups an hour)' }) : null,
+                infoRow('Used', S.usageText(id, { hasKey: serviceHasKey(id) })),
+                h('div', { class: 'settings-row' }, h('span', { class: 'header-actions' }, test,
+                    h('a', { class: 'link-btn', href: svc.signup, target: '_blank', rel: 'noopener', text: 'Get a free key' })), result),
+                h('details', { class: 'settings-row settings-steps' }, h('summary', { text: 'How to get the free key, step by step' }),
+                    h('ol', {}, svc.steps.map(t => h('li', { text: t })))),
+            ], `${svc.attribution.text}. Data from ${svc.name} is shown with this credit, as its terms ask.`);
+        };
+        return [
+            ...settingsGroup('', [h('div', { class: 'settings-row look-note', role: 'note', text: 'Nourish works with no keys at all. Add a free key for more recipes and more accurate calories. Every service here has a free plan: no card, no trial that runs out.' })], S.PRIVACY),
+            ...settingsGroup('Nutrition checks', [
+                infoRow('Checked by 2 or more sources', pctOf(counts.multi)),
+                infoRow('High confidence', pctOf(counts.high)),
+                infoRow('Medium confidence', pctOf(counts.medium)),
+                infoRow('Low: sources disagree (not planned)', pctOf(counts.low)),
+                infoRow('Estimate: one source', pctOf(counts.estimate)),
+                settingsButton(xRunning ? 'Checking…' : 'Check my recipes now', () => runCrossChecks({ manual: true, minutes: 6 }), 'settings-button-primary'),
+            ], help(anyServiceKey() ? 'Recipes are checked in the background, a few at a time, within each service\'s free limits.' : 'Without keys, each recipe is checked against its own site\'s numbers where it has them. That\'s a lighter check.',
+                'High: the sources agree within about 10%. Medium: within about 20%, or two of three agree. Low: they disagree, so the recipe stays out of plans until a check settles it. Estimate: only one source (books and recipes without published nutrition), until a free service gives a second opinion.')),
+            ...['edamam', 'fatsecret', 'usda', 'spoonacular'].flatMap(card),
+        ];
+    },
     advanced() {
         const lib = libraryStats();
         const bySource = Object.entries(lib.perSource).sort((x, y) => y[1] - x[1]);
@@ -1912,8 +2002,9 @@ const SETTINGS_RENDERERS = {
                 h('span', { class: 'settings-label', text: x.name }), h('span', { class: 'settings-hint', text: `${x.domain} · ${x.why}` }))),
                 help('These sites were checked and are left alone. Allrecipes, HelloFresh and the other big names say in their terms of use that automated apps may not read them, or they turn apps away.', 'Nourish never tries to get around a site\'s rules. You can try adding a recipe from one of these sites yourself, one at a time: paste its link in "Add a recipe from a link" on the Plan screen.')),
             ...settingsGroup('Recipe databases', NourishSources.SOURCES.filter(x => x.kind === 'api').map(sourceRow).concat([
-                secretRow('spoonacular_api_key', 'Spoonacular key', 'optional, free key'),
-            ]), help('TheMealDB works without a key. Spoonacular is an optional extra that needs a free key.', 'An API is a service apps can ask directly for recipes. Get a free Spoonacular key at spoonacular.com/food-api, then paste it here.')),
+                h('button', { type: 'button', class: 'settings-row settings-nav', onclick: () => openSettingsPage('services') },
+                    h('span', { class: 'settings-label' }, 'Free keys', h('span', { class: 'settings-hint', text: 'Spoonacular, FatSecret, Edamam and USDA: Recipe and nutrition services' })), icon('i-chevron', 'chev')),
+            ]), help('TheMealDB works without a key. The others are optional and free.', 'An API is a service apps can ask directly for recipes or nutrition. Each one\'s free key is added in Settings → Recipe and nutrition services, with step-by-step instructions.')),
             ...settingsGroup('Your own sites', [
                 settingsRow('Also search', settingsInput('custom_sites', { placeholder: 'e.g. mysite.com' }), { hint: 'separate several with commas' }),
             ], help('Add a recipe site you like and Nourish searches it too.', 'Works best with sites built on WordPress (most food blogs). Nourish uses the site\'s own search, so nothing is crawled.')),
@@ -2472,7 +2563,22 @@ function nutritionPanel(meal) {
             ? `Nutrition is for one person's portion (${portionLabel(meal)} of the recipe). Ingredient amounts are for ${meal.servings} ${meal.servings > 1 ? 'people' : 'person'}.`
             : `Nutrition is for one serving. Ingredient amounts make ${meal.servings} serving${meal.servings > 1 ? 's' : ''}.` }) : null,
         nutritionNotes(meal).map(t => h('p', { class: 'recipe-note', text: t })),
+        checkLine(meal),
         calorieBreakdown(meal));
+}
+
+// The cross-check in plain words, right with the numbers ("Calories checked against 3 sources: they
+// agree"), and the credit a service asks for when its data is used.
+const CHECK_CHIP = { high: ['Checked', 'ok'], medium: ['Checked', 'ok'], low: ['Sources disagree', 'warn'], estimate: ['Estimate', ''] };
+function checkLine(meal) {
+    const c = meal.nutrition_check;
+    if (!c || !c.level || meal.protein_extra) return null;
+    const used = (c.figures || []).map(f => f.id).filter(id => ['edamam', 'fatsecret', 'usdalive'].includes(id));
+    const credit = used.map(id => NourishServices.SERVICES[id === 'usdalive' ? 'usda' : id].attribution);
+    return h('div', { class: 'check-line' },
+        CHECK_CHIP[c.level] ? h('span', { class: `chip ${CHECK_CHIP[c.level][1]}`, text: CHECK_CHIP[c.level][0] }) : null,
+        h('span', { class: 'recipe-note', text: NourishCrossCheck.summary(meal, { anyKey: anyServiceKey() }) }),
+        credit.length ? h('span', { class: 'check-credit' }, credit.map(a => h('a', { href: a.url, target: '_blank', rel: 'noopener', text: a.text }))) : null);
 }
 
 // "How is this worked out?": every ingredient with its calories per serving, what was assumed
@@ -2491,7 +2597,22 @@ function calorieBreakdown(meal) {
             h('span', { class: 'what' }, l.line, l.assumed ? h('small', { text: `no amount given, counted as ${l.assumed}` }) : null),
             h('span', { class: 'kcal num', text: `${l.kcal}` })))),
         c.unmatched.length ? h('p', { class: 'recipe-note', text: `Not counted (not in the food table): ${c.unmatched.join('; ')}.` }) : null,
-        check ? h('p', { class: 'recipe-note', text: `Cross-check: ${meal.source_name || 'the recipe site'} says ${formatCalories(check.source)} kcal, our calculation ${formatCalories(check.calculated)} kcal (${Math.round(Math.abs(check.source - check.calculated) / Math.max(1, check.calculated) * 100)}% apart). ${meal.nutrition_basis === 'source' ? "Close enough, so the site's number is used." : 'Too far apart, so our calculation is used.'}` }) : null);
+        check && check.level ? checkDetails(meal, check) : check && check.source ? h('p', { class: 'recipe-note', text: `Cross-check: ${meal.source_name || 'the recipe site'} says ${formatCalories(check.source)} kcal, our calculation ${formatCalories(check.calculated)} kcal (${Math.round(Math.abs(check.source - check.calculated) / Math.max(1, check.calculated) * 100)}% apart).` }) : null);
+}
+// Each source's number (per serving of the recipe as written), and the ingredients that disagree.
+function checkDetails(meal, c) {
+    const session = c.fp && xSession[c.fp];
+    return h('div', { class: 'check-details' },
+        h('p', { class: 'recipe-note', text: 'Each source, for one serving of the recipe as written:' }),
+        h('div', { class: 'breakdown-rows' }, (c.figures || []).map(f => h('div', { class: 'breakdown-row' },
+            h('span', { class: 'what', text: f.label }), h('span', { class: 'kcal num', text: `${f.calories}` })))),
+        (c.flags || []).length ? h('p', { class: 'recipe-note', text: 'Ingredients the sources see differently (kcal per serving):' }) : null,
+        (c.flags || []).length ? h('div', { class: 'breakdown-rows' }, c.flags.map(f => h('div', { class: 'breakdown-row' },
+            h('span', { class: 'what' }, f.line, h('small', { text: `${Object.entries(f.values).map(([k, v]) => `${NourishCrossCheck.LABELS[k] || k}: ${v}`).join(' · ')}${f.why ? `. ${f.why}` : ''}` }))))) : null,
+        session ? h('details', { class: 'calorie-breakdown' }, h('summary', { text: 'Edamam, ingredient by ingredient (this session)' }),
+            h('div', { class: 'breakdown-rows' }, session.lines.map(l => h('div', { class: 'breakdown-row' }, h('span', { class: 'what', text: l.line }), h('span', { class: 'kcal num', text: `${l.kcal}` })))),
+            h('a', { href: NourishServices.SERVICES.edamam.attribution.url, target: '_blank', rel: 'noopener', class: 'check-credit', text: NourishServices.SERVICES.edamam.attribution.text })) : null,
+        c.checked_at ? h('p', { class: 'recipe-note', text: `Checked ${new Date(c.checked_at).toLocaleDateString()}${c.services && c.services.length ? ` with ${c.services.map(x => NourishServices.SERVICES[x === 'usdalive' ? 'usda' : x].name).join(', ')}` : ' (Nourish\'s calculation and the source\'s own numbers)'}.` }) : null);
 }
 
 function portionWords(p) {
@@ -3378,7 +3499,8 @@ function normalizeMeal(m) {
         nutrition_basis: m.nutrition_basis === 'source' || m.nutrition_basis === 'calculated' ? m.nutrition_basis : undefined,
         nutrition_unmatched: Array.isArray(m.nutrition_unmatched) && m.nutrition_unmatched.length ? m.nutrition_unmatched.map(String).slice(0, 12) : undefined,
         nutrition_assumed: Array.isArray(m.nutrition_assumed) && m.nutrition_assumed.length ? m.nutrition_assumed.slice(0, 12).map(a => ({ line: String(a.line || ''), amount: String(a.amount || '') })) : undefined,
-        nutrition_check: m.nutrition_check && Number(m.nutrition_check.source) > 0 ? { source: toNumber(m.nutrition_check.source), calculated: toNumber(m.nutrition_check.calculated) } : undefined,
+        nutrition_check: cleanCheck(m.nutrition_check),
+        source_nutrition: m.source_nutrition && Number(m.source_nutrition.calories) > 0 ? { calories: toNumber(m.source_nutrition.calories), protein_g: toNumber(m.source_nutrition.protein_g), carbs_g: toNumber(m.source_nutrition.carbs_g), fat_g: toNumber(m.source_nutrition.fat_g) } : undefined,
         scaled: m.scaled && Number(m.scaled.portion) > 0 ? { from_servings: toNumber(m.scaled.from_servings), portion: toNumber(m.scaled.portion) } : undefined,
         reseasoned: Array.isArray(m.reseasoned) && m.reseasoned.length ? m.reseasoned.map(String).slice(0, 6) : undefined,
         trimmed: m.trimmed ? true : undefined,
@@ -3418,6 +3540,21 @@ function normalizeMeal(m) {
     }
     Object.keys(out).forEach(k => { if (out[k] === undefined) delete out[k]; });
     return out;
+}
+
+// A nutrition cross-check as kept with a meal (crosscheck.js): its level, the sources' totals, the
+// lines that were off and the plain-words note. Older plans kept { source, calculated }.
+function cleanCheck(c) {
+    if (!c || typeof c !== 'object') return undefined;
+    if (!c.level) return Number(c.source) > 0 ? { source: toNumber(c.source), calculated: toNumber(c.calculated) } : undefined;
+    if (!['high', 'medium', 'low', 'estimate', 'none'].includes(c.level)) return undefined;
+    return {
+        level: c.level, sources: toNumber(c.sources) || 0, note: String(c.note || '').slice(0, 300), fp: c.fp ? String(c.fp).slice(0, 32) : undefined, checked_at: toNumber(c.checked_at) || undefined,
+        figures: Array.isArray(c.figures) ? c.figures.slice(0, 5).map(f => ({ id: String(f.id || '').slice(0, 20), label: String(f.label || '').slice(0, 80), calories: toNumber(f.calories), protein_g: toNumber(f.protein_g) })) : undefined,
+        flags: Array.isArray(c.flags) && c.flags.length ? c.flags.slice(0, 5).map(f => ({ line: String(f.line || '').slice(0, 160), food: String(f.food || '').slice(0, 60), why: String(f.why || '').slice(0, 200),
+            values: Object.fromEntries(Object.entries(f.values || {}).slice(0, 5).map(([k, v]) => [String(k).slice(0, 20), toNumber(v)])) })) : undefined,
+        services: Array.isArray(c.services) ? c.services.map(String).slice(0, 5) : undefined,
+    };
 }
 
 function safeSource(m) {
@@ -4287,6 +4424,7 @@ function finderOptions(likes, hates) {
         customSites: String(settings.custom_sites || '').split(/[\s,]+/).filter(Boolean),
         spoonacularKeySaved: !isLocalMode() && !!secretsSet.spoonacular_api_key,
         spoonacularDiet: SPOONACULAR_DIETS[settings.diet],
+        nutritionCheck: nutritionCheckFor,
         fetchPage: (url, { browser } = {}) => fetchForImport(url, { browser }),
         readRecipe: (html, url) => { try { return NourishImport.structuredRecipe(new DOMParser().parseFromString(html, 'text/html'), url); } catch (e) { return null; } },
         api: (path, body) => api(path, { method: 'POST', timeoutMs: 45000, body }),
@@ -4338,6 +4476,188 @@ function libraryStats() {
     });
     return out;
 }
+// === FREE SERVICES AND THE NUTRITION CROSS-CHECK (services.js, crosscheck.js) ===
+// Which services can be used now: a key saved (USDA works without one, with the public demo key,
+// unless switched off in Settings).
+function serviceKeyFields(service) { return NourishServices.SERVICES[service].keys.map(k => k[0]); }
+function hasSecret(f) { return !!settings[f] || (!isLocalMode() && !!secretsSet[f] && !pendingClears.includes(f)); }
+function serviceHasKey(service) { return service === 'usda' ? hasSecret('usda_api_key') : serviceKeyFields(service).every(hasSecret); }
+function serviceOn(service) { return service === 'usda' ? settings.usda_live !== 'off' || serviceHasKey('usda') : serviceHasKey(service); }
+function anyServiceKey() { return ['edamam', 'fatsecret', 'usda', 'spoonacular'].some(serviceHasKey); }
+// One request to a service: through the PC (which adds the key it keeps), or, on a phone, signed
+// here with the key from the phone's secure storage. Counted against the free limit; the activity log
+// gets the address's path only (never a key, signature or the query).
+async function serviceSend(service, req) {
+    service = service === 'usdalive' ? 'usda' : service;
+    const name = NourishServices.SERVICES[service].name;
+    const why = NourishServices.limitReached(service, { hasKey: serviceHasKey(service) });
+    if (why) { const e = new Error(why); e.limit = true; throw e; }
+    NourishServices.count(service, 1);
+    const started = Date.now();
+    let res;
+    if (isLocalMode()) {
+        const keys = Object.fromEntries(serviceKeyFields(service).map(f => [f, settings[f] || '']));
+        const a = await NourishServices.authorize(service, req, keys);
+        const r = await nativeHttp(a.url, { method: req.method || 'GET', headers: Object.assign({ Accept: 'application/json' }, a.headers), body: req.body, timeoutMs: 25000 });
+        res = { status: r.status, body: r.body || '', headers: {} };
+        // A phone sees no quota headers: Spoonacular's points are estimated (a search ≈ 1–2 points).
+        if (service === 'spoonacular') NourishServices.count('spoonacular', 0, Date.now(), (NourishServices.usage('spoonacular').points || 0) + 1.6);
+    } else {
+        res = await api('/api/services/request', { method: 'POST', timeoutMs: 35000, body: Object.assign({ service }, req) });
+        const used = res && res.headers && Number(res.headers['x-api-quota-used']);
+        if (service === 'spoonacular') NourishServices.count('spoonacular', 0, Date.now(), used > 0 ? used : (NourishServices.usage('spoonacular').points || 0) + 1.6);
+    }
+    let path = '';
+    try { path = new URL(req.url).pathname; } catch (e) { /* not a link */ }
+    nlog('services', `${name}: ${(req.method || 'GET').toUpperCase()} ${path}${req.query && req.query.method ? ` (${req.query.method})` : ''} → ${res.status} (${Date.now() - started} ms)`, null, res.status >= 400 ? 'warn' : 'debug');
+    return res;
+}
+// The "Test" button: one tiny request (a single egg), and what it means in plain words.
+async function testService(service) {
+    const reqs = {
+        edamam: { method: 'POST', url: 'https://api.edamam.com/api/nutrition-details', body: { title: 'Test', ingr: ['1 large egg'] } },
+        fatsecret: NourishCrossCheck.fatsecretSearch('egg'),
+        usda: NourishCrossCheck.usdaSearch('egg'),
+        spoonacular: { method: 'GET', url: 'https://api.spoonacular.com/recipes/complexSearch', query: { query: 'egg', number: '1' } },
+    };
+    try {
+        const res = await serviceSend(service, reqs[service]);
+        if (res.status === 200) return { ok: true, text: 'Works ✓' };
+        if (res.status === 401 || res.status === 403) return { ok: false, text: service === 'fatsecret' ? "FatSecret didn't accept the key. Check the Consumer Key and Consumer Secret (OAuth 1.0)." : "The key wasn't accepted. Check that it was copied in full." };
+        if (res.status === 402 || res.status === 429) return { ok: false, text: "The key works, but today's free allowance is used up. It resets tomorrow." };
+        let detail = '';
+        try { const d = JSON.parse(res.body || '{}'); detail = (d.error && (d.error.message || d.error)) || d.message || ''; } catch (e) { /* not JSON */ }
+        return { ok: false, text: `The service answered ${res.status}${detail ? `: ${String(detail).slice(0, 120)}` : ''}.` };
+    } catch (e) { return { ok: false, text: e.message }; }
+}
+
+// Results, by recipe fingerprint, kept for good so a recipe is never analysed twice. What's kept is
+// Nourish's own conclusion and the four main numbers; Edamam's per-ingredient data is used for this
+// session only, FatSecret's food data for 24 hours (their terms). USDA data is public domain.
+const XCHECK_KEY = 'nourish_xcheck', XLOOKUP_KEY = 'nourish_xcheck_lookups';
+let xchecks = null;
+const xSession = {};   // fingerprint → Edamam's own figure, this session only
+function crossChecks() { if (!xchecks) xchecks = loadJSON(XCHECK_KEY, {}) || {}; return xchecks; }
+function saveCrossChecks() {
+    const all = crossChecks();
+    const keys = Object.keys(all);
+    if (keys.length > 4000) keys.sort((a, b) => (all[a].checked_at || 0) - (all[b].checked_at || 0)).slice(0, keys.length - 4000).forEach(k => { delete all[k]; });
+    if (!store(XCHECK_KEY, all)) nlog('nutrition', 'Saving nutrition checks failed (storage full)', null, 'warn');
+}
+const xLookups = (() => {
+    let m = null;
+    const get = () => { if (!m) m = loadJSON(XLOOKUP_KEY, {}) || {}; return m; };
+    return {
+        get: k => get()[k] || null,
+        set: (k, v) => {
+            const all = get();
+            all[k] = v;
+            // FatSecret: only the food's id may be kept beyond 24 hours.
+            const now = Date.now();
+            Object.keys(all).forEach(x => { if (x.startsWith('fatsecret:') && all[x].per100 && now - (all[x].at || 0) > 24 * 3600e3) all[x] = { food_id: all[x].food_id, expired: true, none: true, at: all[x].at }; });
+            store(XLOOKUP_KEY, all);
+        },
+    };
+})();
+// A recipe's cross-check as the finder needs it (a fuller check done before), by fingerprint.
+function nutritionCheckFor(fp) { const c = crossChecks()[fp]; return c && c.services && c.services.length ? c : null; }
+// Library counts for Settings: how many recipes are High, Medium, Low and Estimate.
+function crossCheckCounts() {
+    const out = { high: 0, medium: 0, low: 0, estimate: 0, multi: 0, total: 0 };
+    const cache = loadJSON(NourishFinder.CACHE.recipes, {}) || {};
+    Object.values(cache).forEach(c => {
+        const r = c && c.r;
+        if (!r || !(r.ingredients || []).length) return;
+        const x = JSON.parse(JSON.stringify(r));
+        NourishNutrition.settle(x);
+        const done = nutritionCheckFor(NourishCrossCheck.fingerprint(x));
+        const res = done || NourishCrossCheck.localCheck(x);
+        out.total++;
+        out[res.level] = (out[res.level] || 0) + 1;
+        if (res.sources >= 2) out.multi++;
+    });
+    return out;
+}
+// Recipes waiting for a check with the free services: this plan's first, then those whose sources
+// disagree (a third opinion can settle them), then single-source estimates.
+function crossCheckQueue() {
+    const seen = new Set();
+    const out = [];
+    const push = (r, why) => {
+        if (!r || !(r.ingredients || []).length || r.builtin || r.ai || r.protein_extra || r.quick) return;
+        const x = JSON.parse(JSON.stringify(r));
+        delete x.scaled;
+        const fp = NourishCrossCheck.fingerprint(x);
+        if (seen.has(fp) || nutritionCheckFor(fp)) return;
+        seen.add(fp);
+        out.push({ r: x, fp, why });
+    };
+    // Plan meals are sized copies: their base recipe is in the library or the pools.
+    const base = new Map();
+    const cache = loadJSON(NourishFinder.CACHE.recipes, {}) || {};
+    const lib = Object.values(cache).map(c => c && c.r).filter(Boolean);
+    lib.concat(...Object.values(lastPlanPools || {})).forEach(r => { if (r && r.name && !base.has(r.name)) base.set(r.name, r); });
+    daysData.forEach(d => MEAL_TYPES.forEach(t => { const m = d && d[t]; if (m) push(base.get(m.name) || m, 'in your plan'); }));
+    const settled = lib.map(r => { const x = JSON.parse(JSON.stringify(r)); NourishNutrition.settle(x); return [r, NourishCrossCheck.localCheck(x)]; });
+    settled.filter(([, c]) => c.level === 'low').forEach(([r]) => push(r, 'sources disagree'));
+    settled.filter(([, c]) => c.level === 'estimate').forEach(([r]) => push(r, 'one source only'));
+    settled.forEach(([r]) => push(r, 'not checked by a service yet'));
+    return out;
+}
+let xRunning = false;
+// Runs the check over the plan and the saved library, within the free limits, a recipe at a time
+// (Edamam allows 10 a minute). Stops cleanly at a limit, after `minutes`, or when there's nothing left.
+async function runCrossChecks({ minutes = 4, manual = false } = {}) {
+    if (xRunning) return;
+    const services = { edamam: serviceOn('edamam'), fatsecret: serviceOn('fatsecret'), usdalive: serviceOn('usda') };
+    if (!Object.values(services).some(Boolean)) { if (manual) showToast('Add a free key in Settings → Recipe and nutrition services first.', true); return; }
+    if (isLocalMode() && typeof nativeAvailable === 'function' && !nativeAvailable()) return;
+    xRunning = true;
+    const started = Date.now();
+    let done = 0, settledLow = 0;
+    try {
+        const queue = crossCheckQueue();
+        if (!queue.length) { if (manual) showToast('Every recipe has been checked ✓', false); return; }
+        nlog('nutrition', `Checking nutrition with ${Object.keys(services).filter(k => services[k]).map(k => NourishServices.SERVICES[k === 'usdalive' ? 'usda' : k].name).join(', ')}: ${queue.length} recipe${queue.length === 1 ? '' : 's'} waiting`);
+        for (const item of queue) {
+            if (Date.now() - started > minutes * 60e3) break;
+            const now = { edamam: services.edamam && !NourishServices.limitReached('edamam'), fatsecret: services.fatsecret && !NourishServices.limitReached('fatsecret'),
+                usdalive: services.usdalive && !NourishServices.limitReached('usda', { hasKey: serviceHasKey('usda') }) };
+            if (!Object.values(now).some(Boolean)) {
+                const wait = NourishServices.limitReached('edamam') === 'wait a minute';
+                if (!wait) { nlog('nutrition', 'Nutrition checks paused: the free allowances are used up for now; they continue when they reset'); break; }
+                await new Promise(ok => setTimeout(ok, 62e3));
+                continue;
+            }
+            NourishNutrition.settle(item.r);
+            const before = NourishCrossCheck.localCheck(item.r).level;
+            const { result, session } = await NourishCrossCheck.fullCheck(item.r, {
+                send: serviceSend, services: now, cache: xLookups,
+                log: (m, level) => nlog('nutrition', m, null, level || 'debug'),
+            });
+            crossChecks()[item.fp] = result;
+            if (session.edamam) xSession[item.fp] = session.edamam;
+            done++;
+            if (before === 'low' && result.level !== 'low') settledLow++;
+            const flagged = (result.flags || []).filter(f => !/no majority/.test(f.why));
+            if (result.level === 'low' || flagged.length || before !== result.level) {
+                nlog('nutrition', `"${item.r.name}" (${item.why}): ${result.note}`, (result.flags || []).map(f => `${f.line}: ${Object.entries(f.values).map(([k, v]) => `${NourishCrossCheck.LABELS[k] || k} ${v} kcal`).join(', ')}${f.why ? ` (${f.why})` : ''}`));
+            }
+            // A meal in the plan shows its new check straight away.
+            daysData.forEach(d => MEAL_TYPES.forEach(t => { const m = d && d[t]; if (m && m.name === item.r.name) m.nutrition_check = result; }));
+            if (done % 5 === 0) saveCrossChecks();
+            if (now.edamam) await new Promise(ok => setTimeout(ok, 6500));   // 10 a minute at most
+        }
+    } catch (e) {
+        nlog('nutrition', `Nutrition check stopped: ${e.message}`, null, e.limit ? 'info' : 'warn');
+    } finally {
+        if (done) { saveCrossChecks(); changed('plan'); }
+        xRunning = false;
+        if (done) nlog('nutrition', `Nutrition checked for ${done} recipe${done === 1 ? '' : 's'} in ${Math.round((Date.now() - started) / 1000)} s${settledLow ? `; ${settledLow} whose sources disagreed are settled now` : ''}`);
+        if (manual) { showToast(done ? `Checked ${done} recipe${done === 1 ? '' : 's'} ✓` : 'Nothing could be checked right now', !done); if (settingsPage === 'services') renderSettings(); }
+    }
+}
+
 async function refreshRecipeLibrary({ manual = false } = {}) {
     if (libraryRefreshing) return;
     try {

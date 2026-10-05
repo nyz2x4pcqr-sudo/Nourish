@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Service keys (SecretStore.java) stay on this phone: never in a backup. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="nourish_secrets.xml" />
+</full-backup-content>
