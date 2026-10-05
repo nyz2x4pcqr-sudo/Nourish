@@ -1,0 +1,7 @@
+My Recipes
+
+Drop your own recipes here: family recipes, notes, saved web pages or photos of recipe cards.
+Each one needs a title, a list of ingredients and the steps.
+Nourish reads them in the background and can use them in your plans.
+
+You can also add files from Nourish: Settings > Recipes > Add files.

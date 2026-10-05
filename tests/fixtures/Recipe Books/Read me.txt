@@ -1,0 +1,8 @@
+Recipe Books
+
+Drop cookbooks here: EPUB or PDF books, Word, text or Markdown files, saved web pages, or photos of pages.
+Nourish reads them in the background and learns from them: which ingredients go together,
+how dishes are seasoned and cooked. Their recipes can also turn up in your plans, next to
+recipes from other places.
+
+You can also add files from Nourish: Settings > Recipes > Add files.

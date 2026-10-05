@@ -33,3 +33,7 @@ mobile/ios/llama-src/
 local.properties
 nourish-secrets*
 *.gguf
+
+# Plan audit: web library and reports (tools/audit)
+tools/audit/.cache/
+node_modules/

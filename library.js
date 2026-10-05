@@ -55,6 +55,13 @@
                 if (lines[k] && /^#+\s/.test(lines[k]) && titleLike(lines[k])) { title = lines[k]; titleAt = k; break; }
             }
             if (!title) for (let k = i - 1; k >= Math.max(floor, i - 15); k--) { if (lines[k] && titleLike(lines[k]) && !/\b(serves|servings|prep|cook|total|yield|makes)\b/i.test(lines[k])) { title = lines[k]; titleAt = k; break; } }
+            // A title that wraps onto a second line ("Sheet-Pan Sausage and Peppers with" / "Crispy
+            // Potatoes"): the two lines are one title (0.1.12 kept only the second, a chopped title).
+            const above = titleAt > floor ? lines[titleAt - 1] : '';
+            if (title && above && titleLike(above) && !/^#+\s/.test(title) && (CONNECT_END.test(above) || CONNECT_START.test(title) || /^[a-z]/.test(title)) && (above + title).length <= 90) {
+                title = `${above} ${title}`;
+                titleAt--;
+            }
             const ingredients = [];
             let j = i + 1;
             for (; j < lines.length && !STEP_HEAD.test(lines[j]) && !ING_HEAD.test(lines[j]); j++) {
@@ -158,12 +165,19 @@
         const lines = [], pages = [];
         let page = 1;
         raw.forEach(l => { if (l.indexOf('\f') >= 0) page += (l.match(/\f/g) || []).length; lines.push(cleanLine(l)); pages.push(page); });
-        // Running heads and feet: the same short line on many pages.
+        // Running heads and feet: the same short line on many pages, at the top or bottom of the page.
+        // Headings every recipe has ("Ingredients", "Method", "Serves 4") repeat on most pages too,
+        // but they're never running heads (0.1.12 removed them, so a PDF's recipes lost their titles
+        // and servings).
         const totalPages = pages.length ? pages[pages.length - 1] : 1;
         if (totalPages >= 4) {
+            const edge = new Set();
+            const byPage = new Map();
+            lines.forEach((l, i) => { if (l) { if (!byPage.has(pages[i])) byPage.set(pages[i], []); byPage.get(pages[i]).push(i); } });
+            byPage.forEach(list => list.slice(0, 2).concat(list.slice(-2)).forEach(i => edge.add(i)));
             const seen = new Map();
             lines.forEach((l, i) => {
-                if (!l || l.length > 60 || isIngLine(l)) return;
+                if (!l || l.length > 60 || !edge.has(i) || isIngLine(l) || ING_HEAD.test(l) || STEP_HEAD.test(l) || OTHER_HEAD.test(l) || SERVINGS_LINE.test(l) || /\b(serves|servings?|makes|yields?|prep|cook|ready in)\b/i.test(l)) return;
                 const k = l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ');
                 if (!seen.has(k)) seen.set(k, new Set());
                 seen.get(k).add(pages[i]);
