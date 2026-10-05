@@ -4386,12 +4386,30 @@ async function runSmartPlan(likes, hates) {
             exclude: NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet }), weekday: d => (dayBase() + d) % 7, already: recentPlanDishes() });
         days = kept.days;
         if (kept.changes.length) nlog('plan', `Kept ${kept.changes.length} day(s) to the calorie target`, kept.changes);
+        // The last guard: whichever step chose a meal, none with something avoided (a dislike, an
+        // allergy or the diet) reaches the plan. Such a meal is swapped like an empty one.
+        const avoided = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
+        const swapOut = [];
+        days.forEach((d, i) => MEAL_TYPES.forEach(t => {
+            const m = d && d[t];
+            const hit = m && avoided(m);
+            if (!hit) return;
+            nlog('plan', `${dayName(i)} ${t} "${m.name}" has ${hit}, which is avoided; swapped`, null, 'warn');
+            swapOut.push({ day: i, meal: t, kcal: Math.round((m.nutrition && m.nutrition.calories) || 500) });
+            d[t] = null;
+        }));
+        if (swapOut.length) {
+            const again = { days, pools: plan.pools, missing: swapOut };
+            await fillMissingMeals(again);
+            days = again.days.map((d, i) => swapOut.some(s => s.day === i) ? NourishPlanner.fitDay(d, plannerSettings(dayTargetsFor(i)), servingsWanted()) : d);
+        }
         if (!days.some(d => MEAL_TYPES.some(t => d[t]))) {
             throw new Error(aiReady()
                 ? "Couldn't find or write any recipes. Check your internet connection and try again."
                 : 'No recipes could be found right now. Check your internet connection, or download an AI model in Settings so Nourish can write recipes itself.');
         }
         applyPlan({ days });
+        daysData.forEach((d, i) => MEAL_TYPES.forEach(t => { const m = d && d[t]; const hit = m && avoided(m); if (hit) nlog('plan', `${dayName(i)} ${t} "${m.name}" still has ${hit} after the day's rules`, m.ingredients, 'error'); }));
         // Book recipes: how many were candidates and how many made it into the plan.
         const inPool = new Set(MEAL_TYPES.flatMap(m => (plan.pools[m] || []).filter(r => r.from_book).map(r => r.book_recipe_id || r.name))).size;
         const chosen = daysData.flatMap(d => MEAL_TYPES.map(t => d[t]).filter(x => x && x.from_book));

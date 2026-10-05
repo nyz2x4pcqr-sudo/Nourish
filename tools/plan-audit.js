@@ -377,6 +377,11 @@ async function main() {
         results.push({ case: c, res, findings });
         const probs = findings.filter(f => f.severity === 'problem').length;
         console.error(`${c.id.padEnd(30)} ${((Date.now() - t0) / 1000).toFixed(1)} s, ${probs} problems, split ${JSON.stringify(res.split.perSource)}${res.error ? ' ERROR ' + res.error : ''}`);
+        // A problem: the app's own notes on how it made this plan, so the cause can be found from the log.
+        if (probs) {
+            findings.filter(f => f.severity === 'problem').forEach(f => console.error(`  problem: ${f.check}: ${f.meal || ''} ${f.where || ''} ${f.what}`));
+            res.log.slice(0, 60).forEach(l => console.error(`  app log: ${l.slice(0, 700)}`));
+        }
     }
     await browser.close();
     stop();
