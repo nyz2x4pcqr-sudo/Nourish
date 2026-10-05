@@ -215,7 +215,7 @@ function checkMeal(m, slot, ctx, add) {
         const invented = inventedFood(d, m);
         if (invented) add('description', 'fail', `"${d}": mentions ${invented}, which isn't in the recipe`);
         if (/\b(recipe video|jump to|click|subscribe|this post|affiliate|pin (it|this)|scroll down|printable)\b/i.test(d)) add('description', 'fail', `"${d}": website text, not a description of the dish`);
-        if (/\b\d+(\.\d+)?\s*(cups?|tbsp|tsp|tablespoons?|teaspoons?|pounds?|lbs?|oz|ounces?|grams?|g|kg|gallons?|quarts?|pints?|liters?|litres?|ml)\b|\b(gallons?|quarts?|pints?)\b/i.test(d)) add('description', 'fail', `"${d}": reads like an ingredient list (amounts and units)`);
+        if (/\b\d+(\.\d+)?\s*(cups?|tbsp|tsp|tablespoons?|teaspoons?|pounds?|lbs?|oz|ounces?|grams?|g|kg|gallons?|quarts?|pints?|liters?|litres?|ml)\b|\b(gallons?|quarts?|pints?|lbs?|oz|tbsp|tsp)\b/i.test(d)) add('description', 'fail', `"${d}": reads like an ingredient list (amounts and units)`);
         if (/\b(brine|kosher salt|sea salt|for (deep )?frying|cold water|gallon)\b/i.test(d) || (m.description_made && /\b(water|ice)\b/i.test(d))) add('description', 'fail', `"${d}": mentions water, salt, brine or frying oil, not the dish`);
         const one = w => w.replace(/(es|s)$/, '');
         const foodWords = new Set(`${name} ${own(m).join(' ')}`.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3).map(one));

@@ -186,7 +186,7 @@
             byPage.forEach(list => list.slice(0, 2).concat(list.slice(-2)).forEach(i => edge.add(i)));
             const seen = new Map();
             lines.forEach((l, i) => {
-                if (!l || l.length > 60 || !edge.has(i) || isIngLine(l) || ING_HEAD.test(l) || STEP_HEAD.test(l) || OTHER_HEAD.test(l) || SERVINGS_LINE.test(l) || /\b(serves|servings?|makes|yields?|prep|cook|ready in)\b/i.test(l)) return;
+                if (!l || l.length > 60 || !edge.has(i) || isIngLine(l) || NUM_STEP.test(l) || isStepLine(l) || /[.!]$/.test(l) || ING_HEAD.test(l) || STEP_HEAD.test(l) || OTHER_HEAD.test(l) || SERVINGS_LINE.test(l) || /\b(serves|servings?|makes|yields?|prep|cook|ready in)\b/i.test(l)) return;
                 const k = l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ');
                 if (!seen.has(k)) seen.set(k, new Set());
                 seen.get(k).add(pages[i]);

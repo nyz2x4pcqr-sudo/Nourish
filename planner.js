@@ -1484,7 +1484,8 @@
     function foodName(line) {
         const it = U ? U.splitIngredient(line) : { text: line };
         // Brackets and how it's prepared first ("bone-in, skin-on chicken thighs"), then what follows a comma.
-        return String(it.text || line).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(DESC_PREP, ' ').replace(/^[\s,;-]+/, '').replace(/,.*$/, ' ').replace(/^(x\s*)?\d+(\.\d+)?\s*-?\s*(ounces?|oz|grams?|g|pounds?|lbs?)\b\.?(\s*\/\s*\d+\s*(oz|g))?/, ' ')
+        // A second amount ("250 g / ½ lb beef mince") goes too, so no "lb" in the description.
+        return String(it.text || line).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/^\s*\/\s*[\d\s/.½¼¾⅓⅔⅛]+\s*(lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|litres?|cups?|tbsp|tsp)\b\.?/, ' ').replace(DESC_PREP, ' ').replace(/^[\s,;-]+/, '').replace(/,.*$/, ' ').replace(/^(x\s*)?\d+(\.\d+)?\s*-?\s*(ounces?|oz|grams?|g|pounds?|lbs?)\b\.?(\s*\/\s*\d+\s*(oz|g))?/, ' ')
             .replace(/^(cans?|tins?|jars?|packages?|bags?|racks?( of)?|heads?|bunch(es)?|sprigs?|stalks?|cloves?|slices?|pieces?|fillets?|handfuls?|pinch(es)?|dash(es)?)\b/, ' ')
             .replace(DESC_PREP, ' ').replace(/\b(cloves?|leaves|sprigs?|florets?|chunks?|wedges?|pieces?|strips?)$/, ' ').replace(/[^a-z' -]/g, ' ').replace(/\s+/g, ' ').trim();
     }
