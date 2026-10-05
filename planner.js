@@ -1487,7 +1487,11 @@
         // A second amount ("250 g / ½ lb beef mince") goes too, so no "lb" in the description.
         return String(it.text || line).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/^\s*\/\s*[\d\s/.½¼¾⅓⅔⅛]+\s*(lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|litres?|cups?|tbsp|tsp)\b\.?/, ' ').replace(DESC_PREP, ' ').replace(/^[\s,;-]+/, '').replace(/,.*$/, ' ').replace(/^(x\s*)?\d+(\.\d+)?\s*-?\s*(ounces?|oz|grams?|g|pounds?|lbs?)\b\.?(\s*\/\s*\d+\s*(oz|g))?/, ' ')
             .replace(/^(cans?|tins?|jars?|packages?|bags?|racks?( of)?|heads?|bunch(es)?|sprigs?|stalks?|cloves?|slices?|pieces?|fillets?|handfuls?|pinch(es)?|dash(es)?)\b/, ' ')
-            .replace(DESC_PREP, ' ').replace(/\b(cloves?|leaves|sprigs?|florets?|chunks?|wedges?|pieces?|strips?)$/, ' ').replace(/[^a-z' -]/g, ' ').replace(/\s+/g, ' ').trim();
+            .replace(DESC_PREP, ' ').replace(/\b(cloves?|leaves|sprigs?|florets?|chunks?|wedges?|pieces?|strips?)$/, ' ')
+            // "2 heaped tbsp almonds", "drizzle to serve honey or agave": just the food (the first choice).
+            .replace(/\b(heaped|heaping|level|rounded|generous|scant|good|big|drizzle|splash|squeeze|dash|to serve|for serving|to garnish|for garnish|for drizzling|optional)\b/g, ' ')
+            .replace(/^\s*[\d\s/.½¼¾⅓⅔⅛-]+/, ' ').replace(/^\s*(cups?|tbsps?|tsps?|tablespoons?|teaspoons?|handfuls?|pinch(es)?|knobs?|of)\b\s*/, ' ').replace(/\s+or\s+.*$/, ' ')
+            .replace(/[^a-z' -]/g, ' ').replace(/\s+/g, ' ').trim();
     }
     const LIQUID = /\b(milk|buttermilk|broth|stock|wine|beer|juice|water|cream|vinegar)\b/;
     function describe(r) {
