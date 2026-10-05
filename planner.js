@@ -648,7 +648,9 @@
         const pTarget = ctx.targets.protein * share;
         const fTarget = ctx.targets.fat * share;
         const p = n.protein_g * f, fat = n.fat_g * f;
-        cost += Math.max(0, (pTarget - p) / pTarget) * 1.5 + Math.max(0, (fat - fTarget) / fTarget) * 1.5;
+        // Protein counts for more when the day's target is a big share of its calories (losing weight, 2 g per kg).
+        const pShare = ctx.targets.kcal > 0 ? ctx.targets.protein * 4 / ctx.targets.kcal : 0.2;
+        cost += Math.max(0, (pTarget - p) / pTarget) * (1.5 + Math.max(0, pShare - 0.25) * 5) + Math.max(0, (fat - fTarget) / fTarget) * 1.5;
         // A meal with real protein of its own comes before one Nourish would have to add chicken to.
         cost += Math.max(0, (MEAL_PROTEIN.min - p) / MEAL_PROTEIN.min) * (ctx.meal === 'breakfast' ? 1 : 2.5);
         cost -= Math.min(2, P.likeScore(r, ctx.likes)) * 0.5;
@@ -782,7 +784,8 @@
                 pick.forEach((x, i) => { if (!x) return; const k = targets.kcal * split[i] / x.r.nutrition.calories; p += x.r.nutrition.protein_g * k; f += x.r.nutrition.fat_g * k; share += split[i]; });
                 if (share > 0) {
                     const pT = targets.protein * share, fT = targets.fat * share;
-                    cost += Math.max(0, (pT * 0.9 - p) / pT) * 4 + Math.max(0, (f - fT * 1.1) / fT) * 4;
+                    // A day short of its protein is a worse day: add-ons can only do so much (one food a meal).
+                    cost += Math.max(0, (pT * 0.9 - p) / pT) * 10 + Math.max(0, (f - fT * 1.1) / fT) * 4;
                 }
                 if (new Set(cuis).size < cuis.length) cost += 0.6;
                 // Two meals of one day from the same source, or a day that would take it past its share.
@@ -849,12 +852,17 @@
             const r = out[m];
             if (!r || !r.nutrition || !(r.nutrition.calories > 0)) return;
             if (!(r.ingredients || []).length || !(split[i] > 0)) { fixed += r.nutrition.calories; return; }
-            const kcal = targets.kcal * split[i];
+            let kcal = targets.kcal * split[i];
             const copy = JSON.parse(JSON.stringify(r));
+            // What Nourish added (a protein or fiber food) is a side of its own: sizing the portion
+            // sizes the dish, never the added chicken or eggs (else protein and calories chase each other).
+            const extra = addOns(copy, people);
+            // The add-on's calories (a serving's worth) are part of the day already.
+            if (extra) { const per = extra.nutrition.calories; fixed += per; kcal = Math.max(kcal * 0.4, kcal - per); }
             // Already sized (amounts are for `people`): work from one serving as it stands.
             if (copy.scaled) copy.servings = people || Number(copy.servings) || 1;
             if (kcal / copy.nutrition.calories < 0.85) trimAndRecount(copy, copy.nutrition.calories - kcal / 0.85);
-            items.push({ key: m, r: copy, want: kcal, prev: r, base: r.scaled && r.scaled.portion > 0 ? r.scaled.portion : 1 });
+            items.push({ key: m, r: copy, want: kcal, prev: r, base: r.scaled && r.scaled.portion > 0 ? r.scaled.portion : 1, extra });
         });
         const sized = sizeMeals(items, Math.max(1, targets.kcal - fixed), people || 1);
         items.forEach(it => {
@@ -863,8 +871,51 @@
             if (s.scaled && it.prev.scaled) s.scaled = Object.assign({}, s.scaled, { from_servings: it.prev.scaled.from_servings, portion: s.scaled.absolute || Math.round(it.prev.scaled.portion * s.scaled.portion * 100) / 100 });
             if (s.scaled) delete s.scaled.absolute;
             if (!s.scaled && !it.r.trimmed) return;
-            out[it.key] = s;
+            out[it.key] = it.extra ? withAddOns(s, it.extra, people || 1) : s;
         });
+        return out;
+    }
+    // A meal's added foods (protein_added, fiber_added) taken out: { lines, steps, nutrition } for the
+    // whole meal, with `meal` left as the dish alone (ingredients, steps, numbers). null when none.
+    function addOns(meal, people) {
+        const added = [].concat(meal.protein_added || [], meal.fiber_added || []);
+        if (!added.length) return null;
+        const food = l => String(l).toLowerCase().replace(/^[\d\s/.½¼¾⅓⅔⅛-]+/, '').replace(/^(cups?|oz|scoops?|tbsp|tsp)\s+/, '').trim();
+        const want = new Set(added.map(food));
+        const lines = (meal.ingredients || []).filter(l => want.has(food(l)));
+        if (!lines.length) return null;
+        const n = Math.max(1, Number(meal.servings) || people || 1);
+        const nut = N.calculate(lines, n).nutrition;
+        meal.ingredients = meal.ingredients.filter(l => !want.has(food(l)));
+        const steps = new Set((meal.added_steps || []).map(String));
+        const stepList = (meal.steps || []).filter(st => steps.has(String(st)));
+        meal.steps = (meal.steps || []).filter(st => !steps.has(String(st)));
+        const nu = meal.nutrition || {};
+        ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'].forEach(k => { if (nu[k] != null) nu[k] = Math.max(0, Math.round(((Number(nu[k]) || 0) - (nut[k] || 0)) * 10) / 10); });
+        meal.nutrition = nu;
+        delete meal._lines;
+        return { lines, steps: stepList, nutrition: nut, servings: n };
+    }
+    // The dish (sized) with its added foods back, for `people` (the add-ons keep their amount a person).
+    function withAddOns(dish, extra, people) {
+        const out = JSON.parse(JSON.stringify(dish));
+        const k = people / extra.servings;
+        // Never past the most a person adds (scaling can round 6⅔ oz up to 7).
+        const lines = extra.lines.map(l => (Math.abs(k - 1) < 0.01 ? l : scaleLine(l, k))).map(l => {
+            const item = U.splitIngredient(l);
+            const hit = Object.keys(BOOST_MOST).find(f => String(item.text || '').toLowerCase() === f);
+            return hit && item.qty / people > BOOST_MOST[hit] ? `${U.formatAmount(BOOST_MOST[hit] * people, item.unit)} ${item.text}`.trim() : l;
+        });
+        out.ingredients = (out.ingredients || []).concat(lines);
+        out.steps = (out.steps || []).concat(extra.steps);
+        const add = N.calculate(lines, people).nutrition;
+        const nu = out.nutrition || {};
+        ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(key => { nu[key] = Math.round((Number(nu[key]) || 0) + (add[key] || 0)); });
+        nu.fiber_g = Math.round(((Number(nu.fiber_g) || 0) + (add.fiber_g || 0)) * 10) / 10;
+        out.nutrition = nu;
+        // The added lines as they now read (the app finds them by their food).
+        const food = l => String(l).toLowerCase().replace(/^[\d\s/.½¼¾⅓⅔⅛-]+/, '').replace(/^(cups?|oz|scoops?|tbsp|tsp)\s+/, '').trim();
+        ['protein_added', 'fiber_added'].forEach(key => { if (Array.isArray(out[key])) out[key] = out[key].map(a => lines.find(l => food(l) === food(a)) || a); });
         return out;
     }
     // The last check on every plan, whoever made it: a day more than 10% off the calorie target has
@@ -893,10 +944,19 @@
                 const want = targets.kcal * split[MEALS.indexOf(worst.m)];
                 const limits = slotLimits(settings, worst.m, weekday ? weekday(d) : null);
                 const others = MEALS.filter(m => m !== worst.m).map(m => cur[m]).filter(Boolean);
-                const pick = (pools[worst.m] || []).filter(r => r && r.nutrition && r.nutrition.calories > 0 && !used.has(r.name) && !(exclude && exclude(r)) && !slotProblem(r, worst.m, limits)
+                // Never a source's 4th meal of the week (3 by default) because of a swap.
+                const cap = Number(settings.source_cap) > 0 ? Number(settings.source_cap) : 3;
+                const bySource = {};
+                days.filter((x, i) => i !== d).forEach(x => MEALS.forEach(m => { const y = x && x[m]; if (y) bySource[sourceKey(y)] = (bySource[sourceKey(y)] || 0) + 1; }));
+                MEALS.forEach(m => { const y = cur[m]; if (y) bySource[sourceKey(y)] = (bySource[sourceKey(y)] || 0) + 1; });
+                const roomFor = r => sourceKey(r) === 'builtin' || sourceKey(r) === sourceKey(cur[worst.m]) || (bySource[sourceKey(r)] || 0) < cap;
+                const pick = (pools[worst.m] || []).filter(r => r && r.nutrition && r.nutrition.calories > 0 && !used.has(r.name) && !(exclude && exclude(r)) && roomFor(r) && !slotProblem(r, worst.m, limits)
                     && !others.some(o => mainProtein(o) && mainProtein(o) === mainProtein(r)))
                     .map(r => ({ r, f: want / r.nutrition.calories })).filter(x => x.f >= 0.55 && x.f <= 2)
-                    .sort((a, b) => (recent.has(a.r.name) ? 1 : 0) - (recent.has(b.r.name) ? 1 : 0) || Math.abs(Math.log(a.f)) - Math.abs(Math.log(b.f)))[0];
+                    // Recent dishes last; Nourish's own recipes after web and book ones (they're a backup).
+                    .sort((a, b) => (recent.has(a.r.name) ? 1 : 0) - (recent.has(b.r.name) ? 1 : 0)
+                        || (settings.builtin_mode !== 'mix' ? (a.r.source_id === 'builtin' ? 1 : 0) - (b.r.source_id === 'builtin' ? 1 : 0) : 0)
+                        || Math.abs(Math.log(a.f)) - Math.abs(Math.log(b.f)))[0];
                 if (!pick) break;
                 changes.push(`day ${d + 1}: ${Math.round(total)} kcal against ${targets.kcal}; ${worst.m} "${cur[worst.m].name}" → "${pick.r.name}"`);
                 used.add(pick.r.name);
@@ -993,7 +1053,10 @@
             out.protein_added = [line].concat((meal.protein_added || []).slice(1));
             return out;
         }
+        // A vegan or vegetarian dish gets a plant protein, never chicken or tuna (whatever the person eats).
+        const plantOnly = /\b(vegan|vegetarian|veggie|plant[- ]based|meatless)\b/i.test(meal.name || '');
         for (const [food, unit, perUnit, step] of BOOSTERS[kind]) {
+            if (plantOnly && /chicken|tuna|eggs?|egg whites|greek yogurt|cottage cheese/.test(food) && (/vegan|plant/i.test(meal.name || '') || /chicken|tuna/.test(food))) continue;
             // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces.
             const units = Math.min(unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit), BOOST_MOST[food] || 4);
             const qty = units * n;
@@ -1176,7 +1239,9 @@
             }));
             if (!best || best.gain < MICRO_TARGETS[k] * 0.1) return;
             const old = out[best.i][best.m];
-            out[best.i] = fitDay(Object.assign({}, out[best.i], { [best.m]: JSON.parse(JSON.stringify(best.r)) }), settings, people);
+            // Sized to that day's own calories (a big day in Weekly mode keeps its target).
+            const daySettings = Array.isArray(settings.day_kcal) && settings.day_kcal[best.i] > 0 ? Object.assign({}, settings, { calorie_target: settings.day_kcal[best.i] }) : settings;
+            out[best.i] = fitDay(Object.assign({}, out[best.i], { [best.m]: JSON.parse(JSON.stringify(best.r)) }), daySettings, people);
             used.add(best.r.name);
             notes.push(`The week was low in ${MICRO_NAMES[k]}: day ${best.i + 1} ${best.m} "${old.name}" swapped for "${best.r.name}" (about ${Math.round(best.gain)} ${MICRO_UNITS[k]} more)`);
         });

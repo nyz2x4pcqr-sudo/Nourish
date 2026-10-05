@@ -188,7 +188,9 @@
         // Bits of a site's nutrition panel or recipe card that end up in its description ("17g salt.",
         // "320 kcal.", "Serves 4.") aren't sentences about the dish.
         const card = /^\s*(?:\d+(?:\.\d+)?\s*(?:g|mg|kcal|cal|calories)\b[^.!?]*|(?:serves|makes|prep|cook|total)\b[^.!?]{0,20})[.!?]+\s*$/i;
-        for (const p of parts) { if (card.test(p)) continue; const next = (out + ' ' + p.trim()).trim(); if (next.length > max) break; out = next; }
+        // And the page's own chatter: "Recipe video above.", "PS Just 2 tablespoons…", "Jump to recipe".
+        const chatter = /\b(recipe video|video above|video below|watch the video|scroll down|jump to (the )?recipe|print (the )?recipe|pin (it|this)|see (the )?(notes|post) (above|below)|full recipe below)\b|^\s*p\.?s\.?\b|\b\d+(\.\d+)?\s*(cups?|tablespoons?|tbsp|teaspoons?|tsp|grams?|g|oz|ounces?|ml)\b/i;
+        for (const p of parts) { if (card.test(p) || chatter.test(p)) continue; const next = (out + ' ' + p.trim()).trim(); if (next.length > max) break; out = next; }
         return out.length >= 20 ? out : '';
     }
     function fromJsonLd(doc, url) {

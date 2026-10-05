@@ -113,7 +113,7 @@ DIET_WORDS.Vegan = new RegExp(DIET_WORDS.Vegetarian.source.slice(0, -4) + '|eggs
 const lc = s => String(s || '').toLowerCase();
 const words = s => lc(s).split(/[^a-z]+/).filter(w => w.length >= 3).map(w => w.replace(/(ies)$/, 'y').replace(/([^s])s$/, '$1'));
 // Pairs where the table's food has another name than the line (checked by hand).
-const SAME_FOOD = [[/\bmince\b/, /ground/], [/\bprawns?\b/, /shrimp/], [/\bswede\b/, /rutabaga/], [/\bcourgette/, /zucchini/], [/\baubergine/, /eggplant/], [/\bscallions?|spring onions?|green onions?/, /onion/],
+const SAME_FOOD = [[/\bmince\b/, /ground/], [/\bprawns?\b/, /shrimp/], [/\bswede\b/, /rutabaga/], [/\bmangetout|sugar snap/, /snow peas/], [/\bcourgette/, /zucchini/], [/\baubergine/, /eggplant/], [/\bscallions?|spring onions?|green onions?/, /onion/],
     [/\bbuns?|rolls?|baguette|crusty/, /bread/], [/\bstock\b|bouillon/, /broth/], [/\bchilli|chili|jalape/, /pepper|jalapeno|chili/], [/\bcilantro|coriander/, /coriander|cilantro|parsley/], [/\bpasta|spaghetti|penne|macaroni|fusilli|linguine|rigatoni|orzo/, /pasta|spaghetti|macaroni/],
     [/\byoghurt/, /yogurt/], [/\bpassata|crushed tomatoes|tomato puree/, /tomato/], [/\bsalt pork|fatback|pancetta|guanciale|pork belly/, /bacon/], [/\bpigeon peas|gandules|black-eyed/, /chickpea|pea/], [/\bsplit peas/, /lentil/], [/\bcornstarch|cornflour/, /corn/],
     [/\bflank|skirt|sirloin|steak|chuck|round/, /beef|steak/], [/\bwraps?\b/, /tortilla/], [/\bmayo\b/, /mayonnaise/], [/\bromaine|little gem|iceberg|salad leaves|greens|spring mix/, /lettuce/],
@@ -249,8 +249,11 @@ function checkPlan(res, c) {
     const builtins = Object.entries(res.sourceOf).filter(([, s]) => s === 'Nourish recipes');
     if (builtins.length > 3) {
         const spare = res.spareWeb || {};
-        const could = builtins.filter(([k]) => (spare[k.split(':')[1]] || 0) > 0);
-        push({ meal: 'Nourish recipes' }, { check: 'too many built-in recipes', severity: could.length ? 'problem' : 'note', what: `${builtins.length} of 21 meals were Nourish's own recipes${could.length ? `; ${could.length} of them had web recipes that fit the slot (${[...new Set(could.map(([k]) => k.split(':')[1]))].join(', ')})` : ''}` });
+        // A problem when a slot had more spare web recipes that fit than Nourish recipes used in it.
+        const inSlot = m => builtins.filter(([k]) => k.split(':')[1] === m).length;
+        const could = builtins.filter(([k]) => (spare[k.split(':')[1]] || 0) > inSlot(k.split(':')[1]));
+        const names = [...new Set(could.map(([k]) => k.split(':')[1]))].map(m => `${m}: ${((res.spareNames || {})[m] || []).slice(0, 3).join('; ')}`).join(' / ');
+        push({ meal: 'Nourish recipes' }, { check: 'too many built-in recipes', severity: could.length ? 'problem' : 'note', what: `${builtins.length} of 21 meals were Nourish's own recipes${could.length ? `; ${could.length} of them had web recipes that fit the slot (${names})` : ''}` });
     }
     // Daily totals.
     days.forEach((d, i) => {
@@ -341,8 +344,9 @@ async function main() {
             const perSite = {};
             daysData.forEach(d => MEALS.forEach(t => { const m = d && d[t]; if (m && m.source_name) perSite[m.source_name] = (perSite[m.source_name] || 0) + 1; }));
             const share = { breakfast: 0.25, lunch: 0.3, dinner: 0.45 };
-            MEALS.forEach(t => { spareWeb[t] = ((lastPlanPools || {})[t] || []).filter(r => r.source_url && !r.from_book && !r.builtin && !inPlan.has(r.name) && !exclude(r) && (perSite[r.source_name] || 0) < (Number(settings.source_cap) || 3)
-                && r.nutrition && daysData.some((d, i) => { const f = dayKcalTarget(i) * share[t] / r.nutrition.calories; return f >= 0.5 && f <= 2 && !slotCheck(r, t, i); })).length; });
+            const spareNames = {};
+            MEALS.forEach(t => { const list = ((lastPlanPools || {})[t] || []).filter(r => r.source_url && !r.from_book && !r.builtin && !inPlan.has(r.name) && !exclude(r) && (perSite[r.source_name] || 0) < (Number(settings.source_cap) || 3)
+                && r.nutrition && daysData.some((d, i) => { const f = dayKcalTarget(i) * share[t] / r.nutrition.calories; return f >= 0.5 && f <= 2 && (r.nutrition.protein_g || 0) * Math.min(2, f) >= 12 && !slotCheck(r, t, i); })); spareWeb[t] = list.length; spareNames[t] = list.slice(0, 5).map(r => `${r.name} (${r.source_name}, ${r.nutrition.calories} kcal)`); });
             return {
                 error, ms: Date.now() - since,
                 days: JSON.parse(JSON.stringify(daysData)).map(d => { MEALS.forEach(t => { const m = d && d[t]; if (m && !m.description && typeof describeFromRecipe === 'function') { m.description = describeFromRecipe(m); m.description_made = true; } }); return d; }),
@@ -350,7 +354,7 @@ async function main() {
                 totals: daysData.map(d => { const t = NourishPlanner.dayTotals(d); return { kcal: t.kcal, protein: t.protein, fiber: t.fiber }; }),
                 targets: daysData.map((d, i) => ({ kcal: dayKcalTarget(i), protein: proteinTarget() })),
                 limits: daysData.map((d, i) => Object.fromEntries(MEALS.map(t => [t, slotLimitsFor(t, i)]))),
-                sourceOf, spareWeb,
+                sourceOf, spareWeb, spareNames,
                 split: planSourceSplit(daysData),
                 log: activityLog.filter(l => l.t >= since && l.area === 'plan').map(l => l.msg + (l.details ? ` ${l.details.slice(0, 400)}` : '')),
             };

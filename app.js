@@ -3507,6 +3507,18 @@ function checkWeek(days) {
 }
 function applyNutritionRules(days) {
     days.forEach((d, i) => { days[i] = dayRules(d, i); });
+    // The added protein and fiber have calories too: a day they pushed more than 8% off its target
+    // gets its furthest-off meal swapped (never a repeat, always fitting the slot), then the rules again.
+    if (lastPlanPools) {
+        try {
+            const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (lastPlanPools[m] || []).concat(typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off' ? NourishBuiltins.forMeal(m) : [])]));
+            const kept = NourishPlanner.keepToTargets(days, { pools, settings: plannerSettings(), people: servingsWanted(), exclude: nutritionExcluder(), weekday: d => (dayBase() + d) % 7, already: recentPlanDishes(), tolerance: 0.08 });
+            if (kept.changes.length) {
+                nlog('plan', `After adding protein and fiber, ${kept.changes.length} day(s) kept to the calorie target`, kept.changes);
+                kept.days.forEach((d, i) => { if (d !== days[i]) days[i] = dayRules(d, i); });
+            }
+        } catch (e) { nlog('plan', `Keeping days to target after the rules failed: ${e.message}`, null, 'warn'); }
+    }
     checkWeek(days);
 }
 // Per-day calorie target overrides (Weekly mode: big days and the days around them); {} in Daily mode.
