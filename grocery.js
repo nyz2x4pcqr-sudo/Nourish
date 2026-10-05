@@ -125,14 +125,25 @@
     }
 
     // A recipe's ingredient lines with any later line for the same thing dropped (the first one stays).
+    // The same food twice in a recipe: a repeat of the same line is dropped; two amounts in the same
+    // unit are added up ("1 large egg" and "3 eggs" → "4 large eggs"); in different units, the first line counts.
     function dedupeIngredients(list) {
-        const seen = new Set();
-        return (list || []).filter(line => {
+        const out = [];
+        const at = new Map();
+        (list || []).forEach(line => {
             const key = ingredientKey(line);
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
+            if (!at.has(key)) { at.set(key, out.length); out.push(line); return; }
+            const i = at.get(key);
+            const prev = out[i];
+            if (String(prev).trim().toLowerCase() === String(line).trim().toLowerCase()) return;
+            const a = Units && Units.splitIngredient(prev), b = Units && Units.splitIngredient(line);
+            if (a && b && a.qty != null && b.qty != null && (a.unit || '') === (b.unit || '') && !a.qtyHigh && !b.qtyHigh && a.note === undefined && b.note === undefined) {
+                out[i] = `${Units.formatAmount(a.qty + b.qty, a.unit || '')} ${a.text}`.trim().replace(/\b(egg)\b(?!s)/i, a.qty + b.qty > 1 ? 'eggs' : 'egg');
+                return;
+            }
+            // Different units ("1 cup milk", "250 ml milk"): a mistake in the recipe; the first line counts.
         });
+        return out;
     }
 
     // The list for a plan: [{ key, text, category, uses }], one per thing to buy, junk left out.

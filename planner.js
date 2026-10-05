@@ -716,7 +716,8 @@
         const ctx = { targets, likes: P.parse(likes || ''), goal: settings.goal || settings.prefsGoal, sourcePenalty, taste, cuisineCount: {}, sourceCount: {}, builtinMode: settings.builtin_mode || 'mix' };
         const rejected = {};   // why recipes didn't fit a slot (for the log)
         const cap = Math.max(1, Number(settings.source_cap) || 3);
-        const overCap = r => (ctx.sourceCount[sourceKey(r)] || 0) >= cap;
+        // Nourish's own recipes are the backup for when the web and books run out: they don't count against the cap.
+        const overCap = r => sourceKey(r) !== 'builtin' && (ctx.sourceCount[sourceKey(r)] || 0) >= cap;
         // The real calories of a recipe at each realistic portion (amounts rounded as written), so
         // meals are chosen for how close the day can really get, not for a number on paper.
         const portionKcal = new Map();
@@ -757,9 +758,9 @@
                 const shared = fits.filter(x => !overCap(x.r));
                 if (shared.length) { fits.filter(x => overCap(x.r)).forEach(x => { rejected[`${m}: ${x.r.name}`] = `already ${cap} meals from ${x.r.book || x.r.source_name || sourceKey(x.r)} this week`; }); fits.length = 0; shared.forEach(x => fits.push(x)); }
                 else fits.forEach(x => { x.cost += 2; });
-                // Nourish's own recipes are a backup: with at least 3 web or book recipes that fit this
+                // Nourish's own recipes are a backup: with any web or book recipe that fits this
                 // slot, they're not in the running at all (a weaker fit from the web still comes first).
-                if (ctx.builtinMode === 'backup' && fits.filter(x => x.r.source_id !== 'builtin').length >= 3) {
+                if (ctx.builtinMode === 'backup' && fits.filter(x => x.r.source_id !== 'builtin').length >= 1) {
                     const web = fits.filter(x => x.r.source_id !== 'builtin');
                     fits.length = 0; web.forEach(x => fits.push(x));
                 }
@@ -889,12 +890,16 @@
         const added = [].concat(meal.protein_added || [], meal.fiber_added || []);
         if (!added.length) return null;
         const food = l => String(l).toLowerCase().replace(/^[\d\s/.½¼¾⅓⅔⅛-]+/, '').replace(/^(cups?|oz|scoops?|tbsp|tsp)\s+/, '').trim();
-        const want = new Set(added.map(food));
-        const lines = (meal.ingredients || []).filter(l => want.has(food(l)));
+        // Each added food's line: the last line with that food (added lines go at the end; an egg
+        // dish keeps its own eggs).
+        const all = (meal.ingredients || []).map(String);
+        const picked = new Set();
+        added.map(food).forEach(f => { for (let i = all.length - 1; i >= 0; i--) if (!picked.has(i) && food(all[i]) === f) { picked.add(i); break; } });
+        const lines = [...picked].sort((a, b) => a - b).map(i => all[i]);
         if (!lines.length) return null;
         const n = Math.max(1, Number(meal.servings) || people || 1);
         const nut = N.calculate(lines, n).nutrition;
-        meal.ingredients = meal.ingredients.filter(l => !want.has(food(l)));
+        meal.ingredients = meal.ingredients.filter((l, i) => !picked.has(i));
         const steps = new Set((meal.added_steps || []).map(String));
         const stepList = (meal.steps || []).filter(st => steps.has(String(st)));
         meal.steps = (meal.steps || []).filter(st => !steps.has(String(st)));
@@ -1026,7 +1031,7 @@
         if (!(food in leanCache)) { const n = N.calculate([`1 ${unit} ${food}`.replace(/\s+/g, ' ')], 1).nutrition; leanCache[food] = n.calories > 0 ? n.protein_g / n.calories * 100 : 0; }
         return leanCache[food];
     }
-    const BOOST_MOST = { 'soy yogurt': 1.5, tempeh: 6, 'cooked lentils': 1, eggs: 4, 'egg whites': 1, 'chicken breast': 6, 'firm tofu': 6, 'canned tuna': 5, edamame: 1, 'protein powder': 2, 'greek yogurt': 1.5, 'cottage cheese': 1 };
+    const BOOST_MOST = { 'soy yogurt': 1.5, tempeh: 6, 'cooked lentils': 1, eggs: 4, 'egg whites': 1.5, 'chicken breast': 6, 'firm tofu': 6, 'canned tuna': 5, edamame: 1, 'protein powder': 2, 'greek yogurt': 1.5, 'cottage cheese': 1 };
     const BOOSTERS = {
         sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['soy yogurt', 'cup', 9, 'Serve with the soy yogurt (stirred in or on the side).']],
         savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.'], ['firm tofu', 'oz', 4.9, 'Crumble the tofu and pan-fry it with a pinch of salt for 5 minutes; serve alongside.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.']],
@@ -1041,12 +1046,18 @@
         // still short gets more of the same food.
         const already = (meal.protein_added || [])[0];
         if (already) {
-            const hit = BOOSTERS[kind].concat(BOOSTERS.main, BOOSTERS.sweet, BOOSTERS.savory).find(([food]) => already.indexOf(food.replace(/s$/, '')) >= 0);
+            // The added food by its full name, longest first ("egg whites" is not "eggs").
+            const all = BOOSTERS[kind].concat(BOOSTERS.main, BOOSTERS.sweet, BOOSTERS.savory).slice().sort((a, b) => b[0].length - a[0].length);
+            const hit = all.find(([food]) => new RegExp(`\\b${food.replace(/s$/, '')}s?\\b`, 'i').test(already));
             if (!hit) return meal;
             const [food, unit, perUnit] = hit;
             // The line as it is now (a resized portion changed its amount), found by its food.
             const stem = food.replace(/s$/, '');   // "1 egg" as well as "3 eggs"
-            const idx = (meal.ingredients || []).map(String).findIndex(l => l.toLowerCase().indexOf(stem) >= 0 && /^[\d½¼¾⅓⅔]/.test(l.trim()));
+            const same = new RegExp(`^[\\d½¼¾⅓⅔⅛/.\\s]+(?:${unit ? unit + 's?\\s+' : ''})?${stem}s?$`, 'i');
+            // Added lines go at the end: the last match is the added one, not the recipe's own eggs.
+            const list = (meal.ingredients || []).map(String);
+            let idx = -1;
+            for (let i = list.length - 1; i >= 0; i--) if (same.test(list[i].trim())) { idx = i; break; }
             if (idx < 0) return meal;
             const now = meal.ingredients[idx];
             const item = U ? U.splitIngredient(now) : null;
@@ -1054,8 +1065,30 @@
             const more = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
             // Never more than a sensible amount a person: 4 eggs, 6 oz chicken, 2 scoops, 1½ cups.
             const most = BOOST_MOST[food] || (unit === 'oz' ? 6 : unit === 'cup' ? 1.5 : unit === 'scoop' ? 2 : 4);
-            const per = Math.min(most, have + more);
-            if (!(per > have)) return meal;
+            let per = Math.min(most, have + more);
+            if (!unit) per = Math.floor(per);   // whole eggs
+            if (!(per > have)) {
+                // At its most already (4 eggs): swapped for a leaner food that covers it all (egg whites), still one food.
+                const nowP = N.calculate([list[idx]], n).nutrition.protein_g || 0;
+                for (const [f2, u2, p2, st2] of BOOSTERS[kind]) {
+                    if (f2 === food || (exclude && exclude({ name: f2, ingredients: [f2] }))) continue;
+                    let q2 = u2 === 'cup' ? Math.ceil((nowP + need) / p2 * 4) / 4 : Math.ceil((nowP + need) / p2);
+                    if (q2 > (BOOST_MOST[f2] || 4)) continue;
+                    const l2 = `${U ? U.formatQty(q2 * n) : q2 * n}${u2 ? ' ' + (u2 === 'cup' && q2 * n > 1 ? 'cups' : u2 === 'scoop' && q2 * n > 1 ? 'scoops' : u2) : ''} ${f2}`;
+                    const before2 = N.calculate([list[idx]], n).nutrition, after2 = N.calculate([l2], n).nutrition;
+                    if (!(after2.protein_g > before2.protein_g)) continue;
+                    const out = JSON.parse(JSON.stringify(meal));
+                    out.ingredients[idx] = l2;
+                    const oldStep = (meal.added_steps || [])[0];
+                    if (oldStep) { out.steps = out.steps.map(x => (x === oldStep ? st2 : x)); out.added_steps = [st2].concat((meal.added_steps || []).slice(1)); }
+                    const nu = out.nutrition || {};
+                    ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'].forEach(k => { if (after2[k] != null) nu[k] = Math.round((Number(nu[k]) || 0) - (before2[k] || 0) + after2[k]); });
+                    out.nutrition = nu;
+                    out.protein_added = [l2].concat((meal.protein_added || []).slice(1));
+                    return out;
+                }
+                return meal;
+            }
             const qty = per * n;
             const line = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}`.replace(/^1 eggs$/, '1 egg');
             const before = N.calculate([now], n).nutrition, after = N.calculate([line], n).nutrition;

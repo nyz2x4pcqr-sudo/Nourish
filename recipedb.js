@@ -144,7 +144,8 @@
         const kindWhy = F && F.notAMeal ? F.notAMeal(r) : '';
         const fit = PL ? PL.mealFit(r) : { breakfast: false, lunch: false, dinner: false };
         const meals = ['breakfast', 'lunch', 'dinner'].filter(m => fit[m]);
-        const kind = (!meals.length && /dessert/.test(fit.why || '') ? 'dessert' : '') || NOT_MEAL_KIND[kindWhy] || (meals.length ? 'meal' : /dessert/.test(fit.why || '') ? 'dessert' : /drink/.test(fit.why || '') ? 'drink' : /article/.test(fit.why || '') ? 'article'
+        const dessertName = /\b(cakes?|cupcakes?|cookies?|brownies?|pudding|mousse|flan|tart|pie|ice cream|cheesecake|fudge)\b/i.test(r.name || '');
+        const kind = (!meals.length && /dessert/.test(fit.why || '') && (kindWhy !== 'a drink' || dessertName) ? 'dessert' : '') || NOT_MEAL_KIND[kindWhy] || (meals.length ? 'meal' : /dessert/.test(fit.why || '') ? 'dessert' : /drink/.test(fit.why || '') ? 'drink' : /article/.test(fit.why || '') ? 'article'
             : /starter|spread|side/.test(fit.why || '') ? 'side' : /sauce/.test(fit.why || '') ? 'sauce' : 'other');
         const prof = PL ? PL.recipeProfile(r) : null;
         const out = Object.assign(r, {

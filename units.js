@@ -27,11 +27,15 @@
     function parseNumber(text) {
         const frac = text.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)/);
         if (frac && Number(frac[3])) return { value: (frac[1] ? Number(frac[1]) : 0) + Number(frac[2]) / Number(frac[3]), length: frac[0].length };
-        const m = text.match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)(?![\d/]))?/);
+        // A range may end in a fraction: "1 to 1½ tbsp", "2-2½ cups".
+        const m = text.match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?(?![\d/]))?/);
         if (!m || !(m[1] || m[2])) return null;
         const value = (m[1] ? Number(m[1]) : 0) + (m[2] ? FRACTIONS[m[2]] : 0);
+        const high = (m[3] ? Number(m[3]) : 0) + (m[4] ? FRACTIONS[m[4]] : 0);
         const out = { value, length: m[0].length };
-        if (m[3] && Number(m[3]) > value) out.high = Number(m[3]);
+        if (!(m[3] || m[4])) out.length = (m[0].match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?/) || [''])[0].length;
+        if (high > value) out.high = high;
+        else if (m[3] || m[4]) out.length = (m[0].match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?/) || [''])[0].length;
         return out;
     }
 

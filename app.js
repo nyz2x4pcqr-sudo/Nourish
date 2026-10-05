@@ -3331,7 +3331,10 @@ function ingredientAmounts(list) {
 function normalizeMeal(m) {
     if (!m || typeof m !== 'object' || !m.name) return null;
     const n = m.nutrition && typeof m.nutrition === 'object' ? m.nutrition : null;
-    const ingredients = cleanIngredients(toStringList(m.ingredients), m.name);
+    // What Nourish added (protein or fiber food) stays its own line, so it can still be told apart.
+    const addedFood = new Set([].concat(m.protein_added || [], m.fiber_added || []).map(String));
+    const all = toStringList(m.ingredients);
+    const ingredients = cleanIngredients(all.filter(l => !addedFood.has(l)), m.name).concat(all.filter(l => addedFood.has(l)));
     // Only a name the AI wrote is spell-checked: never a web, book or Nourish recipe's own name.
     const written = !m.source_url && !m.library_path && !m.builtin && !m.from_book && !m.quick;
     const out = Object.assign({

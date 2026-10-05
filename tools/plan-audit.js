@@ -321,12 +321,16 @@ async function main() {
         for (let i = 0; i < 240 && (libraryState.busy || libraryState.progress); i++) await new Promise(r => setTimeout(r, 500));
         await new Promise(r => setTimeout(r, 1500));
         const list = recipeDB.books ? recipeDB.books() : [];
+        window.__auditFiles = (recipeDB.files ? recipeDB.files() : []).map(f => ({ path: f.path || f.name, count: f.count, why: f.why || f.note || '', type: f.type }));
+        window.__auditNotes = (libraryState.notes || []).slice(0, 20);
         return list.map(b => ({ title: b.title, author: b.author, count: b.count, review: b.review, meals: b.meals, others: b.others, type: b.type, why: b.why || b.note || '',
             recipes: recipeDB.recipesOf ? recipeDB.recipesOf(b.id).map(r => ({ name: r.name, kind: r.kind, meal_types: r.meal_types, ingredients: r.ingredients, review: r.review, why: r.review_why || r.why || '', nutrition: r.nutrition, fit: r._fit || NourishPlanner.mealFit(r) })) : [] }));
     });
 
+    const files = await page.evaluate(() => ({ files: window.__auditFiles || [], notes: window.__auditNotes || [] }));
     const results = [];
-    const cases = QUICK ? CASES.filter((c, i) => i % 4 === 0) : CASES;
+    const only = opt('--only');
+    const cases = only ? CASES.filter(c => c.id === only) : QUICK ? CASES.filter((c, i) => i % 4 === 0) : CASES;
     for (const c of cases) {
         const t0 = Date.now();
         const res = await page.evaluate(async ({ c, BASE, MEALS }) => {
@@ -350,7 +354,9 @@ async function main() {
             const share = { breakfast: 0.25, lunch: 0.3, dinner: 0.45 };
             const spareNames = {};
             MEALS.forEach(t => { const list = ((lastPlanPools || {})[t] || []).filter(r => r.source_url && !r.from_book && !r.builtin && !inPlan.has(r.name) && !exclude(r) && (perSite[r.source_name] || 0) < (Number(settings.source_cap) || 3)
-                && r.nutrition && daysData.some((d, i) => { const f = dayKcalTarget(i) * share[t] / r.nutrition.calories; return f >= 0.5 && f <= 2 && (r.nutrition.protein_g || 0) * Math.min(2, f) >= 12 && !slotCheck(r, t, i); })); spareWeb[t] = list.length; spareNames[t] = list.slice(0, 5).map(r => `${r.name} (${r.source_name}, ${r.nutrition.calories} kcal)`); });
+                && r.nutrition && daysData.some((d, i) => { const f = dayKcalTarget(i) * share[t] / r.nutrition.calories; const others = MEALS.filter(x => x !== t).map(x => d && d[x]).filter(Boolean);
+                    const clash = others.some(o => NourishPlanner.mainProtein(o) && NourishPlanner.mainProtein(o) === NourishPlanner.mainProtein(r));
+                    return f >= 0.5 && f <= 2 && (r.nutrition.protein_g || 0) * Math.min(2, f) >= 12 && !clash && !slotCheck(r, t, i); })); spareWeb[t] = list.length; spareNames[t] = list.slice(0, 5).map(r => `${r.name} (${r.source_name}, ${r.nutrition.calories} kcal)`); });
             return {
                 error, ms: Date.now() - since,
                 days: JSON.parse(JSON.stringify(daysData)).map(d => { MEALS.forEach(t => { const m = d && d[t]; if (m && !m.description && typeof describeFromRecipe === 'function') { m.description = describeFromRecipe(m); m.description_made = true; } }); return d; }),
@@ -370,11 +376,11 @@ async function main() {
     }
     await browser.close();
     stop();
-    return report({ version, books, results, snapshotSize: Object.keys(snapshot).length, live: LIVE, pageErrors, tmp });
+    return report({ version, books, files, results, snapshotSize: Object.keys(snapshot).length, live: LIVE, pageErrors, tmp });
 }
 
 // ---------------------------------------------------------------------------------------------
-function report({ version, books, results, snapshotSize, live, pageErrors, tmp }) {
+function report({ version, books, files, results, snapshotSize, live, pageErrors, tmp }) {
     fs.mkdirSync(OUT, { recursive: true });
     const all = results.flatMap(r => r.findings);
     const problems = all.filter(f => f.severity === 'problem');
@@ -420,6 +426,8 @@ function report({ version, books, results, snapshotSize, live, pageErrors, tmp }
     lines.push('## The test books as read', '', '| Book | Recipe | Really | Read as | kcal | Protein | Fat | Review |', '|---|---|---|---|---|---|---|---|');
     bookRows.forEach(r => lines.push(`| ${r.book} | ${r.name} | ${r.is} | ${r.read} | ${r.kcal ?? ''} | ${r.protein ?? ''} | ${r.fat ?? ''} | ${r.review} |`));
     books.filter(b => !b.count).forEach(b => lines.push('', `${b.title}: no recipes. ${b.why || ''}`));
+    (files.files || []).filter(f => !f.count).forEach(f => lines.push('', `${path.basename(String(f.path))}: no recipes read. ${f.why || '(no reason given)'}`));
+    if ((files.notes || []).length) lines.push('', 'What the app said about the files: ' + files.notes.map(n => (typeof n === 'string' ? n : JSON.stringify(n))).join(' · '));
     lines.push('', '## Plans', '');
     results.forEach(r => {
         const n = r.findings.filter(f => f.severity === 'problem').length;
@@ -427,6 +435,7 @@ function report({ version, books, results, snapshotSize, live, pageErrors, tmp }
     });
     const md = lines.join('\n') + '\n';
     fs.writeFileSync(path.join(OUT, 'plan-audit.md'), md);
+    if (opt('--only')) fs.writeFileSync(path.join(OUT, 'plan-full.json'), JSON.stringify(results.map(r => r.res.days), null, 1));
     fs.writeFileSync(path.join(OUT, 'plan-audit.json'), JSON.stringify({ version, problems, notes, books, results: results.map(r => ({ case: r.case, findings: r.findings, split: r.res.split, log: r.res.log, days: r.res.days.map(d => Object.fromEntries(MEALS.map(m => [m, d && d[m] ? { name: d[m].name, kcal: d[m].nutrition && d[m].nutrition.calories, protein: d[m].nutrition && d[m].nutrition.protein_g, portion: d[m].scaled && d[m].scaled.portion, description: d[m].description, source: d[m].source_name || d[m].book } : null]))) })) }, null, 1));
     process.stdout.write(md);
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* leave it */ }
