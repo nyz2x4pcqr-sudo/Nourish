@@ -64,6 +64,13 @@ test('avoided foods: lox is fish, brioche buns are gluten, gluten-free pasta and
     assert.ok(v({ name: 'x', ingredients: ['2 oz milk chocolate'] }));
 });
 
+test('avoided foods: a word ending in y also catches its -ies plural (anchovies are fish)', () => {
+    const f = P.excluder({ avoid: 'fish, salmon, tuna' });
+    assert.ok(f({ name: 'Caesar Salad Wrap', ingredients: ['1 anchovies in oil'] }));
+    assert.ok(f({ name: 'x', ingredients: ['2 anchovy fillets'] }));
+    assert.ok(P.excluder({ avoid: 'turkey' })({ name: 'x', ingredients: ['2 turkeys'] }));
+});
+
 test('portions stay whole, half or quarter servings, and an added protein food stays within what a person would add', () => {
     const r = { name: 'Black Bean Tacos', servings: 4, ingredients: ['2 cans black beans', '8 corn tortillas', '1 avocado', '1/2 cup salsa'], steps: ['Warm the beans.', 'Fill the tortillas.'] };
     N.settle(r);

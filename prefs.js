@@ -183,7 +183,9 @@
 
     function termRegex(term) {
         const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '[\\s-]+');
-        return new RegExp('(^|[^a-z])' + esc + '(e?s|es)?($|[^a-z])', 'i');
+        // "anchovy" must catch "anchovies" too (a consonant then y makes -ies); "turkey" just adds s
+        const stem = /[^aeiou]y$/i.test(term) ? esc.slice(0, -1) + '(y|ies)' : esc + '(e?s|es)?';
+        return new RegExp('(^|[^a-z])' + stem + '($|[^a-z])', 'i');
     }
 
     // A checker for recipes: given the avoid text, the allergies text and the diet, returns
