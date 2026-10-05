@@ -89,11 +89,13 @@
         const side = SIDE.test(cat) && !/main|breakfast|brunch|lunch|dinner/.test(cat);
         if (side) return { breakfast: false, lunch: false, dinner: false, why: 'a side or snack, not a meal' };
         const hasProtein = !!mainProtein(r);
+        // Hardly any protein (under 8% of its calories: a carrot and apple salad) is a side, not a main meal.
+        const lowProtein = !!(n0 && Number(n0.calories) > 0 && (Number(n0.protein_g) || 0) * 4 / n0.calories < 0.08);
         return {
-            breakfast: brk && !heavy,
-            lunch: !onlyBrk && !side && !sweetHeavy && !heavy && !HEAVY_LUNCH.test(name) && (hasProtein || /salad|soup|bowl|wrap|sandwich|pita|quesadilla|pasta|noodle|grain|lentil|(?<!green |string |runner |french )bean|chickpea/i.test(name) || /\blunch\b/.test(cat)),
+            breakfast: brk && !heavy && !lowProtein,
+            lunch: !onlyBrk && !side && !sweetHeavy && !lowProtein && !heavy && !HEAVY_LUNCH.test(name) && (hasProtein || /salad|soup|bowl|wrap|sandwich|pita|quesadilla|pasta|noodle|grain|lentil|(?<!green |string |runner |french )bean|chickpea/i.test(name) || /\blunch\b/.test(cat)),
             // A curry, stew, roast or pie is a dinner by what it is, with or without meat.
-            dinner: !onlyBrk && !side && !sweetHeavy && (hasProtein || mainDish),
+            dinner: !onlyBrk && !side && !sweetHeavy && !lowProtein && (hasProtein || mainDish),
             why: heavy && brk ? 'a dinner dish' : '',
         };
     }
@@ -434,8 +436,17 @@
             const best = [0, 0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1].reduce((a, b) => (Math.abs(b - part) < Math.abs(a - part) ? b : a));
             q = whole + best;
         } else q = q >= 0.3 ? Math.max(0.25, Math.round(q * 4) / 4) : Math.max(0.125, Math.round(q * 8) / 8);   // kitchen fractions: ¼ ½ ¾ (⅛ for pinches)
+        const eff = q / item.qty;   // the factor this line really changed by (whole things are rounded)
+        if (unit === 'kg' && q < 1) { q = Math.max(5, Math.round(q * 1000 / 5) * 5); unit = 'g'; }
+        if (unit === 'l' && q < 1) { q = Math.max(5, Math.round(q * 1000 / 5) * 5); unit = 'ml'; }
         const amount = U.formatAmount(q, unit);
-        if (LINE_WEIGHT.test(item.text || '')) item.text = scaleWeight(item.text, q / item.qty);
+        if (LINE_WEIGHT.test(item.text || '')) item.text = scaleWeight(item.text, eff);
+        // A second amount for the same thing ("/ 2 lb", "/ 14oz") is scaled too.
+        item.text = String(item.text || '').replace(/^\/\s*((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?|[½¼¾])\s*(lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|cups?)\b/i, (m0, num, u) => {
+            const n = U.parseNumber(num); if (!n) return m0;
+            const v = n.value * eff, metric = /^(g|grams?|kg|ml|l)$/i.test(u);
+            return `/ ${metric ? Math.max(5, Math.round(v / 5) * 5) : U.formatQty(Math.max(0.125, Math.round(v * 4) / 4))} ${u}`;
+        });
         return item.note !== undefined ? `${item.text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${item.text}`.trim();
     }
     // Cuts oil, butter and sugar (to no less than half, keeping at least a teaspoon of oil) to save
@@ -596,9 +607,11 @@
     function sourceKey(r) {
         if (!r) return 'other';
         if (r.from_book) return `book:${r.book_id || r.book || r.source_name || '?'}`;
-        if (r.builtin || r.quick) return 'builtin';
-        if (r.source_id) return r.source_id;
-        try { return new URL(r.source_url).hostname.replace(/^www\./, ''); } catch (e) { return r.ai ? 'ai' : 'other'; }
+        if (r.builtin || r.quick || r.source_id === 'builtin') return 'builtin';
+        // The site's address first: a meal in the plan has lost its source_id (normalizeMeal), and
+        // "bbcgoodfood" and "bbcgoodfood.com" must be one source (0.1.12 let a swap add a 4th meal).
+        try { return new URL(r.source_url).hostname.replace(/^www\./, ''); } catch (e) { /* no address */ }
+        return r.source_id || (r.ai ? 'ai' : 'other');
     }
     // Meals per source in a plan, so a later swap (calories, vitamins) keeps to the weekly share too:
     // 0.1.12's swaps could put a 4th meal from one site into the week.
@@ -663,6 +676,7 @@
         const fTarget = ctx.targets.fat * share;
         const p = n.protein_g * f, fat = n.fat_g * f;
         cost += Math.max(0, (pTarget - p) / pTarget) * 1.5 + Math.max(0, (fat - fTarget) / fTarget) * 1.5;
+        if (p < pTarget * 0.5) cost += 2;   // well under half its share of the day's protein
         cost -= Math.min(2, P.likeScore(r, ctx.likes)) * 0.5;
         if (ctx.goal === 'Cut' && r.healthy) cost -= 0.3;
         cost += goalCost(r, f, ctx.goal);
@@ -789,6 +803,10 @@
                 if (share > 0) {
                     const pT = targets.protein * share, fT = targets.fat * share;
                     cost += Math.max(0, (pT * 0.9 - p) / pT) * 4 + Math.max(0, (f - fT * 1.1) / fT) * 4;
+                    // A day well short of its protein (under 80%) is a poor day, not a small miss.
+                    cost += Math.max(0, (pT * 0.8 - p) / pT) * 12;
+                    // A day that would end well short of its protein (under 80%) is a poor day, not a small miss.
+                    cost += Math.max(0, (pT * 0.8 - p) / pT) * 25;
                 }
                 if (new Set(cuis).size < cuis.length) cost += 0.6;
                 // Two meals of one day from the same source, or a day that would take it past its share.
@@ -961,8 +979,10 @@
     // more eggs or egg whites, a lunch or dinner lean chicken, tofu or tuna. Anything the person
     // avoids, is allergic to or doesn't eat (diet) is never used. `need`: grams of protein per person.
     const BOOSTERS = {
-        sweet: [['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.']],
-        savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.']],
+        sweet: [['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'],
+            ['pea protein powder', 'scoop', 20, 'Stir or blend in the pea protein powder.']],
+        savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.'],
+            ['firm tofu', 'oz', 4.9, 'Crumble the tofu into a hot pan with a pinch of salt and cook for 4 minutes; serve alongside.']],
         // Only for a dish with no main protein of its own (a pasta, a salad, a grain bowl): a side
         // that suits it. Plant dishes get plant protein.
         main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 4.9, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 5.4, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.']],
@@ -981,8 +1001,9 @@
     // "a bit more chicken thighs", never a different meat added to the plate.
     function moreOfItsOwn(meal, need, n) {
         const lines = N.calculate(meal.ingredients || [], n).lines;
+        const added = new Set([].concat(meal.protein_added || [], meal.fiber_added || []));
         let best = -1, bestGrams = 0;
-        (meal.ingredients || []).forEach((l, i) => { const x = lines.find(y => y.line === l); if (x && PROTEIN[x.key] && x.grams > bestGrams && U.splitIngredient(l).qty != null) { best = i; bestGrams = x.grams; } });
+        (meal.ingredients || []).forEach((l, i) => { if (added.has(l)) return; const x = lines.find(y => y.line === l); if (x && PROTEIN[x.key] && x.grams > bestGrams && U.splitIngredient(l).qty != null) { best = i; bestGrams = x.grams; } });
         if (best < 0) return null;
         const old = meal.ingredients[best];
         const per = N.calculate([old], n).nutrition;
@@ -999,6 +1020,29 @@
         delete out._lines;
         return out;
     }
+    function trimAdditions(meal, mealType) {
+        let out = meal;
+        for (let i = 0; i < 3; i++) {
+            const extra = (out.protein_added || []).filter(l => !/^a bit more\b/.test(l));
+            if (!extra.length) break;
+            const own = ownProtein(out);
+            const added = (Number(out.nutrition && out.nutrition.protein_g) || 0) - own;
+            const por = out.scaled && Number(out.scaled.portion) > 0 ? Number(out.scaled.portion) : 1;
+            const enough = own / por >= (mealType === 'breakfast' ? 8 : 12);
+            if (added <= own + 1 && enough) break;
+            const line = extra[extra.length - 1];
+            const minus = N.calculate([line], Math.max(1, Number(out.servings) || 1)).nutrition;
+            const next = JSON.parse(JSON.stringify(out));
+            const idx = next.ingredients.lastIndexOf(line);
+            if (idx >= 0) next.ingredients.splice(idx, 1);
+            next.protein_added = next.protein_added.filter(l => l !== line);
+            if (!next.protein_added.length) delete next.protein_added;
+            ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(k => { next.nutrition[k] = Math.max(0, Math.round((Number(next.nutrition[k]) || 0) - (minus[k] || 0))); });
+            next.removed = (out.removed || []).concat(line);
+            out = next;
+        }
+        return out;
+    }
     function boostProtein(meal, need, mealType, people = 1, exclude) {
         if (!meal || !(need > 0.5)) return meal;
         const n = Math.max(1, Number(meal.servings) || people || 1);
@@ -1008,11 +1052,14 @@
         // bone marrow. What's added is never more than the dish's own protein.
         const kcal = Number(meal.nutrition && meal.nutrition.calories) || 0;
         const already = (Number(meal.nutrition && meal.nutrition.protein_g) || 0) - own;
-        if (mealType === 'breakfast' ? own < 8 : own < 12 || (kcal > 0 && own * 4 / Math.max(1, kcal - already * 4) < 0.1)) return meal;
+        // Judged on a full serving of the recipe (a half portion of a good dish is still a good dish).
+        const por = meal.scaled && Number(meal.scaled.portion) > 0 ? Number(meal.scaled.portion) : 1;
+        if (mealType === 'breakfast' ? own / por < 9 : own / por < 13 || (kcal > 0 && own * 4 / Math.max(1, kcal - already * 4) < 0.1)) return meal;
         need = Math.min(need, own - already);
         if (!(need > 0.5)) return meal;
         if (mealType !== 'breakfast') {
-            const main = mainProtein(Object.assign({}, meal, { _lines: undefined }));
+            const addedLines = new Set([].concat(meal.protein_added || [], meal.fiber_added || []));
+            const main = mainProtein(Object.assign({}, meal, { _lines: undefined, ingredients: (meal.ingredients || []).filter(l => !addedLines.has(l)) }));
             if (main && !(meal.protein_added || []).some(l => /^a bit more\b/.test(l))) { const more = moreOfItsOwn(meal, need, n); if (more) return more; }
             if (main) return meal;   // never a different protein on a dish that has its own
         }
@@ -1021,15 +1068,19 @@
         for (const [food, unit, perUnit, step] of BOOSTERS[kind]) {
             const word = food.replace(/s$/, '');
             if ((meal.protein_added || []).some(l => l.indexOf(word) >= 0)) continue;   // a different food each time: variety, never a second scoop line
-            // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces.
-            const units = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
-            if (units * perUnit > own + 2) continue;   // more than the dish's own protein: something smaller
-            const qty = units * n;
-            const line = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}`.replace(/^1 eggs$/, '1 egg');
+            // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces. Rounded
+            // up to cover what's needed, or down when that would be more than the dish's own protein.
+            const step = unit === 'cup' ? 0.25 : 1;
+            const up = Math.ceil(need / perUnit / step) * step, down = Math.floor(need / perUnit / step) * step;
+            let line = '', add = null;
+            for (const units of [...new Set([up, down])].filter(u => u > 0)) {
+                const qty = units * n;
+                const l = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}`.replace(/^1 eggs$/, '1 egg');
+                const a = N.calculate([l], n);
+                if (a.nutrition.protein_g > 0 && a.nutrition.protein_g <= own - already) { line = l; add = a; break; }   // never more than the dish's own protein
+            }
+            if (!line) continue;
             if (exclude && exclude({ name: food, ingredients: [line] })) continue;
-            const add = N.calculate([line], n);
-            if (!(add.nutrition.protein_g > 0)) continue;
-            if (add.nutrition.protein_g > own - already + 1) continue;   // never more than the dish's own protein
             const out = JSON.parse(JSON.stringify(meal));
             out.ingredients = (out.ingredients || []).concat(line);
             out.steps = (out.steps || []).concat(step);
@@ -1063,7 +1114,9 @@
             if (short > 0) {
                 meals().sort((a, b) => cur[a].nutrition.protein_g - cur[b].nutrition.protein_g).forEach(m => {
                     if (short <= 0) return;
-                    const room = T.mealProtein.max - (Number(cur[m].nutrition.protein_g) || 0);
+                    // Up to 40 g a meal, or more when the day's target needs it (180 g a day over three
+                    // meals can't be met at 40 g each).
+                    const room = Math.max(T.mealProtein.max, Math.ceil(T.protein * 0.97 / Math.max(1, meals().length))) - (Number(cur[m].nutrition.protein_g) || 0);
                     if (room < 5) return;
                     const b = boostProtein(cur[m], Math.min(room, short + 2), m, people, exclude);
                     if (b === cur[m]) return;
@@ -1191,6 +1244,7 @@
                     if (!r || !r.nutrition || used.has(r.name) || (exclude && exclude(r)) || slotProblem(r, m, limits) || overCap(r, counts, settings, cur)) return;
                     const f = cur.nutrition.calories / r.nutrition.calories;
                     if (f < 0.75 || f > 1.33) return;
+                    if ((Number(r.nutrition.protein_g) || 0) * f < (Number(cur.nutrition.protein_g) || 0) * 0.9) return;   // never at the cost of protein
                     const gain = (per(r) - per(cur)) * cur.nutrition.calories;
                     if (gain > 0 && (!best || gain > best.gain)) best = { gain, i, m, r };
                 });
@@ -1234,11 +1288,15 @@
         if (Math.abs(before.kcal / T.kcal - 1) > 0.05) {
             const refit = fitDay(cur2, settings, people);
             const now = dayTotals(refit);
-            if (Math.abs(now.kcal - T.kcal) < Math.abs(before.kcal - T.kcal) && now.protein >= Math.min(before.protein, T.protein * 0.9)) {
+            if (Math.abs(now.kcal - T.kcal) < Math.abs(before.kcal - T.kcal) && now.protein >= Math.min(before.protein * 0.9, T.protein * 0.9)) {
                 notes.push(`with the protein and fiber added, the day came to ${Math.round(before.kcal)} kcal; portions sized again to ${Math.round(now.kcal)} kcal`);
                 cur2 = refit;
             }
         }
+        // Sizing rounds whole things (eggs, a glass of milk) differently from the dish: an addition
+        // that ends up more than the dish's own protein, or on a dish that no longer has enough of its
+        // own, is taken off again.
+        MEALS.forEach(t => { const m = cur2[t]; const fixed = m && trimAdditions(m, t); if (fixed && fixed !== m) { notes.push(`${t} "${m.name}": took off ${fixed.removed.join(', ')} (the protein added was more than the dish's own after sizing)`); delete fixed.removed; cur2 = Object.assign({}, cur2, { [t]: fixed }); } });
         return { day: cur2, notes };
     }
 

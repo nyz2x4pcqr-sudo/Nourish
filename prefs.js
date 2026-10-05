@@ -27,7 +27,7 @@
         fish: ['fish', 'salmon', 'tuna', 'cod', 'tilapia', 'halibut', 'trout', 'mackerel', 'sardine', 'anchovy', 'haddock', 'pollock', 'snapper', 'bass', 'swordfish', 'catfish', 'fish sauce', 'worcestershire'],
         shellfish: ['shellfish', 'shrimp', 'prawn', 'crab', 'lobster', 'scallop', 'clam', 'mussel', 'oyster', 'crawfish', 'crayfish', 'langoustine', 'squid', 'calamari', 'octopus', 'oyster sauce'],
         seafood: ['fish', 'salmon', 'tuna', 'cod', 'tilapia', 'halibut', 'trout', 'mackerel', 'sardine', 'anchovy', 'haddock', 'shrimp', 'prawn', 'crab', 'lobster', 'scallop', 'clam', 'mussel', 'oyster', 'squid', 'calamari', 'octopus', 'fish sauce', 'oyster sauce'],
-        dairy: ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'yoghurt', 'ghee', 'whey', 'parmesan', 'mozzarella', 'cheddar', 'feta', 'ricotta', 'paneer', 'halloumi', 'cream cheese', 'sour cream', 'buttermilk', 'half and half', 'creme fraiche', 'mascarpone', 'goat cheese', 'cottage cheese', 'gruyere', 'brie', 'casein'],
+        dairy: ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'yoghurt', 'ghee', 'whey', 'parmesan', 'mozzarella', 'cheddar', 'feta', 'ricotta', 'paneer', 'halloumi', 'cream cheese', 'sour cream', 'buttermilk', 'half and half', 'creme fraiche', 'mascarpone', 'goat cheese', 'cottage cheese', 'gruyere', 'brie', 'casein', 'protein powder'],
         lactose: ['milk', 'cream', 'yogurt', 'ice cream', 'buttermilk', 'cream cheese', 'sour cream', 'half and half', 'ricotta', 'cottage cheese', 'whey'],
         egg: ['egg', 'mayonnaise', 'mayo', 'aioli', 'meringue', 'egg white', 'egg yolk', 'eggnog'],
         gluten: ['wheat', 'flour', 'bread', 'pasta', 'spaghetti', 'penne', 'noodle', 'couscous', 'bulgur', 'barley', 'rye', 'semolina', 'spelt', 'farro', 'seitan', 'breadcrumb', 'panko', 'crouton', 'tortilla', 'pita', 'naan', 'bagel', 'cracker', 'soy sauce', 'beer', 'orzo', 'udon', 'ramen'],
@@ -73,6 +73,8 @@
         fish: ['fish sauce'],
         // Someone who avoids olives still cooks with olive oil.
         olive: ['olive oil'],
+        // Protein powder is whey (milk) unless it says it's made from plants.
+        'protein powder': ['pea protein powder', 'plant protein powder', 'plant-based protein powder', 'vegan protein powder', 'soy protein powder', 'rice protein powder', 'hemp protein powder', 'pea protein'],
         cheese: ['vegan cheese', 'nutritional yeast'],
     };
     const CUISINES = ['italian', 'mexican', 'thai', 'indian', 'japanese', 'chinese', 'korean', 'vietnamese', 'mediterranean', 'greek', 'middle eastern', 'lebanese', 'turkish', 'moroccan', 'french', 'spanish', 'american', 'cajun', 'caribbean', 'ethiopian', 'persian', 'filipino', 'indonesian', 'malaysian', 'peruvian', 'brazilian', 'british', 'german'];

@@ -26,7 +26,15 @@
     // "1 1/2", "1/2", "1.5", "1½", "½", "2-3" (→ 2, high 3) at the start of text.
     function parseNumber(text) {
         const frac = text.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)/);
-        if (frac && Number(frac[3])) return { value: (frac[1] ? Number(frac[1]) : 0) + Number(frac[2]) / Number(frac[3]), length: frac[0].length };
+        if (frac && Number(frac[3])) {
+            const out = { value: (frac[1] ? Number(frac[1]) : 0) + Number(frac[2]) / Number(frac[3]), length: frac[0].length };
+            const range = text.slice(frac[0].length).match(/^\s*(?:-|–|to)\s*(?:(\d+)\s+)?(\d+)(?:\/(\d+))?(?![\d.])/);
+            if (range) {
+                const high = range[3] ? (range[1] ? Number(range[1]) : 0) + Number(range[2]) / Number(range[3]) : Number(range[2]) + (range[1] ? Number(range[1]) : 0);
+                if (high > out.value) { out.high = high; out.length += range[0].length; }
+            }
+            return out;
+        }
         const m = text.match(/^(\d+(?:\.\d+)?)?\s*([½¼¾⅓⅔⅛⅜⅝⅞])?(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)(?![\d/]))?/);
         if (!m || !(m[1] || m[2])) return null;
         const value = (m[1] ? Number(m[1]) : 0) + (m[2] ? FRACTIONS[m[2]] : 0);

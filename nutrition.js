@@ -36,6 +36,8 @@
         'ham hocks': 'pork shoulder', 'ham hock': 'pork shoulder', 'pork hocks': 'pork shoulder',
         'branzino': 'cod', 'sea bass': 'cod', 'snapper': 'cod', 'red snapper': 'cod', 'whole fish': 'cod', 'sea bream': 'cod', 'white fish': 'cod',
         'chicken pieces': 'chicken', 'chicken legs': 'chicken', 'chicken leg quarters': 'chicken', 'leg quarters': 'chicken',
+        'fresh fruit': 'berries', 'frozen fruit': 'berries', 'mixed fruit': 'berries', fruit: 'berries',
+        'mange tout': 'snow peas', 'mange-tout': 'snow peas',
         'french beans': 'green beans', 'fine beans': 'green beans', 'haricots verts': 'green beans', 'string beans': 'green beans',
         // Nut and seed butters aren't butter (0.1.12 read "nut or seed butter" as dairy butter).
         'nut butter': 'peanut butter', 'nut or seed butter': 'peanut butter', 'seed butter': 'peanut butter', 'sunflower seed butter': 'peanut butter', 'cashew butter': 'peanut butter',
@@ -67,6 +69,12 @@
         // USDA SR Legacy: tomatillos, raw; broad (fava) beans, raw; mixed cooked grains as cooked brown rice and quinoa.
         // Frozen unsweetened acai pulp (a packet's label: per 100 g).
         acai: { n: [60, 1, 6, 5, 3, 0, 20, 100, 15], a: ['acai pulp', 'acai puree', 'frozen acai', 'acai berry'], u: [[100, 'pack']] },
+        // Cooked pasta and noodles (USDA SR Legacy, cooked, per 100 g): mostly water, about 40% of dry.
+        'cooked pasta': { n: [158, 5.8, 30.9, 0.9, 1.8, 0, 7, 44, 18], a: [], u: [[140, 'cup']] },
+        'cooked egg noodles': { n: [138, 4.5, 25.2, 2.1, 1.2, 0.1, 12, 38, 21], a: [], u: [[160, 'cup']] },
+        'cooked rice noodles': { n: [108, 1.8, 24, 0.2, 1, 0, 4, 4, 3], a: [], u: [[176, 'cup']] },
+        'cooked couscous': { n: [112, 3.8, 23.2, 0.2, 1.4, 0, 8, 58, 8], a: [], u: [[157, 'cup']] },
+        'cooked udon': { n: [105, 2.6, 21.6, 0.4, 0.8, 0, 6, 9, 6], a: [], u: [[200, 'cup']] },
         tomatillo: { n: [32, 1, 5.8, 1, 1.9, 0, 7, 268, 20], a: ['tomatillos'], u: [[34, 'medium'], [132, 'cup']] },
         'fava beans': { n: [88, 7.9, 17.6, 0.7, 7.5, 0, 37, 332, 33], a: ['broad beans', 'fava bean', 'broad bean'], u: [[109, 'cup']] },
         'cooked grains': { n: [120, 3.5, 23, 1.2, 2.2, 0, 10, 60, 50], a: ['mixed grains', 'cooked mixed grains', 'grain mix', 'pouch cooked grains'], u: [[195, 'cup']] },
@@ -77,14 +85,18 @@
     const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, 'cherry tomatoes': 17, 'grape tomatoes': 8,
         'pork ribs': 1000, 'beef short ribs': 300, oxtail: 150, 'lamb chop': 700, 'bone marrow': 250, lobster: 600, 'beef steak': 300, clams: 20, 'pork shoulder': 600,
         // One prawn is about 15 g, not 100; a boneless chicken breast about 200 g.
-        shrimp: 15, 'chicken breast': 200 };
+        shrimp: 15, 'chicken breast': 200, anchovies: 4 };
     // A fish fillet as recipes mean it: one portion, about 150 g (USDA's "fillet" is half a side of salmon, 396 g).
     const FISH = /^(salmon|cod|tilapia|tuna steak|trout|haddock|halibut|sea bass|white fish|pollock|hake|mackerel)$/;
     // "2 racks of ribs", "1 slab": one rack weighs a set amount (EACH), not "one rib".
     const EACH_RACK = /\b(racks?|slabs?)\b/;
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
     // A cup of something light and airy (chips, flakes) weighs far less than a cup of water.
-    const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60 };
+    const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60,
+        // A cup of chopped or shredded meat, or of grated cheese, is far lighter than a cup of water
+        // (0.1.12 read "2 cups cooked chicken" as 480 g).
+        'chicken breast': 140, chicken: 140, 'chicken thigh': 140, 'turkey breast': 140, ham: 140, 'ground beef': 225, 'lean ground beef': 225, 'ground turkey': 225, 'ground chicken': 225, 'ground pork': 225,
+        shrimp: 145, tuna: 150, salmon: 140, cod: 140, crab: 135, lobster: 145, tofu: 250, cheddar: 113, mozzarella: 112, parmesan: 100, feta: 150, 'goat cheese': 120, cheese: 113, 'monterey jack': 113 };
 
     let INDEX = null;   // [phrase, key], longest phrases first
     function index() {
@@ -122,10 +134,18 @@
         const variants = [base, base.split(' ').map(singular).join(' '), base.replace(PREP, ' ').replace(/\s+/g, ' ').trim()];
         variants.push(variants[2].split(' ').map(singular).join(' '));
         const all = variants.join(' | ');
+        // The food the line is about is its last word, the noun: "high protein vanilla yogurt" is
+        // yogurt (0.1.12 read it as vanilla extract, 600 kcal). A match ending on that word wins; the
+        // longest match otherwise. Parts and units ("garlic cloves", "parsley leaves") don't count.
+        const head = singular((variants[2].split(' ').pop() || ''));
+        const useHead = head.length > 2 && !/^(clove|leave|leaf|sprig|stalk|rib|head|bunch|piece|slice|stick|wedge|floret|chunk|strip|cube|spear|ear|half|halve|part|white|yolk)$/.test(head);
         let out = null;
         for (const [re, phrase, key, first] of PATTERNS) {
             if (all.indexOf(first) < 0) continue;   // quick check before the pattern
-            if (variants.some(v => re.test(v))) { out = { key, food: FOODS[key], phrase }; break; }
+            if (!variants.some(v => re.test(v))) continue;
+            const hit = { key, food: FOODS[key], phrase };
+            if (!out) out = hit;
+            if (!useHead || singular(phrase.split(' ').pop()) === head) { out = useHead ? hit : out; break; }
         }
         if (matched.size > 20000) matched.clear();
         matched.set(base, out);
@@ -224,6 +244,7 @@
     const FRYING = /\b(for (deep[- ]?|shallow[- ]?|pan[- ]?)?frying|to (deep[- ]?)?fry|for the (deep[- ]?)?fryer|for deep[- ]fat frying|frying oil)\b/i;
     const FAT = /\b(oil|lard|shortening|ghee|dripping|fat)\b/i;
     function isDiscarded(raw) { return DISCARDED.test(String(raw)); }
+    const COATING = /\(\s*for (the )?(coating|breading|dredging)\s*\)|\bfor (dredging|coating|breading|dusting)\b/i;
 
     // Things counted by their size: "4 4-ounce salmon fillets", "2 x 180g snapper fillets",
     // "1 whole chicken (about 4 pounds)", "2 racks of lamb (about 1 1/2 pounds each)".
@@ -233,6 +254,8 @@
     const toGrams = (n, unit) => n * (/^(pound|lb)/i.test(unit) ? 453.6 : /^(ounce|oz)/i.test(unit) ? 28.35 : /^k/i.test(unit) ? 1000 : 1);
     function fraction(t) { const m = String(t).trim().match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/); return m ? Number(m[1] || 0) + Number(m[2]) / Number(m[3]) : ({ '½': 0.5, '¼': 0.25, '¾': 0.75 }[t] || Number(t)); }
 
+    const COOKED = /\b(cooked|ready[- ]cooked|ready to (wok|eat|use|heat)|pre-?cooked|leftover|boiled|steamed)\b/i;
+    const COOKED_AS = { pasta: 'cooked pasta', 'whole wheat pasta': 'cooked pasta', spaghetti: 'cooked pasta', macaroni: 'cooked pasta', 'egg noodles': 'cooked egg noodles', 'rice noodles': 'cooked rice noodles', couscous: 'cooked couscous', udon: 'cooked udon', rice: 'cooked rice', 'brown rice': 'cooked brown rice', quinoa: 'cooked quinoa', lentils: 'cooked lentils' };
     function readLine(line, servings = 1) {
         let raw = String(line || '').trim();
         if (!raw) return null;
@@ -255,7 +278,13 @@
         let words = (item.text || raw) + (item.note ? ' ' + item.note : '');
         if (/,[^,]*\bor\b[^,]*\b(seeds|nuts|beans|lentils|berries|greens|peppers|mushrooms|cheese|herbs|butters?)\b/i.test(words)) words = words.replace(/,/g, ' ');
         // "fat-free, reduced-sodium chicken broth": the words after a comma can be the food itself.
-        const m = matchFood(words) || matchFood(raw) || matchFood(words.replace(/,/g, ' '));
+        let m = matchFood(words) || matchFood(raw) || matchFood(words.replace(/,/g, ' '));
+        // Cooked or ready-cooked rice, pasta, noodles, grains or lentils weigh mostly water: their
+        // cooked values (0.1.12 counted "1 pack ready-cooked egg noodles" as dry: 1,075 kcal).
+        if (m && COOKED.test(raw) && !/\b(uncooked|dry|dried|raw)\b/i.test(raw)) {
+            const key = COOKED_AS[m.key] || `cooked ${m.key}`;
+            if (FOODS[key] && key !== m.key) m = { key, food: FOODS[key], phrase: m.phrase };
+        }
         const low = !m || FOODS[m.key].n[0] < 400 || /spray/.test(m.key);
         const free = FREE.test(clean(words)) && low;
         if (!m) return free ? { grams: 0, key: null, free: true } : { unmatched: true, line: raw };
@@ -267,7 +296,7 @@
         const bracket = raw.match(BRACKET) || raw.match(ABOUT);
         const packWord = /\b(cans?|tins?|packages?|packets?|jars?|bags?|containers?|cartons?|blocks?|boxes?)\b/i.test(raw);
         if (size && !packWord) grams = qty * toGrams(Number(size[1]), size[2]);   // "4 4-ounce fillets": 4 × 4 oz
-        else if (bracket && !packWord && (qty == null || !item.unit || ['piece', 'fillet', 'slice', 'head', 'bunch'].indexOf(item.unit) >= 0)) {
+        else if (bracket && !packWord && (qty == null || !item.unit || ['piece', 'fillet', 'slice', 'head', 'bunch', 'cup', 'tbsp', 'tsp'].indexOf(item.unit) >= 0)) {
             // A weight in brackets: the whole amount ("about 4 pounds"), or each one's ("1 1/2 pounds each").
             const w = toGrams(fraction(bracket[1]), bracket[2]);
             const after = raw.slice(raw.indexOf(bracket[0]) + bracket[0].length, raw.indexOf(bracket[0]) + bracket[0].length + 8);
@@ -279,7 +308,7 @@
             const count = qty != null && raw.indexOf(pack[0]) > raw.search(/[\d½¼¾⅓⅔⅛⅜⅝⅞]/) ? qty : 1;
             grams = each * (count || 1);
             // Canned beans and lentils, drained: what's left without the can's liquid (about 60%).
-            if (/\b(drained|rinsed)\b/i.test(raw) && /\b(beans?|chickpeas|lentils|garbanzos?|black-eyed peas|pigeon peas|cannellini|butter beans|kidney beans)\b/i.test(raw)) grams *= 0.6;
+            if (/\b(drained|rinsed)\b/i.test(raw) && /\b(beans?|chickpeas|lentils|garbanzos?|black-eyed peas|pigeon peas|cannellini|butter beans|kidney beans|corn|sweetcorn|peas|mushrooms|artichokes?|olives|beets?)\b/i.test(raw)) grams *= 0.6;
         } else if (qty != null) {
             const unit = item.unit;
             if (G[unit]) grams = qty * G[unit];
@@ -313,6 +342,8 @@
         const per = Math.max(1, Number(servings) || 1);
         // Frying oil: only what the food takes up (about a tablespoon a serving), never the potful.
         if (FRYING.test(raw) && FAT.test(`${m.key} ${clean(words)}`) && grams > 14 * per) return { grams: 14 * per, key: m.key, free: false, assumed: 'about 1 tbsp a serving (what frying takes up; the rest stays in the pot)' };
+        // A coating: about a third of what's set out sticks to the food (the rest is left over).
+        if (COATING.test(raw) && grams > 0) return { grams: grams * 0.35, key: m.key, free, assumed: 'about a third (what sticks; the rest of the coating is left over)' };
         // Bones and shells: only the edible part counts.
         const edible = edibleShare(raw);
         if (edible && grams > 0) return { grams: grams * edible.share, key: m.key, free, edible: edible.note, whole: Math.round(grams) };
@@ -397,6 +428,18 @@
                 if (brineWater || salt || sugar) lines[i] = `${l} (for the brine)`;
             });
         }
+        // A breading station (flour, beaten egg, crumbs to coat): most of it is left in the bowls.
+        const coatSteps = steps.split(/(?<=[.!?])\s+/).filter(x => /\b(dredge|dredging|coat|coating|dip|dipping|bread|breading|roll)\b/i.test(x));
+        if (coatSteps.length) {
+            lines.forEach((l, i) => {
+                if (COATING.test(l) || isDiscarded(l)) return;
+                const t = clean(l);
+                const what = /\b(flour|panko|breadcrumbs?|bread crumbs|crumbs|cornmeal|cornstarch|corn starch)\b/.exec(t) || (/\beggs?\b/.test(t) && /\bbeaten\b|\bwhisked\b/i.test(l) ? ['egg'] : null);
+                if (!what) return;
+                const word = what[0].replace(/s$/, '');
+                if (coatSteps.some(x => new RegExp(`\\b${word}`, 'i').test(x)) && !new RegExp(`\\b(stir|mix|whisk|fold)[^.]*\\b${word}[^.]*\\b(into|with) the (sauce|batter|dough|filling)`, 'i').test(steps)) lines[i] = `${l} (for coating)`;
+            });
+        }
         if (/\bdeep[- ]?fr(y|ied|ying)\b|\bheat the oil to \d{3}\b|\boil (reaches|registers|is) \d{3}\b/i.test(steps)) {
             lines.forEach((l, i) => { if (!FRYING.test(l) && FAT.test(clean(l)) && mlOf(l) >= 480) lines[i] = `${l} (for frying)`; });
         }
@@ -411,7 +454,11 @@
         const own = recipe.nutrition && Number(recipe.nutrition.calories) > 0 ? recipe.nutrition : null;
         const calc = c.nutrition;
         let keepOwn = false;
-        if (own && calc.calories > 0) keepOwn = Math.abs(own.calories - calc.calories) / calc.calories <= 0.15;
+        // A site's own numbers only when they add up (protein, carbs and fat give its calories, within
+        // 20%: a site's "328 kcal" with 402 kcal of macros isn't kept) and agree with ours.
+        const fromMacros = own ? (Number(own.protein_g) || 0) * 4 + (Number(own.carbs_g) || 0) * 4 + (Number(own.fat_g) || 0) * 9 : 0;
+        const consistent = !own || own.protein_g == null || own.carbs_g == null || own.fat_g == null || Math.abs(fromMacros - own.calories) / own.calories <= 0.2;
+        if (own && calc.calories > 0) keepOwn = consistent && Math.abs(own.calories - calc.calories) / calc.calories <= 0.15;
         else if (own && !c.lines.length) keepOwn = true;   // nothing matched at all: the source's numbers are all we have
         recipe.nutrition = keepOwn ? { calories: Math.round(own.calories), protein_g: own.protein_g != null ? Math.round(own.protein_g) : calc.protein_g, carbs_g: own.carbs_g != null ? Math.round(own.carbs_g) : calc.carbs_g, fat_g: own.fat_g != null ? Math.round(own.fat_g) : calc.fat_g,
             fiber_g: calc.fiber_g, micros: calc.micros } : calc;

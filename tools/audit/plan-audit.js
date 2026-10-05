@@ -7,6 +7,7 @@
 //   node tools/audit/plan-audit.js --books-dir "C:\path\to\Nourish"   also use real books from a
 //        Nourish folder (its "Recipe Books" and "My Recipes"); can be given more than once
 //   node tools/audit/plan-audit.js --saved nourish-data.json   also audit the plan saved in a data file
+//   node tools/audit/plan-audit.js --seed 2         25 different plans (the recipes shuffled differently)
 //   node tools/audit/plan-audit.js --only 3        just scenario 3 (1-based)
 //   node tools/audit/plan-audit.js --only 3 --show "Pork Chops"   and every line of the meals with that in their name
 //
@@ -65,6 +66,7 @@ function args() {
         else if (a[i] === '--python') out.python = a[++i];
         else if (a[i] === '--quiet') out.quiet = true;
         else if (a[i] === '--show') out.show = a[++i];
+        else if (a[i] === '--seed') out.seed = Number(a[++i]) || 0;
     }
     return out;
 }
@@ -86,6 +88,13 @@ async function main() {
         folders.push({ dir: copy, folder: f });
     }));
     const { db, books, notes } = await loadBooks(folders, { python, ocr: 'simulate' });
+    // --seed: a different 70% of the web library each time, like another phone's library.
+    if (o.seed && web) {
+        const F = require('../../finder.js');
+        const hash = t => { let h = 2166136261; for (const c of t) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
+        const lib = web[F.CACHE.recipes] || {};
+        web = Object.assign({}, web, { [F.CACHE.recipes]: Object.fromEntries(Object.entries(lib).filter(([url]) => hash(`${o.seed}|${url}`) % 10 < 7)) });
+    }
     const header = [
         `Books: ${books.map(b => `${b.title} (${b.count} recipes, ${b.meals || 0} meals${b.review ? `, ${b.review} need a look` : ''}${b.note ? `; ${b.note}` : ''})`).join('; ')}`,
         `Web library: ${web ? W.size(web) : 0} recipes${web ? '' : ' (none saved yet: run with --grow-web)'}`,
@@ -94,7 +103,8 @@ async function main() {
 
     const list = o.only ? [SCENARIOS[o.only - 1]] : SCENARIOS;
     const results = [];
-    const base = Date.UTC(2026, 9, 5);
+    // Each plan starts the recipe shuffle on a different day; --seed moves them all (other plans).
+    const base = Date.UTC(2026, 9, 5) + (o.seed || 0) * 37 * DAY;
     for (let i = 0; i < list.length; i++) {
         const sc = Object.assign({ books: true, web: true }, list[i]);
         const t0 = Date.now();

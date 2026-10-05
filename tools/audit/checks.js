@@ -37,7 +37,7 @@ const NOT_DESSERT = /\b(pot pies?|shepherd'?s pie|cottage pie|chicken pie|meat p
 const SAUCE = /\b(sauces?|dressings?|vinaigrettes?|gravy|chimichurri|marinades?|rubs?|seasonings?|spice (mix|blend)|stocks?|broths?|syrups?|jams?|jellies|chutneys?|relish|pickles?|condiments?|mayonnaise|ketchup|hot sauce|chili oil|chili crisp)$/i;
 const SIDE_WORDS = /\b(side|sides|side dish|accompaniments?|to serve alongside)\b/i;
 const ARTICLE = /^(how to|a guide|the guide|guide to|tips|\d+\s+(ways|tips|ideas|recipes|things))|\b(guide|101|tips|ideas|round-?up|meal plan)$/i;
-const MEAL_WORDS = /\b(salads?|soups?|stews?|chili|curr(y|ies)|bowls?|wraps?|sandwich(es)?|burgers?|tacos?|burritos?|quesadillas?|pasta|noodles?|rice|risotto|pilaf|grains?|lentils?|beans?|chickpeas?|omelet+e?s?|frittatas?|eggs|oats|oatmeal|porridge|pancakes?|toast|stir[- ]?fry|casseroles?|bakes?|pies?|pizzas?|skillet|traybakes?|sheet[- ]pan|dumplings?|pitas?|flatbreads?|bagels?)\b/i;
+const MEAL_WORDS = /\b(salads?|soups?|stews?|chili|curr(y|ies)|bowls?|wraps?|sandwich(es)?|burgers?|tacos?|burritos?|quesadillas?|pasta|noodles?|rice|risotto|pilaf|grains?|lentils?|beans?|chickpeas?|omelet+e?s?|frittatas?|eggs|oats|oatmeal|porridge|pancakes?|toast|stir[- ]?fry|casseroles?|bakes?|pies?|pizzas?|skillet|traybakes?|sheet[- ]pan|dumplings?|pitas?|flatbreads?|bagels?|roll[- ]?ups?|pinwheels?|lettuce cups?)\b/i;
 const VEG_OR_STARCH = /\b(potato(es)?|green beans|beans|carrots?|broccoli|cauliflower|asparagus|brussels sprouts|spinach|kale|zucchini|squash|corn|peas|mushrooms?|onions?|cabbage|slaw|coleslaw|fries|chips|bread|garlic bread|rolls|biscuits|cornbread|rice|couscous|polenta)\b/i;
 const PROTEIN_WORDS = /\b(chicken|beef|pork|lamb|turkey|duck|veal|venison|fish|salmon|tuna|cod|halibut|tilapia|trout|shrimp|prawns?|scallops?|crab|lobster|mussels|clams|sausages?|bacon|ham|steak|ribs|tofu|tempeh|seitan|eggs?|lentils?|chickpeas?|beans|edamame|paneer|halloumi|cheese)\b/i;
 // Dishes for dinner, not breakfast or lunch (long, heavy or special).
@@ -51,7 +51,7 @@ const NOT_BONY = /\b(boneless|bone[- ]free|peeled|shelled|meat\b|fillets?|filets
 const ALLERGENS = {
     nuts: /\b(almonds?|walnuts?|pecans?|cashews?|pistachios?|hazelnuts?|macadamias?|brazil nuts?|pine nuts?|nuts?|praline|marzipan|nutella)\b/i,
     peanuts: /\b(peanuts?|peanut butter|groundnuts?)\b/i,
-    dairy: /\b(milk|cheese|cheddar|mozzarella|parmesan|feta|ricotta|butter(?!milk squash)|buttermilk|cream|yogh?urt|ghee|whey|casein|gruy[eè]re|paneer|halloumi|mascarpone|quark|kefir)\b/i,
+    dairy: /\b(milk|cheese|cheddar|mozzarella|parmesan|feta|ricotta|butter(?!milk squash)|buttermilk|cream|yogh?urt|ghee|whey|casein|gruy[eè]re|paneer|halloumi|mascarpone|quark|kefir|(?<!(pea|plant|vegan|soy|rice|hemp|plant-based) )protein powder)\b/i,
     gluten: /\b(flour|bread|breadcrumbs|panko|pasta|spaghetti|macaroni|noodles|couscous|bulgur|barley|rye|wheat|seitan|pitas?|tortillas?(?! \(corn\))|buns?|bagels?|crackers?|croutons|beer|soy sauce|farro|semolina|orzo)\b/i,
     shellfish: /\b(shrimp|prawns?|crab|lobster|scallops?|mussels|clams|oysters|langoustines?|crayfish)\b/i,
     fish: /\b(fish|salmon|tuna|cod|halibut|tilapia|trout|sardines?|anchov(y|ies)|mackerel|haddock|snapper|bass|swordfish|fish sauce)\b/i,
@@ -61,7 +61,7 @@ const ALLERGENS = {
 };
 const MEAT = /\b(chicken|beef|pork|lamb|turkey|duck|veal|venison|bacon|ham|sausages?|chorizo|salami|pepperoni|prosciutto|pancetta|steak|ribs|mince|gelatin|lard|bone marrow|marrow bones?|anchov(y|ies)|fish sauce)\b/i;
 const SEAFOOD = /\b(fish|salmon|tuna|cod|halibut|tilapia|trout|sardines?|mackerel|shrimp|prawns?|crab|lobster|scallops?|mussels|clams|oysters)\b/i;
-const ANIMAL = /\b(eggs?|milk|cheese|butter|cream|yogh?urt|honey|ghee|whey|mayonnaise)\b/i;
+const ANIMAL = /\b(eggs?|milk|cheese|butter|cream|yogh?urt|honey|ghee|whey|mayonnaise|(?<!(pea|plant|vegan|soy|rice|hemp|plant-based) )protein powder)\b/i;
 
 // === Helpers ===
 const own = m => {
@@ -102,8 +102,9 @@ function checkMeal(m, slot, ctx, add) {
     if (ARTICLE.test(name)) why.push('an article or guide');
     if (APPETIZER.test(dish) || (/\b(appeti[sz]ers?|starters?|small plates?|tapas|mezze|snacks?|nibbles)\b/i.test(cat) && !/\b(main|dinner|lunch|breakfast|brunch|entr[eé]e)\b/i.test(cat)) || /\bas an? (appeti[sz]er|starter|snack|dip|spread)\b/i.test(steps)) why.push('an appetizer or small plate');
     if (SPREAD.test(dish) && !MEAL_WORDS.test(dish)) why.push('a spread or dip');
-    if (DRINK.test(dish) && !/\b(smoothie bowl|tea[- ]smoked|tea eggs?)\b/i.test(dish) && !MEAL_WORDS.test(dish)) why.push('a drink');
-    if (DESSERT.test(dish) && !NOT_DESSERT.test(dish) && !(slot === 'breakfast' && /\b(pancakes?|muffins?)\b/i.test(dish))) why.push('a dessert');
+    // Smoothies and shakes: a breakfast when filling enough (the app's own rule, checked below).
+    if (DRINK.test(dish) && !/\b(smoothies?|shakes?|smoothie bowl|tea[- ]smoked|tea eggs?)\b/i.test(dish) && !MEAL_WORDS.test(dish)) why.push('a drink');
+    if (DESSERT.test(dish) && !NOT_DESSERT.test(dish) && !(slot === 'breakfast' && /\b(pancakes?|muffins?|smoothie bowls?|smoothies?|oats|oatmeal|porridge|parfaits?|yogh?urt bowls?|waffles?)\s*$/i.test(dish))) why.push('a dessert');
     if (SAUCE.test(dish)) why.push('a sauce or condiment');
     if (SIDE_WORDS.test(cat) && !/\b(mains?|main course|dinner|lunch|breakfast|brunch|entr[eé]es?)\b/i.test(cat)) why.push('a side dish (its category)');
     if (/\bas a side( dish)?\b|\bside dish\b/i.test(steps) && !PROTEIN_WORDS.test(dish)) why.push('a side dish (its steps say so)');
@@ -147,7 +148,11 @@ function checkMeal(m, slot, ctx, add) {
         if (/\b(ribs|short ribs?)\b/i.test(dish) && (fShare < 0.3 || per.p < 10)) add('nutrition', 'fail', `ribs with ${Math.round(fShare * 100)}% fat and ${per.p} g protein`);
         // One serving of the recipe as written: the meal without what the app added, over its portion.
         const extra = N.calculate([].concat((m.protein_added || []).filter(l => !/^a bit more\b/i.test(l)), m.fiber_added || []), m.servings || 1).nutrition;
-        const oneKcal = (kcal - extra.calories) / portionOf(m), oneP = (per.p - extra.protein_g) / portionOf(m);
+        // The recipe's own numbers per serving when it's in the pools (exact: a small portion can't
+        // shrink half a baguette, so dividing the meal by its portion overstates it).
+        const src = ctx.poolByName && ctx.poolByName.get(m.name);
+        const oneKcal = src ? src.nutrition.calories : (kcal - extra.calories) / portionOf(m);
+        const oneP = src ? Number(src.nutrition.protein_g) || 0 : (per.p - extra.protein_g) / portionOf(m);
         if (/\bfried\b|\bdeep[- ]fried\b|\bbattered\b/i.test(dish) && oneKcal > 1400) add('nutrition', 'fail', `${Math.round(oneKcal)} kcal a serving: the frying oil was counted as eaten`);
         if (oneKcal > 1700) add('nutrition', 'fail', `${Math.round(oneKcal)} kcal in one serving of the recipe`);
         if (oneP > 110) add('nutrition', 'fail', `${Math.round(oneP)} g protein in one serving of the recipe`);
@@ -167,9 +172,10 @@ function checkMeal(m, slot, ctx, add) {
         const dishMain = PL.mainProtein(Object.assign({}, m, { ingredients: own(m), _lines: undefined }));
         const addedMain = PL.mainProtein({ ingredients: pAdded, servings: m.servings || 1 });
         const ownKcal = kcal - addedCalc.nutrition.calories;
-        if (slot !== 'breakfast' && (ownP < 12 || (ownKcal > 0 && ownP * 4 / ownKcal < 0.1))) add('added', 'fail', `only ${Math.round(ownP)} g protein of its own; the app added ${pAdded.join(', ')} to make it pass`);
-        else if (slot === 'breakfast' && ownP < 8) add('added', 'fail', `only ${Math.round(ownP)} g protein of its own; the app added ${pAdded.join(', ')} to make it pass`);
-        else if (addedP > ownP) add('added', 'fail', `more of its protein is added (${pAdded.join(', ')}: ${Math.round(addedP)} g) than its own (${Math.round(ownP)} g)`);
+        const perServing = ownP / portionOf(m);   // a full serving of the recipe, as the app judges it
+        if (slot !== 'breakfast' && (perServing < 12 || (ownKcal > 0 && ownP * 4 / ownKcal < 0.1))) add('added', 'fail', `only ${Math.round(ownP)} g protein of its own; the app added ${pAdded.join(', ')} to make it pass`);
+        else if (slot === 'breakfast' && perServing < 8) add('added', 'fail', `only ${Math.round(ownP)} g protein of its own; the app added ${pAdded.join(', ')} to make it pass`);
+        else if (addedP > ownP + Math.max(1, ownP * 0.15)) add('added', 'fail', `more of its protein is added (${pAdded.join(', ')}: ${Math.round(addedP)} g) than its own (${Math.round(ownP)} g)`);
         else if (slot !== 'breakfast' && dishMain && addedMain && dishMain !== addedMain) add('added', 'fail', `${addedMain} added to a ${dishMain} dish (${pAdded.join(', ')})`);
         else add('added', 'note', `protein top-up: ${pAdded.join(', ')} (+${Math.round(addedP)} g; ${Math.round(ownP)} g of its own)`);
     }
@@ -250,6 +256,8 @@ function auditPlan(res, scenario) {
         allergens: Object.keys(ALLERGENS).filter(a => new RegExp(`\\b${a === 'nuts' ? '(tree )?nuts?' : a === 'peanuts' ? 'peanuts?' : a === 'eggs' ? 'eggs?' : a}\\b`, 'i').test(s.allergies || '')),
     };
     const on = PL.mealsOf(s);
+    ctx.poolByName = new Map();
+    MEALS.forEach(slot => (res.pools[slot] || []).forEach(r => { if (r && r.nutrition && !ctx.poolByName.has(r.name)) ctx.poolByName.set(r.name, r); }));
     const sources = {};
     const seen = [];
     res.days.forEach((day, d) => {
@@ -288,7 +296,8 @@ function auditPlan(res, scenario) {
     if (builtins.length) {
         const planNames = PL.dishList(res.days.flatMap(day => on.map(t => day[t] && day[t].name).filter(Boolean)));
         const kcalFor = slot => res.targets.kcal * PL.splitOf(s)[MEALS.indexOf(slot)];
-        const alternatives = ({ d, slot }) => (res.pools[slot] || []).filter(r => r.source_id !== 'builtin' && !planNames.has(r.name) && !res.exclude(r)
+        const density = r => (r && r.nutrition && r.nutrition.calories > 0 ? (Number(r.nutrition.protein_g) || 0) / r.nutrition.calories : 0);
+        const alternatives = ({ d, slot, m }) => (res.pools[slot] || []).filter(r => r.source_id !== 'builtin' && !planNames.has(r.name) && !res.exclude(r) && density(r) >= density(m) * 0.9
             && !PL.slotProblem(r, slot, PL.slotLimits(s, slot, d % 7)) && r.nutrition && kcalFor(slot) / r.nutrition.calories >= 0.55 && kcalFor(slot) / r.nutrition.calories <= 2).length;
         const withOthers = builtins.filter(b => alternatives(b) >= 3);
         const msg = `${builtins.length} of Nourish's own recipes (${builtins.map(b => `day ${b.d + 1} ${b.slot}`).join(', ')}); ${withOthers.length} of them had 3 or more unused web or book recipes that fit`;
