@@ -296,7 +296,10 @@ function checkPlan(res, c) {
         const t = res.totals[i];
         const target = res.targets[i];
         if (!t || !target) return;
-        if (Math.abs(t.kcal / target.kcal - 1) > 0.1) push({ day: dayNames[i] }, { check: 'day off target', severity: 'problem', what: `${Math.round(t.kcal)} kcal against ${target.kcal}` });
+        // Under the calories: fine only when the day says so honestly (and the note's number is right).
+        if (Math.abs(t.kcal / target.kcal - 1) > 0.1) push({ day: dayNames[i] }, d && d.kcal_gap && t.kcal < target.kcal && Math.abs(d.kcal_gap.have - Math.round(t.kcal)) <= 1
+            ? { check: 'calories short, said honestly', severity: 'note', what: `${Math.round(t.kcal)} kcal of ${target.kcal}` }
+            : { check: 'day off target', severity: 'problem', what: `${Math.round(t.kcal)} kcal against ${target.kcal}` });
         // Short of protein: fine only when the day says so honestly (real recipes and up to two extras can't reach it).
         if (t.protein < target.protein * 0.9) push({ day: dayNames[i] }, (d && d.protein_gap) ? { check: 'protein short, said honestly', severity: 'note', what: `${Math.round(t.protein)} g of ${target.protein} with ${d.protein_gap.extras} extra(s)` }
             : { check: 'day off target', severity: 'problem', what: `${Math.round(t.protein)} g protein against ${target.protein}, with no note` });

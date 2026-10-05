@@ -3266,7 +3266,8 @@ function updatePlanScreen() {
                     h('span', { class: 'plan-meal-type', text: slotLabel(`snack-${i + 1}`, m) }),
                     h('span', { class: 'plan-meal-name', text: m.name })),
                 h('span', { class: 'plan-meal-meta', text: on('show_nutrition') ? `${formatCalories(m.nutrition && m.nutrition.calories)} kcal` : mealTime(m).text }))))
-            .concat(day.protein_gap ? [h('p', { class: 'plan-day-note', text: proteinGapText(day.protein_gap) })] : []))));
+            .concat(day.protein_gap ? [h('p', { class: 'plan-day-note', text: proteinGapText(day.protein_gap) })] : [])
+            .concat(day.kcal_gap ? [h('p', { class: 'plan-day-note', text: `This day reaches ${day.kcal_gap.have.toLocaleString()} of your ${day.kcal_gap.target.toLocaleString()} kcal: the recipes that fit are smaller than that, even at 1½ servings. Add a snack or a bigger recipe of your own if you like.` })] : []))));
 }
 // The honest number when real recipes (and up to two extras) can't reach the protein target.
 function proteinGapText(g) {
@@ -3582,8 +3583,10 @@ function normalizePlan(data, strict = true) {
             const out = Object.fromEntries(MEAL_TYPES.map(t => [t, normalizeMeal(d[t])]));
             const all = (Array.isArray(d.snacks) ? d.snacks : []).map(normalizeMeal).filter(Boolean);
             // Up to 3 snacks (Settings) and up to 2 protein extras.
-            const snacks = all.filter(x => !x.protein_extra).slice(0, 3).concat(all.filter(x => x.protein_extra).slice(0, 2));
+            const extras = all.filter(x => x.protein_extra).slice(0, 2);
+            const snacks = all.filter(x => !x.protein_extra).slice(0, 5 - extras.length).concat(extras);
             if (snacks.length) out.snacks = snacks;
+            if (d.kcal_gap && Number(d.kcal_gap.target) > 0) out.kcal_gap = { have: toNumber(d.kcal_gap.have), target: toNumber(d.kcal_gap.target) };
             if (d.protein_gap && Number(d.protein_gap.target) > 0) out.protein_gap = { have: toNumber(d.protein_gap.have), target: toNumber(d.protein_gap.target), extras: toNumber(d.protein_gap.extras) || 0 };
             return out;
         })

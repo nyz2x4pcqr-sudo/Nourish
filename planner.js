@@ -953,7 +953,7 @@
                 const roomFor = r => sourceKey(r) === 'builtin' || sourceKey(r) === sourceKey(cur[worst.m]) || (bySource[sourceKey(r)] || 0) < cap;
                 const pick = (pools[worst.m] || []).filter(r => r && r.nutrition && r.nutrition.calories > 0 && !used.has(r.name) && !(exclude && exclude(r)) && roomFor(r) && !slotProblem(r, worst.m, limits)
                     && !others.some(o => mainProtein(o) && mainProtein(o) === mainProtein(r)))
-                    .map(r => ({ r, f: want / r.nutrition.calories })).filter(x => x.f >= 0.55 && x.f <= 2)
+                    .map(r => ({ r, f: want / r.nutrition.calories })).filter(x => x.f >= PORTION_MIN * 0.85 && x.f <= PORTION_MAX * 1.1)
                     // Recent dishes last; Nourish's own recipes after web and book ones (they're a backup).
                     .sort((a, b) => (recent.has(a.r.name) ? 1 : 0) - (recent.has(b.r.name) ? 1 : 0)
                         || (settings.builtin_mode !== 'mix' ? (a.r.source_id === 'builtin' ? 1 : 0) - (b.r.source_id === 'builtin' ? 1 : 0) : 0)
@@ -1167,7 +1167,7 @@
         }
         // A big day (Weekly mode) can need more than three recipes give at 1½ servings: a snack or
         // two of their own make up the calories, never a bigger-than-real portion.
-        for (let i = 0; i < 2 && dayTotals(cur).kcal < T.kcal * 0.95 && (cur.snacks || []).length < 5; i++) {
+        for (let i = 0; i < 3 && dayTotals(cur).kcal < T.kcal * 0.95 && (cur.snacks || []).length < 5; i++) {
             const gap = T.kcal - dayTotals(cur).kcal;
             const taken = new Set((cur.snacks || []).map(x => x.name));
             const pick = SNACKS.map(snackRecipe).filter(r => !taken.has(r.name) && !(exclude && exclude(r)) && !pricey(r))
@@ -1186,6 +1186,12 @@
             cur.protein_gap = { have: Math.round(t.protein), target: T.protein, extras };
             notes.push(`the day reaches ${Math.round(t.protein)} g of its ${T.protein} g protein with real recipes${extras ? ` and ${extras} protein extra${extras > 1 ? 's' : ''}` : ''}: shown as it is`);
         } else delete cur.protein_gap;
+        // Calories the real recipes can't reach (a very big target with small recipes): said plainly.
+        const kcalNow = Math.round(dayTotals(cur).kcal);
+        if (kcalNow < T.kcal * 0.9) {
+            cur.kcal_gap = { have: kcalNow, target: T.kcal };
+            notes.push(`the day reaches ${kcalNow} of its ${T.kcal} kcal with real recipes at 1½ servings and snacks: shown as it is`);
+        } else delete cur.kcal_gap;
         return { day: cur, notes, extras, short };
     }
     // The day's rules, whoever made the plan: portions sized to the calories, then protein extras if
