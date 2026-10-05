@@ -1,0 +1,3 @@
+*.pdf binary
+*.epub binary
+tests/fixtures/ocr/*.txt -text
