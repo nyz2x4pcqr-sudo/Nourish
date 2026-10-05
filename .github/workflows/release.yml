@@ -29,9 +29,12 @@ jobs:
     uses: ./.github/workflows/build-mobile.yml
     with:
       skip_iphone_test: ${{ inputs.skip_iphone_test == true }}
+  # Every release is audited first: 24 full plans, every meal checked (plan-audit.yml). A problem stops it.
+  audit:
+    uses: ./.github/workflows/plan-audit.yml
 
   publish:
-    needs: [windows, phones]
+    needs: [windows, phones, audit]
     runs-on: ubuntu-latest
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
@@ -42,15 +45,26 @@ jobs:
           path: dist
           pattern: Nourish-*
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan-audit
+          path: audit
       - name: List files
-        run: ls -la dist
+        run: ls -la dist audit
+      - name: Release notes with the plan audit
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cp "release-notes/${TAG}.md" body.md
+          printf '\n## Plan audit\n\n' >> body.md
+          sed '1d' audit/plan-audit.md | sed -n '/^## The test books as read/q;p' >> body.md
+          cat body.md
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
           name: ${{ github.event_name == 'workflow_dispatch' && format('Nourish {0}', env.TAG) || '' }}
-          body_path: ${{ github.event_name == 'workflow_dispatch' && format('release-notes/{0}.md', env.TAG) || '' }}
+          body_path: ${{ github.event_name == 'workflow_dispatch' && 'body.md' || '' }}
           prerelease: ${{ contains(env.TAG, '-') }}
           files: |
             dist/Nourish.exe

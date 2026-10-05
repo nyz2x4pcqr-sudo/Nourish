@@ -1,0 +1,40 @@
+name: Plan audit
+
+# Makes 24 full 7-day plans with the real app (its own server and a headless browser, fresh data)
+# from real web recipes read just now, the audit's test books and Nourish's own recipes, and checks
+# every meal (tools/plan-audit.js). Runs before every release (release.yml): a problem stops it, and
+# the report goes into the release notes. Can also be run on its own from the Actions tab.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install (the app's server, a browser, Pillow for the scanned test book)
+        run: |
+          pip install -r backend/requirements-core.txt pillow pypdf
+          npm i --no-save playwright@1.56.1 linkedom@0.18 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Real web recipes, read now from the recipe sites
+        run: node tools/web-snapshot.js 5 > web-recipes.json; ls -l web-recipes.json
+      - name: Audit
+        run: node tools/plan-audit.js --snapshot web-recipes.json --out plan-audit
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-audit
+          path: plan-audit/plan-audit.md
