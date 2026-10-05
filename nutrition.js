@@ -76,7 +76,7 @@
 
     const FISH = /\b(salmon|cod|tilapia|trout|haddock|halibut|pollock|mackerel|sea bass|snapper|tuna steak|swordfish|fish)\b/;
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
-    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, dumplings: 25, 'whole spice berries': 0.2, 'whole nutmeg': 7, nutmeg: 2, tofu: 396, 'silken tofu': 340 };
+    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, dumplings: 25, 'whole spice berries': 0.2, 'whole nutmeg': 7, nutmeg: 2, tofu: 396, 'silken tofu': 340, 'cherry tomatoes': 17, 'grape tomatoes': 8 };
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
     // A cup of something light and airy (chips, flakes) weighs far less than a cup of water.
     const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60 };
@@ -108,7 +108,8 @@
     function saysCooked(raw, unit) {
         const t = String(raw).toLowerCase();
         if (/\b(uncooked|dry|dried|raw)\b/.test(t)) return false;
-        if (!/\b(cooked|pre-?cooked|precooked|leftover|steamed|boiled|prepared)\b/.test(t)) return false;
+        // A ready-to-eat pouch (microwave rice, "ready-to-eat quinoa") is cooked grain too.
+        if (!/\b(cooked|pre-?cooked|precooked|leftover|steamed|boiled|prepared|ready[- ]to[- ](eat|heat|serve)|microwave(able)?|instant pouch)\b|\bpouch\b/.test(t)) return false;
         // "115 g ramen noodles, cooked according to the packet": the weight before cooking.
         if (/\b(cooked|prepared) (according to|as per|following|per) (the )?(packet|package|pack|box|instructions)|to package instructions|packet directions|package directions/.test(t) && G[unit]) return false;
         return true;
