@@ -34,7 +34,7 @@
         wheat: ['wheat', 'flour', 'bread', 'pasta', 'spaghetti', 'penne', 'noodle', 'couscous', 'bulgur', 'semolina', 'spelt', 'farro', 'breadcrumb', 'panko', 'tortilla', 'pita', 'naan', 'bagel', 'cracker', 'orzo', 'udon'],
         peanut: ['peanut', 'peanut butter', 'satay', 'groundnut', 'peanut oil', 'trail mix', 'snickers', 'candy bar', 'pad thai'],
         nut: ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'nut butter', 'almond butter', 'almond milk', 'almond flour', 'praline', 'marzipan', 'nutella', 'trail mix', 'nut'],
-        'tree nut': ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'almond butter', 'almond milk', 'almond flour', 'trail mix'],
+        'tree nut': ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'almond butter', 'almond milk', 'almond flour', 'trail mix', 'nut butter', 'mixed nuts', 'cashew butter', 'praline', 'marzipan', 'nutella', 'pesto', 'nuts'],
         soy: ['soy', 'soya', 'tofu', 'tempeh', 'edamame', 'miso', 'soy sauce', 'tamari', 'soy milk'],
         sesame: ['sesame', 'tahini', 'sesame oil', 'sesame seed', 'hummus'],
         cucumber: ['cucumber', 'pickle', 'gherkin', 'cornichon', 'tzatziki', 'relish'],
@@ -63,7 +63,7 @@
     };
     // Words that aren't the food they look like: "peanut butter" isn't dairy, "eggplant" isn't egg.
     const NOT = {
-        butter: ['peanut butter', 'almond butter', 'nut butter', 'cashew butter', 'apple butter', 'cocoa butter', 'butternut', 'butter bean', 'butterhead', 'sunflower butter'],
+        butter: ['peanut butter', 'almond butter', 'nut butter', 'cashew butter', 'apple butter', 'cocoa butter', 'butternut', 'butter bean', 'butterhead', 'butter lettuce', 'buttermilk', 'sunflower butter'],
         milk: ['coconut milk', 'almond milk', 'oat milk', 'soy milk', 'rice milk', 'cashew milk', 'milk chocolate'],
         cream: ['coconut cream', 'cream of tartar'],
         egg: ['eggplant'],
@@ -71,6 +71,8 @@
         corn: ['peppercorn', 'corned'],
         pepper: ['black pepper', 'white pepper', 'pepper flakes', 'peppercorn', 'salt and pepper', 'ground pepper', 'cracked pepper', 'lemon pepper'],
         fish: ['fish sauce'],
+        // Someone who avoids olives still cooks with olive oil.
+        olive: ['olive oil'],
         cheese: ['vegan cheese', 'nutritional yeast'],
     };
     const CUISINES = ['italian', 'mexican', 'thai', 'indian', 'japanese', 'chinese', 'korean', 'vietnamese', 'mediterranean', 'greek', 'middle eastern', 'lebanese', 'turkish', 'moroccan', 'french', 'spanish', 'american', 'cajun', 'caribbean', 'ethiopian', 'persian', 'filipino', 'indonesian', 'malaysian', 'peruvian', 'brazilian', 'british', 'german'];

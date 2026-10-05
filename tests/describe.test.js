@@ -34,10 +34,29 @@ test('a description made in code from the recipe when there is no AI or it fails
     const d = O.describeFromRecipe({ name: 'Lemon Chicken Traybake', time_minutes: 45,
         ingredients: ['8 chicken thighs', '500 g new potatoes, halved', '1 lemon, sliced', '3 garlic cloves', '2 tbsp olive oil', '1 tsp salt'],
         steps: ['Heat the oven to 200C.', 'Toss everything in a roasting tin and roast for 40 minutes.'] });
-    assert.equal(d, 'Chicken thighs, new potatoes and lemon, roasted. About 45 minutes.');
+    assert.equal(d, 'Roasted chicken thighs and new potatoes with lemon and garlic. Ready in about 45 minutes.');
     const salad = O.describeFromRecipe({ name: 'Chickpea Salad', ingredients: ['1 can chickpeas', '1 cup cherry tomatoes', '1/2 cucumber', '2 tbsp olive oil', 'salt'], steps: ['Mix everything in a bowl and serve.'] });
-    assert.match(salad, /^Chickpeas, cherry tomatoes and (1\/2 )?cucumber, no cooking needed\./);
+    assert.match(salad, /^Chickpeas and cherry tomatoes with cucumber, no cooking needed\./);
     assert.equal(O.describeFromRecipe({ name: 'Water', ingredients: ['1 cup water'], steps: [] }), '');
+});
+
+// 0.1.12 described roasted bone marrow from a book as its ingredient lines stitched together,
+// brine water and all ("Beef marrow bones, gallon water and kosher salt").
+test('a made description says what the dish is: never brine, frying oil, salt, amounts or units', () => {
+    const fried = O.describeFromRecipe({ name: 'Buttermilk Fried Chicken', servings: 4, ingredients: ['2 quarts water (for the brine)', '1/2 cup kosher salt (for the brine)', '1/4 cup sugar (for the brine)',
+        '3 1/2 pounds bone-in, skin-on chicken pieces (thighs and drumsticks)', '2 cups buttermilk', '2 cups all-purpose flour', '1 tbsp paprika', '2 quarts vegetable oil, for deep frying'],
+    steps: ['Brine the chicken for 4 hours.', 'Dredge in the flour and deep-fry for 12 minutes.'] });
+    assert.match(fried, /^Fried chicken pieces with/);
+    assert.doesNotMatch(fried, /\b(water|salt|sugar|oil|quarts?|pounds?|bone-in|skin-on|\d+ (cups?|tbsp))\b/i);
+    assert.equal(O.descriptionProblem(fried, { name: 'Buttermilk Fried Chicken', ingredients: ['chicken pieces', 'buttermilk', 'paprika'], steps: ['deep-fry'] }), '');
+});
+
+test("a website's description is kept only where it describes the dish", () => {
+    const PL = require('../planner.js');
+    const bowl = { name: 'Teriyaki Salmon Bowl', ingredients: ['1 lb salmon', '2 cups rice', '1 cup edamame', '1 stalk celery'], steps: ['Bake the salmon.'] };
+    assert.equal(PL.cleanDescription('Recipe video above. These bowls are served with edamame and cucumbers for a quick meal. I make these salmon bowls every week! These salmon bowls are glazed in a sticky teriyaki sauce.', bowl),
+        'These salmon bowls are glazed in a sticky teriyaki sauce.');
+    assert.equal(PL.cleanDescription('Try this no-fuss, midweek meal that is high in protein and big on flavour.', bowl), '');
 });
 
 // 0.1.12: descriptions were cut off mid-sentence ("…topped with coarse.") and sometimes invented

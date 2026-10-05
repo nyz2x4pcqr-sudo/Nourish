@@ -10,17 +10,17 @@
         cup: 'cup', cups: 'cup', c: 'cup', tbsp: 'tbsp', tbs: 'tbsp', tablespoon: 'tbsp', tablespoons: 'tbsp', tsp: 'tsp', teaspoon: 'tsp', teaspoons: 'tsp',
         oz: 'oz', ounce: 'oz', ounces: 'oz', lb: 'lb', lbs: 'lb', pound: 'lb', pounds: 'lb', g: 'g', gram: 'g', grams: 'g', kg: 'kg', kilogram: 'kg', kilograms: 'kg',
         ml: 'ml', milliliter: 'ml', milliliters: 'ml', millilitre: 'ml', millilitres: 'ml', l: 'l', liter: 'l', liters: 'l', litre: 'l', litres: 'l',
-        floz: 'fl oz', pint: 'pint', pints: 'pint', quart: 'quart', quarts: 'quart',
+        floz: 'fl oz', pint: 'pint', pints: 'pint', quart: 'quart', quarts: 'quart', gallon: 'gallon', gallons: 'gallon', gal: 'gallon',
         clove: 'clove', cloves: 'clove', slice: 'slice', slices: 'slice', can: 'can', cans: 'can', pinch: 'pinch', handful: 'handful', handfuls: 'handful',
         piece: 'piece', pieces: 'piece', stick: 'stick', sticks: 'stick', bunch: 'bunch', head: 'head', sprig: 'sprig', sprigs: 'sprig',
         package: 'package', packages: 'package', pkg: 'package', scoop: 'scoop', scoops: 'scoop', fillet: 'fillet', fillets: 'fillet', dash: 'dash',
     };
     const PLURAL = { cup: 'cups', clove: 'cloves', slice: 'slices', can: 'cans', handful: 'handfuls', piece: 'pieces', stick: 'sticks', bunch: 'bunches',
-        head: 'heads', sprig: 'sprigs', package: 'packages', scoop: 'scoops', fillet: 'fillets', pinch: 'pinches', dash: 'dashes', pint: 'pints', quart: 'quarts' };
+        head: 'heads', sprig: 'sprigs', package: 'packages', scoop: 'scoops', fillet: 'fillets', pinch: 'pinches', dash: 'dashes', pint: 'pints', quart: 'quarts', gallon: 'gallons' };
     // How much of each unit, in millilitres (volume) or grams (weight).
-    const ML = { tsp: 5, tbsp: 15, cup: 240, 'fl oz': 30, pint: 480, quart: 960, ml: 1, l: 1000 };
+    const ML = { tsp: 5, tbsp: 15, cup: 240, 'fl oz': 30, pint: 480, quart: 960, gallon: 3840, ml: 1, l: 1000 };
     const G = { oz: 28.35, lb: 453.6, g: 1, kg: 1000 };
-    const IMPERIAL = ['tsp', 'tbsp', 'cup', 'fl oz', 'pint', 'quart', 'oz', 'lb'];
+    const IMPERIAL = ['tsp', 'tbsp', 'cup', 'fl oz', 'pint', 'quart', 'gallon', 'oz', 'lb'];
     const METRIC = ['ml', 'l', 'g', 'kg'];
 
     // "1 1/2", "1/2", "1.5", "1½", "½", "2-3" (→ 2, high 3) at the start of text.

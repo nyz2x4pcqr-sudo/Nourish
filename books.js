@@ -174,13 +174,20 @@
             const firstIng = part.findIndex(isIngredient);
             if (firstIng < 0) continue;
             const ingredients = [];
+            // A group that's thrown away ("For the brine", "For frying") labels its lines, so the
+            // nutrition doesn't count a gallon of brine (library.js groupLabel).
+            let group = '';
+            const lib = libraryReader();
+            const push = l => ingredients.push(group && lib && lib.groupLabel ? lib.groupLabel(l, group) : l);
             let k = firstIng;
             for (; k < part.length; k++) {
                 const b = part[k];
-                if (ING_HEAD.test(b.text) || (b.kind === 'h' && /^for the\b/i.test(b.text))) continue;
+                if (ING_HEAD.test(b.text) || (b.kind === 'h' && /^for the\b/i.test(b.text))) { group = b.text; continue; }
+                // "To serve" inside the ingredients is a group heading, not the method.
+                if (/^(to serve|to finish|for serving|to garnish|for garnish)$/i.test(b.text) && part[k + 1] && (isIngredient(part[k + 1]) || part[k + 1].kind === 'li')) { group = b.text; continue; }
                 if (STEP_HEAD.test(b.text)) { k++; break; }
-                if (isIngredient(b)) { b.text.split('\n').forEach(l => { if (l.trim()) ingredients.push(l.replace(/^[-*•]\s*/, '').trim()); }); continue; }
-                if (b.kind === 'li' && b.list === 'ul' && b.text.length < 120) { ingredients.push(b.text); continue; }
+                if (isIngredient(b)) { b.text.split('\n').forEach(l => { if (l.trim()) push(l.replace(/^[-*•]\s*/, '').trim()); }); continue; }
+                if (b.kind === 'li' && b.list === 'ul' && b.text.length < 120) { push(b.text); continue; }
                 // One short line without an amount in the middle of the list ("Ice", "Salt") stays in it.
                 if (b.kind !== 'h' && b.text.length <= 40 && !/[.!?]$/.test(b.text) && part[k + 1] && isIngredient(part[k + 1])) { ingredients.push(b.text); continue; }
                 break;

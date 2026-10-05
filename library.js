@@ -63,13 +63,14 @@
                 titleAt--;
             }
             const ingredients = [];
+            let group = '';
             let j = i + 1;
             for (; j < lines.length && !STEP_HEAD.test(lines[j]) && !ING_HEAD.test(lines[j]); j++) {
                 const l = lines[j];
                 if (!l || OTHER_HEAD.test(l)) continue;
-                if (/^#+\s/.test(l) && !AMOUNT.test(l.replace(/^#+\s*/, ''))) continue;   // a sub-heading ("For the sauce")
-                if (/^for the\b.*:?$/i.test(l)) continue;
-                ingredients.push(l.replace(BULLET, '').trim());
+                if (/^#+\s/.test(l) && !AMOUNT.test(l.replace(/^#+\s*/, ''))) { group = l; continue; }   // a sub-heading ("For the sauce")
+                if (/^(for the\b.*|for (deep[- ]?)?frying|to serve|to finish|for serving|brine)\s*:?$/i.test(l)) { group = l; continue; }
+                ingredients.push(groupLabel(l.replace(BULLET, '').trim(), group));
             }
             if (j >= lines.length || !STEP_HEAD.test(lines[j])) continue;
             const steps = [];
@@ -120,6 +121,14 @@
     const CONNECT_END = /\b(and|with|in|on|&|de|del|con|en|y|a la|al|for|of|or)$/i;
     const CONNECT_START = /^(and|with|in|on|&|de|del|con|en|y|al|for|of|or)\b/i;
     function stripLabel(l) { return l.replace(LABEL_PREFIX, ''); }
+    // An ingredient in a group whose contents are thrown away keeps that in its line ("4 cups water
+    // (for the brine)"), so the nutrition counts only what's eaten (nutrition.js). Other groups
+    // ("For the salad") are left as they are.
+    function groupLabel(line, heading) {
+        const h = String(heading || '').toLowerCase();
+        const tag = /\bbrin(e|ing)\b/.test(h) ? 'for the brine' : /\bsoak(ing)?\b/.test(h) ? 'for soaking' : /\b(deep[- ]?)?fr(y|ying)\b/.test(h) ? 'for frying' : '';
+        return tag && !new RegExp(`\\b${tag}\\b`, 'i').test(line) ? `${line} (${tag})` : line;
+    }
     // strict: the line has an amount (a list starts with one); otherwise a short food line ("Ice",
     // "Salt", "Lard or vegetable oil for frying") counts too, inside a list.
     function isIngLine(raw, strict) {
@@ -210,11 +219,12 @@
             // The ingredients: a run of ingredient lines; group labels ("A"), "For the sauce:" and
             // blank lines in between are fine; a line that wraps is joined to the one before.
             const ingredients = [];
+            let group = '';
             let j = i;
             for (; j < n; j++) {
                 const l = lines[j];
-                if (!l || LABEL.test(l) || ING_HEAD.test(l) || /^(for (the|a)\b.{0,40}|[A-Za-z ]{3,30}):$/i.test(l)) continue;
-                if (isIngLine(l) && !(titleish(l) && !isIngLine(l, true) && ingRunSoon(j + 1, 6) && !ingredients.length)) { ingredients.push(stripLabel(l)); continue; }
+                if (!l || LABEL.test(l) || ING_HEAD.test(l) || /^(for (the|a)\b.{0,40}|[A-Za-z ]{3,30}):$/i.test(l)) { if (l && !LABEL.test(l)) group = l; continue; }
+                if (isIngLine(l) && !(titleish(l) && !isIngLine(l, true) && ingRunSoon(j + 1, 6) && !ingredients.length)) { ingredients.push(groupLabel(stripLabel(l), group)); continue; }
                 if (ingredients.length && /^[a-z(]/.test(l) && l.length < 50 && !isStepLine(l)) { ingredients[ingredients.length - 1] += ' ' + l; continue; }
                 break;
             }
@@ -722,7 +732,7 @@
         return out;
     }
 
-    const api = { techniqueNotes, bookKind, cleanTitle, cleanAuthor, titleFromFileName, parseRecipeText, parseLooseRecipes, findRecipesInText, prepareLines, recipesFromFile, refresh, allRecipes, kindOf, isReadme, passagesFrom, retrieve, pairingScore, terms };
+    const api = { groupLabel, techniqueNotes, bookKind, cleanTitle, cleanAuthor, titleFromFileName, parseRecipeText, parseLooseRecipes, findRecipesInText, prepareLines, recipesFromFile, refresh, allRecipes, kindOf, isReadme, passagesFrom, retrieve, pairingScore, terms };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishLibrary = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -180,6 +180,8 @@
             N.settle(r);
             if (!PL.flavorCheck(r).ok) { ctx.stats.bland++; return turnedAway(ctx, 'bland'); }
         }
+        // The site's own description, only where it describes this dish (planner.js cleanDescription).
+        if (r.description) { const d = PL.cleanDescription(r.description, r); if (d) r.description = d; else delete r.description; }
         r.sameAs = [PL.dishKey(r.name)];
         return r;
     }

@@ -45,7 +45,7 @@ const DINNER_DISH = /\b(ribs|short ribs?|pot roast|roast (chicken|turkey|beef|po
 const LUXURY = /\b(wagyu|kobe|caviar|truffles?(?! (cake|brownies?|balls?))|truffle oil|foie gras|lobster|langoustines?|king crab|abalone|sea urchin|uni\b|saffron|iberico|ib[eé]rico|bluefin|toro|morels?|dry[- ]aged|gold leaf)\b/i;
 const PRICEY = /\b(steaks?|rib[- ]?eye|filet mignon|tenderloin steak|sirloin|porterhouse|t-bone|tomahawk|rack of lamb|racks? of lamb|lamb chops?|lamb|veal|venison|scallops?|crab(meat)?|lobster|duck breast|halibut|sea bass|swordfish)\b/i;
 // Foods whose name changes what they are (a "bone" line isn't steak, a "marrow" line isn't beef).
-const NOUNS = /\b(marrow|bones?|ribs?|liver|livers|kidneys?|hearts?|tongue|tripe|oxtails?|cheeks?|shanks?|hocks?|trotters?|feet|necks?|gizzards?|skin|suet|tails?|wings?|drumsticks?|legs?|breasts?|thighs?|chops?|belly|shells?|heads?|tails)\b/gi;
+const NOUNS = /\b(marrow|bones?|ribs?|liver|livers|kidneys?|hearts?|tongue|tripe|oxtails?|cheeks?|shanks?|hocks?|trotters?|feet|necks?|gizzards?|suet|belly)\b/gi;
 const BONY = /\b(bone[- ]in|on the bone|shell[- ]on|in (the |their )?shells?|head[- ]on|whole (chicken|turkey|duck|fish|branzino|trout|snapper|bass)|marrow bones?|ribs|spare ?ribs|short ribs?|back ?ribs|rack of|racks? of|wings?|drumsticks?|leg quarters?|chicken legs?|shanks?|oxtails?|hocks?|t-bone|porterhouse|tomahawk|crab legs?|lobsters?\b(?! (meat|tails? meat))|mussels|clams|oysters)\b/i;
 const NOT_BONY = /\b(boneless|bone[- ]free|peeled|shelled|meat\b|fillets?|filets?|ground|minced|cooked .* meat|picked)\b/i;
 const ALLERGENS = {
@@ -100,7 +100,7 @@ function checkMeal(m, slot, ctx, add) {
     // --- Not really a meal ---
     const why = [];
     if (ARTICLE.test(name)) why.push('an article or guide');
-    if (APPETIZER.test(dish) || /\b(appeti[sz]ers?|starters?|small plates?|tapas|mezze|snacks?|nibbles)\b/i.test(cat) || /\b(as an? (appeti[sz]er|starter|snack|dip|spread)|spread (it )?on (the )?toast)\b/i.test(steps)) why.push('an appetizer or small plate');
+    if (APPETIZER.test(dish) || (/\b(appeti[sz]ers?|starters?|small plates?|tapas|mezze|snacks?|nibbles)\b/i.test(cat) && !/\b(main|dinner|lunch|breakfast|brunch|entr[eé]e)\b/i.test(cat)) || /\b(as an? (appeti[sz]er|starter|snack|dip|spread)|spread (it )?on (the )?toast)\b/i.test(steps)) why.push('an appetizer or small plate');
     if (SPREAD.test(dish) && !MEAL_WORDS.test(dish)) why.push('a spread or dip');
     if (DRINK.test(dish) && !/\b(smoothie bowl|tea[- ]smoked|tea eggs?)\b/i.test(dish) && !MEAL_WORDS.test(dish)) why.push('a drink');
     if (DESSERT.test(dish) && !NOT_DESSERT.test(dish) && !(slot === 'breakfast' && /\b(pancakes?|muffins?)\b/i.test(dish))) why.push('a dessert');
@@ -133,7 +133,7 @@ function checkMeal(m, slot, ctx, add) {
         if (!x.key) return;
         const hit = N.matchFood(x.line);
         const phrase = hit ? hit.phrase : x.key;
-        const words = String(U.splitIngredient(x.line).text || x.line).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/,.*$/, '').replace(/\b(bone|shell|skin|head)[- ](in|on)\b/g, ' ').replace(/\bboneless\b|\bskinless\b/g, ' ');
+        const words = String(U.splitIngredient(x.line).text || x.line).toLowerCase().replace(/\b(lettuce|romaine|palm|artichoke|celery|cabbage|little gem|gem)( lettuce)? hearts?\b|\bhearts? of (palm|romaine|lettuce|artichoke)\b|\b(celery|chard) ribs?\b|\b(rice|pasta|soup|chicken) bones? broth\b/g, ' ').replace(/\([^)]*\)/g, ' ').replace(/,.*$/, '').replace(/\b(bone|shell|skin|head)[- ](in|on)\b/g, ' ').replace(/\bboneless\b|\bskinless\b/g, ' ');
         const nouns = (words.match(NOUNS) || []).map(w => w.toLowerCase().replace(/s$/, ''));
         const covered = `${phrase} ${x.key}`.toLowerCase();
         const missing = nouns.filter(w => covered.indexOf(w) < 0 && !(w === 'breast' && /chicken|turkey|duck/.test(covered)) && !(w === 'thigh' && /chicken/.test(covered)));
@@ -177,7 +177,8 @@ function checkMeal(m, slot, ctx, add) {
         const isOil = /\b(oil|lard|shortening|fat)\b/i.test(l);
         const frying = isOil && (/\bfor (deep[- ]?)?frying\b|\bto fry\b|\bdeep[- ]?fry/i.test(l) || (/\bdeep[- ]?fr(y|ied|ying)\b/i.test(steps) && it.qty != null && /^(cup|quart|pint|l|ml)$/.test(it.unit) && (it.unit !== 'cup' || it.qty >= 1)));
         if (frying && x.kcal > 150) add('discarded', 'fail', `"${l}" counted as ${x.kcal} kcal a serving (frying oil is mostly left in the pot)`);
-        const brineLine = /\bbrine|brining|soaking\b/i.test(l) || (brined && /\b(sugar|honey|molasses|maple)\b/i.test(l) && /\b(dissolve|stir)[^.]*\b(sugar|honey)\b[^.]*\b(water|brine)\b|\b(sugar|honey)\b[^.]*\binto the water\b/i.test(steps) && !/\b(rub|glaze|sauce)\b/i.test(l));
+        const packed = /\b(in|packed in|canned in) brine\b/i.test(l);
+        const brineLine = !packed && (/\bfor (the )?(brine|brining|soaking)\b|^brine:/i.test(l) || (brined && /\b(water|salt)\b/i.test(l) && /\b(cups?|quarts?|gallons?|liters?|litres?)\b/i.test(l) && /\b(dissolve|brine)\b/i.test(steps))) || (brined && /\b(sugar|honey|molasses|maple)\b/i.test(l) && /\b(dissolve|stir)[^.]*\b(sugar|honey)\b[^.]*\b(water|brine)\b|\b(sugar|honey)\b[^.]*\binto the water\b/i.test(steps) && !/\b(rub|glaze|sauce)\b/i.test(l));
         if (brineLine && x.kcal > 5) add('discarded', 'fail', `"${l}" counted as ${x.kcal} kcal a serving, but it's in the brine, which is thrown away`);
     });
 
@@ -198,9 +199,12 @@ function checkMeal(m, slot, ctx, add) {
     if (!d) add('description', 'fail', 'no description');
     else {
         const problem = O.descriptionProblem(d, m);
-        if (problem) add('description', 'fail', `"${d}": ${problem}`);
+        if (problem && (m.description_made || /cut off|too short/.test(problem))) add('description', 'fail', `"${d}": ${problem}`);
+        const invented = inventedFood(d, m);
+        if (invented) add('description', 'fail', `"${d}": mentions ${invented}, which isn't in the recipe`);
+        if (/\b(recipe video|jump to|click|subscribe|this post|affiliate|pin (it|this)|scroll down|printable)\b/i.test(d)) add('description', 'fail', `"${d}": website text, not a description of the dish`);
         if (/\b\d+(\.\d+)?\s*(cups?|tbsp|tsp|tablespoons?|teaspoons?|pounds?|lbs?|oz|ounces?|grams?|g|kg|gallons?|quarts?|pints?|liters?|litres?|ml)\b|\b(gallons?|quarts?|pints?)\b/i.test(d)) add('description', 'fail', `"${d}": reads like an ingredient list (amounts and units)`);
-        if (/\b(water|brine|kosher salt|sea salt|for (deep )?frying|ice)\b/i.test(d)) add('description', 'fail', `"${d}": mentions water, salt, brine or frying oil, not the dish`);
+        if (/\b(brine|kosher salt|sea salt|for (deep )?frying|cold water|gallon)\b/i.test(d) || (m.description_made && /\b(water|ice)\b/i.test(d))) add('description', 'fail', `"${d}": mentions water, salt, brine or frying oil, not the dish`);
         const foodWords = new Set(`${name} ${own(m).join(' ')}`.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3));
         if (!d.toLowerCase().split(/[^a-z]+/).some(w => w.length > 3 && foodWords.has(w))) add('description', 'fail', `"${d}": doesn't mention anything in the dish`);
         if (d.length < 25) add('description', 'fail', `"${d}": too short to describe the dish`);
@@ -251,7 +255,7 @@ function auditPlan(res, scenario) {
             const twin = seen.find(x => PL.sameDish(x.name, m.name) && !(m.leftover && s.allow_leftovers === 'on'));
             if (twin) add('repeats', 'fail', `the same dish as day ${twin.day} ${twin.slot} ("${twin.name}")`);
             seen.push({ name: m.name, day: d + 1, slot });
-            const k = PL.sourceKey(m);
+            const k = m.builtin || m.quick || m.source_id === 'builtin' ? 'builtin' : PL.sourceKey(m);
             (sources[k] = sources[k] || []).push(`day ${d + 1} ${slot}`);
         });
         (day.snacks || []).forEach(m => {
@@ -284,6 +288,18 @@ function auditPlan(res, scenario) {
         findings.push({ check: 'builtin', severity: builtins.length > 3 && withOthers.length >= 2 ? 'fail' : 'note', day: 0, slot: 'week', name: '', source: 'builtin', detail: msg });
     }
     return { findings, fails: findings.filter(f => f.severity === 'fail').length };
+}
+// A real food named in a description that the recipe doesn't have (the nutrition table's foods).
+let FOOD_WORDS = null;
+function inventedFood(d, m) {
+    if (!FOOD_WORDS) {
+        FOOD_WORDS = new Set();
+        Object.keys(N.FOODS).forEach(k => [k].concat(N.FOODS[k].a || []).forEach(w => { const t = String(w).toLowerCase(); if (/^[a-z]+$/.test(t) && t.length > 3) FOOD_WORDS.add(t.replace(/(es|s)$/, '')); }));
+        ['water', 'salt', 'pepper', 'spice', 'herb', 'sauce', 'dressing', 'seasoning', 'fresh', 'sweet', 'green', 'white', 'black', 'red', 'yellow', 'whole', 'light', 'plain', 'meat', 'fruit', 'veggie', 'vegetable', 'protein', 'grain', 'bread', 'cream', 'stock', 'broth', 'juice', 'syrup', 'flour', 'roll', 'chip', 'crisp', 'butter', 'nut', 'seed', 'bean', 'dip', 'snack', 'leaf', 'loaf'].forEach(w => FOOD_WORDS.delete(w));
+    }
+    const have = `${m.name || ''} ${(m.ingredients || []).join(' ')} ${(m.steps || []).join(' ')}`.toLowerCase();
+    const word = String(d).toLowerCase().split(/[^a-z]+/).map(w => w.replace(/(es|s)$/, '')).find(w => FOOD_WORDS.has(w) && have.indexOf(w) < 0);
+    return word || '';
 }
 function sourceName(m) { return m.from_book ? `book: ${m.book}` : m.builtin || m.source_id === 'builtin' ? 'Nourish' : m.quick ? 'Nourish (quick)' : m.source_name || m.source_id || 'other'; }
 

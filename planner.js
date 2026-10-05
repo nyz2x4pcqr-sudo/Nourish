@@ -19,13 +19,18 @@
     // === MEAL TYPES ===
     const BREAKFAST = /\b(breakfast|brunch|oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|crepes?|french toast|omelet+e?s?|frittatas?|scrambled?|scramble|eggs? benedict|shakshuka|smoothie|parfait|yogh?urt bowl|chia (seed )?pudding|muffins?|scones?|breakfast burrito|avocado toast|toast|bagels?|hash browns?|huevos|congee|egg (muffin|cup|bite)s?|egg bake|breakfast bowl|overnight|acai|quiche|dutch baby|cr[eê]pe)\b/i;
     const ONLY_BREAKFAST = /\b(oat|oats|oatmeal|porridge|granola|muesli|bircher|pancakes?|waffles?|french toast|smoothie|parfait|chia (seed )?pudding|muffins?|scones?|overnight|acai|cereal)\b/i;
-    const DESSERT = /\b(cake|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
+    const DESSERT = /\b(cakes?|cupcakes?|cookies?|brownies?|blondies?|fudge|candy|frosting|icing|cheesecake|tart|pie crust|ice cream|sorbet|gelato|truffles?|macarons?|meringue|tiramisu|mousse|pudding|cobbler|crumble|custard|donuts?|doughnuts?|cinnamon rolls?|sweet rolls?|dessert)\b/i;
     const NOT_DESSERT = /\b(chia( seed)? pudding|protein pudding|overnight|yorkshire pudding|black pudding|bread pudding|pot pie|shepherd'?s pie|chicken pie|cottage pie|savou?ry|rice cakes?|crab cakes?|fish cakes?|salmon cakes?|tuna cakes?|potato cakes?|pancakes?)\b/i;
     const DINNER_ONLY = /\b(curry|curries|tikka|masala|korma|vindaloo|biryani|roast|roasted (chicken|lamb|pork|beef)|stew|braise[d]?|chops?|steaks?|ribs|lasagna|lasagne|casserole|tagine|pasanda|jalfrezi|rogan josh|goulash|hotpot|cottage pie|shepherd'?s pie|meatloaf|pot roast|bolognese|pot pie|enchiladas|paella|risotto|stroganoff|carbonara|lamb|brisket|pulled pork|short rib)\b/i;
     // Fine for dinner, too much for a quick lunch.
     const HEAVY_LUNCH = /\b(baked (pasta|ziti|penne|rigatoni|macaroni|mac|spaghetti|gnocchi)|pasta bake|mac and cheese bake|stuffed shells|manicotti|cannelloni|pot roast|roast (chicken|turkey|lamb|pork|beef|duck)|whole (chicken|fish|turkey)|beef wellington|pie|gratin|moussaka|pastitsio|osso buco|cassoulet|coq au vin|bourguignon|slow cooker|crock ?pot|braised)\b/i;
-    const NOT_A_MEAL = /\b(sauce|dressing|dip|marinade|seasoning|spice (mix|blend)|stock|broth|syrup|jam|butter|vinaigrette|gravy|salsa|pesto|chutney|pickle[sd]?|drink|cocktail|mocktail|lemonade|tea|coffee|latte|juice|bread|loaf|rolls|buns|crackers|croutons|bars|bites|energy balls|protein balls|trail mix|popcorn|chips)$/i;
-    const SIDE = /\b(side|sides|side dish|appetizers?|starters?|snacks?)\b/i;
+    const NOT_A_MEAL = /\b(sauce|dressing|dip|hummus|houmous|guacamole|tapenade|baba ganou?sh|tzatziki|spread|marinade|seasoning|spice (mix|blend)|stock|broth|syrup|jam|butter|vinaigrette|gravy|salsa|pesto|chutney|pickle[sd]?|drink|cocktail|mocktail|lemonade|tea|coffee|latte|juice|bread|loaf|rolls|buns|crackers|croutons|bars|bites|energy balls|protein balls|trail mix|popcorn|chips)$/i;
+    const SIDE = /\b(side|sides|side dish|appetizers?|starters?|snacks?|small plates?|tapas|mezze|meze|hors d'?oeuvres?|canap[eé]s?|nibbles|finger food|party food)\b/i;
+    // Starters and small plates by what they are, whatever the book's chapter: roasted bone marrow
+    // (0.1.12 planned it as a lunch), pâté, crostini, deviled eggs.
+    const APPETIZER = /\b(bone marrow|marrow bones?|crostini|bruschetta|canap[eé]s?|p[aâ]t[eé]s?|terrines?|rillettes|deviled eggs|devilled eggs)\b/i;
+    // The recipe itself says it's a side or a starter.
+    const SERVED_AS_SIDE = /\b(serve|served|serving) (it |them )?as an? (side( dish)?|starter|appeti[sz]er|dip|snack)\b|\bas a side dish\b/i;
     // Parts of a meal, not a meal: eggs marinated or boiled to go with something, "how to cook…".
     const COMPONENT = /\b(marinated|pickled|deviled|devilled|hard[- ]?boiled|soft[- ]?boiled|jammy|soy[- ]sauce|tea|ramen|mayak|onsen|scotch) eggs?\b|\bhow to (cook|make|boil|poach|fry|store|freeze)\b/i;
     // A savoury porridge or congee with meat or fish is a lunch or dinner, not a breakfast.
@@ -58,6 +63,11 @@
         const mealCat = /breakfast|brunch|lunch|dinner|main|entr[eé]e|supper/.test(cat);
         if ((DESSERT.test(name) && !NOT_DESSERT.test(name)) || (/dessert|baking|treat/.test(cat) && !mealCat)) return { breakfast: false, lunch: false, dinner: false, why: 'a dessert' };
         if (COMPONENT.test(name)) return { breakfast: false, lunch: false, dinner: false, why: 'a side or component, not a meal' };
+        if (APPETIZER.test(name.replace(/\s+(with|in|on|over|served with)\s+.*$/i, ''))) return { breakfast: false, lunch: false, dinner: false, why: 'a starter or small plate, not a meal' };
+        if (SERVED_AS_SIDE.test((r.steps || []).join(' '))) return { breakfast: false, lunch: false, dinner: false, why: 'a side or starter (its recipe says so), not a meal' };
+        // Mostly fat with hardly any protein (a spread, a starter like bone marrow): never a meal.
+        const n0 = r.nutrition;
+        if (n0 && Number(n0.calories) > 0 && (Number(n0.protein_g) || 0) * 4 / n0.calories < 0.08 && (Number(n0.fat_g) || 0) * 9 / n0.calories > 0.6) return { breakfast: false, lunch: false, dinner: false, why: 'mostly fat with little protein (a starter or spread), not a meal' };
         // "Salmon Tacos with Mango Salsa" is tacos and "Eggs in Spicy Tomato Sauce" is eggs: only the
         // dish itself counts, not what it comes with or in.
         const dish = name.replace(/\s+(with|in|on|over|served with|and a side of)\s+.*$/i, '').trim();
@@ -80,7 +90,7 @@
         const hasProtein = !!mainProtein(r);
         return {
             breakfast: brk && !heavy,
-            lunch: !onlyBrk && !side && !sweetHeavy && !heavy && !HEAVY_LUNCH.test(name) && (hasProtein || /salad|soup|bowl|wrap|sandwich|pita|quesadilla|hummus|pasta|noodle|grain|lentil|bean|chickpea/i.test(name) || /\blunch\b/.test(cat)),
+            lunch: !onlyBrk && !side && !sweetHeavy && !heavy && !HEAVY_LUNCH.test(name) && (hasProtein || /salad|soup|bowl|wrap|sandwich|pita|quesadilla|pasta|noodle|grain|lentil|(?<!green |string |runner |french )bean|chickpea/i.test(name) || /\blunch\b/.test(cat)),
             // A curry, stew, roast or pie is a dinner by what it is, with or without meat.
             dinner: !onlyBrk && !side && !sweetHeavy && (hasProtein || mainDish),
             why: heavy && brk ? 'a dinner dish' : '',
@@ -103,8 +113,14 @@
     const HARD = /\b(deep[- ]?fr|knead|dough|proof|laminat|temper(ed|ing)? (the )?chocolate|caramel|sous vide|butterfl(y|ied)|debone|truss|flamb|souffl|reduce by half|candy thermometer|pressure cook|pipe the)\b/i;
     const HEAT = /\b(bake|baked|baking|oven|roast|fry|fried|frying|sear|saut[eé]|simmer|boil|grill|broil|steam|poach|cook|heat|stove|skillet|pan|microwave|preheat)\b/i;
     const PASSIVE = /\b(overnight|refrigerate|chill|soak|marinate|rest|set|freeze|cool)\b/i;
+    // What the nutrition rules added to a recipe (a side of broccoli, Greek yogurt) isn't part of
+    // its work: a lunch doesn't become "Involved" or too slow because of it.
+    const ruleSteps = () => new Set([].concat(...Object.values(BOOSTERS).map(list => list.map(b => b[3])), ...Object.values(FIBER_BOOSTERS).map(list => list.map(b => b[1]))));
+    let RULE_STEPS = null;
+    function ownSteps(r) { RULE_STEPS = RULE_STEPS || ruleSteps(); return (r.steps || []).map(String).filter(st => !RULE_STEPS.has(st)); }
     function countIngredients(r) {
-        return (r.ingredients || []).filter(l => {
+        const added = new Set([].concat(r.protein_added || [], r.fiber_added || []));
+        return (r.ingredients || []).filter(l => !added.has(l)).filter(l => {
             const name = String(l).toLowerCase().replace(/\([^)]*\)/g, '').replace(/^[\d\s/.½¼¾⅓⅔-]+(cups?|tbsp|tsp|tablespoons?|teaspoons?|g|ml|oz|lb|pinch|dash)?\s*(of\s+)?/, '').replace(/,.*$/, '').trim();
             return name && !STAPLES.test(name) && !/\bto taste\b|for serving|for garnish|optional/.test(String(l).toLowerCase());
         }).length;
@@ -121,7 +137,7 @@
         return { active, passive };
     }
     function recipeProfile(r) {
-        const steps = (r.steps || []).map(String);
+        const steps = ownSteps(r);
         const text = `${r.name || ''} ${steps.join(' ')}`;
         const techniques = TECHNIQUES.filter(([, re]) => re.test(text)).map(([name, , min]) => ({ name, min }));
         const ingredients = countIngredients(r);
@@ -213,6 +229,8 @@
             if (cooking.length || /\b(cook|heat|stove|skillet|preheat)\b/i.test((r.steps || []).join(' '))) return `needs cooking (${cooking[0] || 'heat'}), and this meal is no-cook`;
         }
         if (p.minutes > timeAllowed(L)) return `takes about ${p.minutes} min${p.timeEstimated ? ' (estimated)' : ''}; ${meal} has ${L.minutes} min`;
+        // "Involved" (the recipe screen's label over 6 of 10) is for dinner, or a meal with no rush.
+        if (meal !== 'dinner' && p.difficulty > Math.max(6, L.difficulty + 0.5)) return `is involved (difficulty ${p.difficulty} of 10): too much work for ${meal}`;
         if (meal !== 'dinner') { const x = pricey(r); if (x) return `has ${x}, an expensive ingredient kept for dinner`; }
         return '';
     }
@@ -242,7 +260,7 @@
         'ground beef': 'beef', 'lean ground beef': 'beef', 'beef steak': 'beef', 'beef stew meat': 'beef', 'pork tenderloin': 'pork', 'pork chop': 'pork', 'ground pork': 'pork',
         'pork shoulder': 'pork', bacon: 'pork', ham: 'pork', sausage: 'pork', chorizo: 'pork', lamb: 'lamb', 'lamb chop': 'lamb', 'ground lamb': 'lamb',
         salmon: 'salmon', 'smoked salmon': 'salmon', tuna: 'tuna', 'tuna steak': 'tuna', cod: 'white fish', tilapia: 'white fish', shrimp: 'shrimp', scallops: 'shellfish',
-        mussels: 'shellfish', crab: 'shellfish', sardines: 'oily fish', egg: 'egg', 'egg white': 'egg', tofu: 'tofu', tempeh: 'tempeh', chickpeas: 'chickpeas',
+        mussels: 'shellfish', crab: 'shellfish', lobster: 'shellfish', clams: 'shellfish', 'pork ribs': 'pork', 'beef short ribs': 'beef', oxtail: 'beef', sardines: 'oily fish', egg: 'egg', 'egg white': 'egg', tofu: 'tofu', tempeh: 'tempeh', chickpeas: 'chickpeas',
         'black beans': 'beans', 'kidney beans': 'beans', 'white beans': 'beans', 'pinto beans': 'beans', lentils: 'lentils', 'cooked lentils': 'lentils', edamame: 'soybeans',
         'greek yogurt': 'yogurt', 'cottage cheese': 'cottage cheese', 'protein powder': 'protein powder', halloumi: 'cheese', paneer: 'cheese',
     };
@@ -371,6 +389,7 @@
         if (!changed) return null;
         out.steps = (r.steps || []).map(st => { re.lastIndex = 0; return String(st).replace(re, sub); });
         out.adapted = (r.adapted || []).concat([`${term} → ${sub}`]);
+        if (out.description) { const d = cleanDescription(out.description, out); if (d) out.description = d; else delete out.description; }
         delete out._lines; delete out.nutrition; delete out._fit;
         return out;
     }
@@ -468,13 +487,18 @@
     // Realistic portions: a quarter of a serving at a time, between half and double. Days get near
     // the target by choosing meals that fit, then these small changes; never an odd ×1.37.
     const PORTIONS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-    function portionOptions(f) {
+    function portionOptions(f, base = 1) {
         // The realistic portions near what's needed (rounded amounts don't always move the
         // calories, so a few are tried), and the recipe as written when it's close.
-        const out = PORTIONS.filter(p => p >= f * 0.7 && p <= f * 1.4);
-        if (!out.length) out.push(snapPortion(Math.max(0.5, Math.min(2, f))));
-        if (Math.abs(Math.log(f)) < Math.log(1.3)) out.push(1);
-        return [...new Set(out)];
+        // base: the portion a meal already is (a day sized again). What comes out is always a
+        // cookable portion in the end (base × option is ½, ¾, 1, 1¼…): 0.1.12 multiplied two
+        // portions together (1¾ × ¾) and showed "1.31 servings".
+        const b = Number(base) > 0 ? Number(base) : 1;
+        const want = f * b;
+        let totals = PORTIONS.filter(p => p >= want * 0.7 && p <= want * 1.4);
+        if (!totals.length) totals.push(snapPortion(Math.max(0.5, Math.min(2, want))));
+        if (Math.abs(Math.log(f)) < Math.log(1.3) && PORTIONS.some(p => Math.abs(p - b) < 0.01)) totals.push(b);
+        return [...new Set(totals.map(t => t / b))];
     }
     function snapPortion(f) { return PORTIONS.reduce((a, b) => (Math.abs(Math.log(b / f)) < Math.abs(Math.log(a / f)) ? b : a), 1); }
     // Sizes a day's meals together: for each, the realistic portions around what its share of the day
@@ -482,7 +506,7 @@
     // recipes as written). Totals are never forced or rounded to the target.
     // items: [{ key, r, want }] (r with settled numbers, want: its kcal share). fixed: kcal already in the day.
     function sizeMeals(items, target, people, fixed = 0) {
-        const choices = items.map(it => portionOptions(it.want / it.r.nutrition.calories).map(p => {
+        const choices = items.map(it => portionOptions(it.want / it.r.nutrition.calories, it.base).map(p => {
             const out = scaleRecipe(it.r, p, people);
             if (Math.abs(p - 1) < 0.01 && Number(it.r.servings) === people) delete out.scaled;
             return { p, out };
@@ -775,8 +799,10 @@
         if (!n || !(kcal > 0)) return r;
         trimAndRecount(r, kcal);
         const want = Math.max(n * 0.6, n - kcal);
-        const f = Math.min(1, Math.max(0.75, snapPortion(want / r.nutrition.calories)));   // ¾ at the least: still a meal
-        const prev = meal.scaled ? meal.scaled.portion : 1;
+        const prev = meal.scaled ? Number(meal.scaled.portion) || 1 : 1;
+        // A cookable portion in the end (prev × f is ½, ¾, 1…), ¾ of what it was at the least: still a meal.
+        const total = PORTIONS.filter(p => p <= prev + 1e-9 && p >= prev * 0.75 - 1e-9).reduce((a, p) => (Math.abs(Math.log(p / (prev * want / r.nutrition.calories))) < Math.abs(Math.log(a / (prev * want / r.nutrition.calories))) ? p : a), snapPortion(prev));
+        const f = Math.min(1, total / prev);
         const out = scaleRecipe(Object.assign({}, r, { servings: people || r.servings || 1 }), f, people || r.servings || 1);
         out.scaled = { from_servings: (meal.scaled && meal.scaled.from_servings) || r.servings || 1, portion: Math.round(prev * f * 100) / 100 };
         return out;
@@ -798,7 +824,7 @@
             // Already sized (amounts are for `people`): work from one serving as it stands.
             if (copy.scaled) copy.servings = people || Number(copy.servings) || 1;
             if (kcal / copy.nutrition.calories < 0.85) trimAndRecount(copy, copy.nutrition.calories - kcal / 0.85);
-            items.push({ key: m, r: copy, want: kcal, prev: r });
+            items.push({ key: m, r: copy, want: kcal, prev: r, base: r.scaled ? Number(r.scaled.portion) || 1 : 1 });
         });
         const sized = sizeMeals(items, Math.max(1, targets.kcal - fixed), people || 1);
         items.forEach(it => {
@@ -896,24 +922,75 @@
     // more eggs or egg whites, a lunch or dinner lean chicken, tofu or tuna. Anything the person
     // avoids, is allergic to or doesn't eat (diet) is never used. `need`: grams of protein per person.
     const BOOSTERS = {
-        sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.']],
+        sweet: [['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.']],
         savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.']],
+        // Only for a dish with no main protein of its own (a pasta, a salad, a grain bowl): a side
+        // that suits it. Plant dishes get plant protein.
         main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 4.9, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 5.4, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.']],
+        plant: [['firm tofu', 'oz', 4.9, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.'], ['chickpeas', 'cup', 15, 'Warm the chickpeas and stir them in.']],
     };
     const SWEET_BREAKFAST_DISH = /\b(smoothie|shake|oat|oats|oatmeal|porridge|granola|muesli|bircher|chia|yogh?urt|parfait|pancakes?|waffles?|crepes?|muffins?|fruit|acai|bowl|toast with (jam|honey|nut))\b/i;
+    const ANIMAL = /\b(chicken|beef|pork|lamb|turkey|duck|veal|bacon|ham|sausages?|chorizo|steak|mince|fish|salmon|tuna|cod|shrimp|prawns?|crab|lobster|scallops?|mussels|clams|anchov)/i;
+    // Protein the recipe has of its own, per serving: what the app added for a rule left out.
+    function ownProtein(meal) {
+        const total = Number(meal && meal.nutrition && meal.nutrition.protein_g) || 0;
+        const added = ((meal && meal.protein_added) || []).filter(l => !/^a bit more\b/i.test(l));
+        if (!added.length) return total;
+        return total - N.calculate(added, Math.max(1, Number(meal.servings) || 1)).nutrition.protein_g;
+    }
+    // A bit more of the dish's own protein (its main protein's line, up to half as much again):
+    // "a bit more chicken thighs", never a different meat added to the plate.
+    function moreOfItsOwn(meal, need, n) {
+        const lines = N.calculate(meal.ingredients || [], n).lines;
+        let best = -1, bestGrams = 0;
+        (meal.ingredients || []).forEach((l, i) => { const x = lines.find(y => y.line === l); if (x && PROTEIN[x.key] && x.grams > bestGrams && U.splitIngredient(l).qty != null) { best = i; bestGrams = x.grams; } });
+        if (best < 0) return null;
+        const old = meal.ingredients[best];
+        const per = N.calculate([old], n).nutrition;
+        if (!(per.protein_g > 2)) return null;
+        const line = scaleLine(old, Math.min(1.5, 1 + need / per.protein_g));
+        if (line === old) return null;
+        const now = N.calculate([line], n).nutrition;
+        const out = JSON.parse(JSON.stringify(meal));
+        out.ingredients[best] = line;
+        const nu = out.nutrition || {};
+        ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(key => { nu[key] = Math.max(0, Math.round((Number(nu[key]) || 0) + (now[key] || 0) - (per[key] || 0))); });
+        out.nutrition = nu;
+        out.protein_added = (out.protein_added || []).concat(`a bit more of its own: ${line}`);
+        delete out._lines;
+        return out;
+    }
     function boostProtein(meal, need, mealType, people = 1, exclude) {
         if (!meal || !(need > 0.5)) return meal;
-        const kind = mealType !== 'breakfast' ? 'main' : SWEET_BREAKFAST_DISH.test(meal.name || '') && !/\b(eggs?|savou?ry|masala|indian|peas|tomato|cheese|spinach|bean|congee|upma|poha)\b/i.test(meal.name || '') ? 'sweet' : 'savory';
         const n = Math.max(1, Number(meal.servings) || people || 1);
+        const own = ownProtein(meal);
+        // A dish that isn't a meal on its own (under 15 g of protein at lunch or dinner, 8 g at
+        // breakfast) is never patched with added protein: 0.1.12 added chicken breast to roasted
+        // bone marrow. What's added is never more than the dish's own protein.
+        const kcal = Number(meal.nutrition && meal.nutrition.calories) || 0;
+        const already = (Number(meal.nutrition && meal.nutrition.protein_g) || 0) - own;
+        if (mealType === 'breakfast' ? own < 8 : own < 12 || (kcal > 0 && own * 4 / Math.max(1, kcal - already * 4) < 0.1)) return meal;
+        need = Math.min(need, own - already);
+        if (!(need > 0.5)) return meal;
+        if (mealType !== 'breakfast') {
+            const main = mainProtein(Object.assign({}, meal, { _lines: undefined }));
+            if (main && !(meal.protein_added || []).some(l => /^a bit more\b/.test(l))) { const more = moreOfItsOwn(meal, need, n); if (more) return more; }
+            if (main) return meal;   // never a different protein on a dish that has its own
+        }
+        const text = `${meal.name || ''} ${(meal.ingredients || []).join(' ')}`;
+        const kind = mealType !== 'breakfast' ? (ANIMAL.test(text) ? 'main' : 'plant') : SWEET_BREAKFAST_DISH.test(meal.name || '') && !/\b(eggs?|savou?ry|masala|indian|peas|tomato|cheese|spinach|bean|congee|upma|poha)\b/i.test(meal.name || '') ? 'sweet' : 'savory';
         for (const [food, unit, perUnit, step] of BOOSTERS[kind]) {
-            if ((meal.protein_added || []).some(l => l.indexOf(food) >= 0)) continue;   // a different food each time: variety, never a second scoop line
+            const word = food.replace(/s$/, '');
+            if ((meal.protein_added || []).some(l => l.indexOf(word) >= 0)) continue;   // a different food each time: variety, never a second scoop line
             // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces.
             const units = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
+            if (units * perUnit > own + 2) continue;   // more than the dish's own protein: something smaller
             const qty = units * n;
-            const line = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}${unit === '' && qty === 1 ? '' : ''}`.replace(/^1 eggs$/, '1 egg');
+            const line = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}`.replace(/^1 eggs$/, '1 egg');
             if (exclude && exclude({ name: food, ingredients: [line] })) continue;
             const add = N.calculate([line], n);
             if (!(add.nutrition.protein_g > 0)) continue;
+            if (add.nutrition.protein_g > own - already + 1) continue;   // never more than the dish's own protein
             const out = JSON.parse(JSON.stringify(meal));
             out.ingredients = (out.ingredients || []).concat(line);
             out.steps = (out.steps || []).concat(step);
@@ -1015,12 +1092,17 @@
     // butter sauce, mash or toast). Same amount; the steps say oil too.
     const SOLID_FAT = /\b(unsalted butter|salted butter|butter|lard|shortening|bacon fat|bacon grease|dripping|beef dripping)\b/i;
     const NEEDS_BUTTER = /\b(cakes?|cookies?|biscuits?|scones?|pastry|pastries|pies?|tarts?|crusts?|muffins?|brownies?|croissants?|shortbread|frosting|buttercream|beurre|hollandaise|b[eé]arnaise|roux|b[eé]chamel|mash(ed)?|toast|grilled cheese|pancakes?|waffles?|crumble|crumbs|butter chicken|ghee|garlic butter|brown butter|compound butter|dumplings?|biscuit|cornbread|bread)\b/i;
-    function fatSwap(meal) {
+    function fatSwap(meal, exclude) {
         if (!meal || NEEDS_BUTTER.test(meal.name || '')) return meal;
         const steps = (meal.steps || []).join(' ');
         if (/\b(cream (the )?butter|cold butter|softened butter|cut in the butter|rub (in )?the butter|knob of butter to finish|finish with (a )?(knob of )?butter|brush(ed)? with (melted )?butter)\b/i.test(steps) || NEEDS_BUTTER.test(steps)) return meal;
-        const idx = (meal.ingredients || []).findIndex(l => SOLID_FAT.test(l) && !/\b(peanut|almond|cashew|nut|apple|cocoa|shea) butter\b/i.test(l));
+        // Butter the fat, not butter lettuce, butter beans, buttermilk or butternut squash (0.1.12 turned
+        // "1 head butter lettuce" into half a head of olive oil: a 2,900 kcal lunch).
+        const NOT_FAT = /\b(peanut|almond|cashew|nut|apple|cocoa|shea|sunflower|seed) butter\b|\bbutter (lettuce|beans?|head|leaf|chicken)\b|\bbutter(milk|nut|scotch|cream frosting)\b/i;
+        const idx = (meal.ingredients || []).findIndex(l => SOLID_FAT.test(l.replace(/\bbutter(milk|nut|scotch)\b/gi, '')) && !NOT_FAT.test(l));
         if (idx < 0) return meal;
+        // Never swap in something the person avoids (olive oil, for someone who avoids olives).
+        if (exclude && exclude({ name: 'olive oil', ingredients: ['1 tbsp olive oil'] })) return meal;
         const old = meal.ingredients[idx];
         const line = old.replace(SOLID_FAT, 'olive oil');
         const before = N.calculate([old], meal.servings || 1).nutrition, after = N.calculate([line], meal.servings || 1).nutrition;
@@ -1092,14 +1174,17 @@
         let cur = Object.assign({}, day);
         if (fatSwapOn) MEALS.forEach(t => {
             const m = cur[t];
-            const swapped = m && !m.fat_swapped ? fatSwap(m) : m;
+            const swapped = m && !m.fat_swapped ? fatSwap(m, exclude) : m;
             if (swapped !== m) { cur[t] = swapped; notes.push(`${t} "${m.name}": ${swapped.fat_swapped}`); }
         });
         const fiber = balanceFiber(cur, settings, people, exclude);
         notes.push(...fiber.notes);
         const protein = balanceProtein(fiber.day, settings, people, exclude);
         notes.push(...protein.notes);
-        return { day: protein.day, notes };
+        // Sizing for protein can shrink portions under the fiber again: checked once more.
+        const after = balanceFiber(protein.day, settings, people, exclude);
+        notes.push(...after.notes);
+        return { day: after.day, notes };
     }
 
     // === SNACKS ===
@@ -1228,6 +1313,84 @@
         return api;
     }
 
+    // === DESCRIPTIONS ===
+    // One sentence that says what the dish is. A website's own description is kept only where it
+    // describes the dish: no "Recipe video above.", no story, no amounts, nothing the recipe doesn't
+    // have (a site's "with cucumbers" after cucumbers were swapped out). Otherwise one is made from
+    // the recipe: its main foods, how it's cooked and how long it takes, never its ingredient list
+    // stitched together (0.1.12 described roasted bone marrow as "Beef marrow bones, gallon water and
+    // kosher salt").
+    const GENERIC = /^(recipe|recipes|easy|healthy|best|quick|simple|perfect|delicious|tasty|homemade|classic|meal|meals|dinner|lunch|breakfast|dish|dishes|family|style|ultimate|minute|minutes|with|from|this|that|your|make|made|serve|served|bowl|bowls|plate|baked|roasted|grilled|fresh|large|small|medium|whole|chopped|sliced|diced|minced|cups|cup|tbsp|tsp|pound|pounds|ounces|grams|optional|taste|about|into|plus|more|each|cooked|frozen|canned)$/;
+    let FOOD_VOCAB = null;
+    function foodVocab() {
+        if (FOOD_VOCAB) return FOOD_VOCAB;
+        FOOD_VOCAB = new Set();
+        Object.keys(N.FOODS || {}).forEach(k => [k].concat(N.FOODS[k].a || []).forEach(w => { const t = String(w).toLowerCase(); if (/^[a-z]+$/.test(t) && t.length > 3) FOOD_VOCAB.add(t.replace(/(es|s)$/, '')); }));
+        ['water', 'salt', 'pepper', 'spice', 'herb', 'sauce', 'dressing', 'seasoning', 'fresh', 'sweet', 'green', 'white', 'black', 'yellow', 'whole', 'light', 'plain', 'meat', 'fruit', 'veggie', 'vegetable', 'protein', 'grain', 'bread', 'cream', 'stock', 'broth', 'juice', 'syrup', 'flour', 'roll', 'chip', 'crisp', 'butter', 'seed', 'bean', 'dip', 'snack', 'leaf', 'loaf', 'spread'].forEach(w => FOOD_VOCAB.delete(w));
+        return FOOD_VOCAB;
+    }
+    const DESC_JUNK = /\b(recipe video|video (above|below)|jump to|click|subscribe|this post|affiliate|pin (it|this)|scroll (down|up)|printable|newsletter|sponsored|giveaway)\b/i;
+    const FIRST_PERSON = /\b(I|I'm|I've|I'd|my|me|we|our|us)\b/;
+    function recipeWords(r) {
+        return new Set(`${r.name || ''} ${(r.ingredients || []).join(' ')}`.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3 && !GENERIC.test(w)).map(w => w.replace(/(es|s)$/, '')));
+    }
+    function cleanDescription(desc, r) {
+        const text = String(desc || '').replace(/\s+/g, ' ').trim();
+        if (!text) return '';
+        const have = `${r.name || ''} ${(r.ingredients || []).join(' ')} ${(r.steps || []).join(' ')}`.toLowerCase();
+        const mine = recipeWords(r);
+        const vocab = foodVocab();
+        const kept = text.split(/(?<=[.!?])\s+/).filter(x => {
+            if (!/^[A-Z"']/.test(x) || !/[.!]$/.test(x) || x.length < 20) return false;
+            if (DESC_JUNK.test(x) || FIRST_PERSON.test(x)) return false;
+            if (/\b\d+(\.\d+)?\s*(g|grams?|kcal|calories|cups?|tbsp|tsp|oz|ounces?|pounds?|lbs?|minutes?|mins?)\b/i.test(x)) return false;
+            const words = x.toLowerCase().split(/[^a-z]+/).map(w => w.replace(/(es|s)$/, ''));
+            if (words.some(w => vocab.has(w) && have.indexOf(w) < 0)) return false;   // a food the recipe doesn't have
+            return words.some(w => w.length > 3 && mine.has(w));   // says something about this dish
+        });
+        const out = kept.slice(0, 2).join(' ');
+        return out.length > 260 ? kept[0] || '' : out;
+    }
+    const DESC_SKIP = /^(salt|kosher salt|sea salt|pepper|black pepper|water|ice|oil|olive oil|vegetable oil|canola oil|cooking spray|sugar|flour|baking powder|baking soda)$/;
+    const DESC_PREP = /\b(bone[- ]in|skin[- ]on|shell[- ]on|head[- ]on|boneless|skinless|large|medium|small|fresh|freshly|chopped|finely|roughly|thinly|sliced|diced|minced|grated|crushed|peeled|deveined|trimmed|halved|cubed|cooked|uncooked|raw|frozen|thawed|drained|rinsed|packed|lean|extra[- ]virgin|low[- ]sodium|plain|whole|ground|dried|toasted|softened|melted|cold|warm|hot|about|of|the|a|an)\b/gi;
+    const METHODS = [['roast', 'Roasted'], ['braise', 'Braised'], ['grill', 'Grilled'], ['deep-fr', 'Fried'], ['stir-fr', 'Stir-fried'], ['bake', 'Baked'], ['simmer', 'Simmered'], ['poach', 'Poached'], ['steam', 'Steamed'], ['fry', 'Pan-fried'], ['sear', 'Seared'], ['sauté', 'Sautéed'], ['saute', 'Sautéed'], ['blend', 'Blended']];
+    function foodName(line) {
+        const it = U ? U.splitIngredient(line) : { text: line };
+        // Brackets and how it's prepared first ("bone-in, skin-on chicken thighs"), then what follows a comma.
+        return String(it.text || line).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(DESC_PREP, ' ').replace(/^[\s,;-]+/, '').replace(/,.*$/, ' ').replace(/^(x\s*)?\d+(\.\d+)?\s*-?\s*(ounces?|oz|grams?|g|pounds?|lbs?)\b\.?(\s*\/\s*\d+\s*(oz|g))?/, ' ')
+            .replace(/^(cans?|tins?|jars?|packages?|bags?|racks?( of)?|heads?|bunch(es)?|sprigs?|stalks?|cloves?|slices?|pieces?|fillets?|handfuls?|pinch(es)?|dash(es)?)\b/, ' ')
+            .replace(DESC_PREP, ' ').replace(/\b(cloves?|leaves|sprigs?|florets?|chunks?|wedges?|pieces?|strips?)$/, ' ').replace(/[^a-z' -]/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+    const LIQUID = /\b(milk|buttermilk|broth|stock|wine|beer|juice|water|cream|vinegar)\b/;
+    function describe(r) {
+        if (!r || !r.name) return '';
+        const added = new Set([].concat(r.protein_added || [], r.fiber_added || []));
+        const lines = N.calculate((r.ingredients || []).filter(l => !added.has(l)), r.servings || 1).lines.filter(x => x.key && !x.discarded && !/frying/.test(x.assumed || '') && x.grams > 0);
+        const names = [];
+        const picked = [];
+        // The dish's main foods first: its protein, then the foods that bring most to it; liquids last.
+        const rank = x => (PROTEIN[x.key] ? 100000 : 0) + (LIQUID.test(x.key) ? -50000 : 0) + x.kcal * 10 + x.grams;
+        lines.slice().sort((a, b) => rank(b) - rank(a)).forEach(x => {
+            const n = foodName(x.line);
+            if (!n || n.length < 3 || DESC_SKIP.test(n) || /\b(water|salt|flour|sugar|oil|baking|for (the )?brine|for frying)\b/.test(n) || names.some(m => m === n || m.indexOf(n) >= 0 || n.indexOf(m) >= 0)) return;
+            names.push(n);
+            picked.push({ n, main: !!PROTEIN[x.key] || (x.kcal >= 25 && !LIQUID.test(`${x.key} ${n}`)) });
+        });
+        if (!names.length) return '';
+        const text = `${r.name} ${ownSteps(r).join(' ')}`.toLowerCase();
+        const method = METHODS.find(([stem]) => new RegExp(`\\b${stem.replace('-', '[- ]?')}`).test(text));
+        // Up to two main foods (what the dish is), then up to two that go with them (spices, a sauce).
+        const mains = picked.filter(p => p.main).slice(0, 2).map(p => p.n);
+        const main = mains.length ? mains : names.slice(0, 1);
+        const extra = names.filter(n => main.indexOf(n) < 0).slice(0, 2);
+        const list = a => (a.length > 1 ? `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}` : a[0]);
+        let sentence = `${method ? `${method[1]} ${list(main)}` : list(main).charAt(0).toUpperCase() + list(main).slice(1)}${extra.length ? ` with ${list(extra)}` : ''}`;
+        if (!method && !recipeProfile(r).cooked) sentence += ', no cooking needed';
+        const mins = Number(r.active_minutes) || Number(r.time_minutes) || recipeProfile(r).minutes || 0;
+        const time = mins ? ` Ready in about ${mins >= 90 ? `${Math.round(mins / 60 * 2) / 2} hours` : `${Math.max(5, Math.round(mins / 5) * 5)} minutes`}.` : '';
+        return `${sentence}.${time}`.slice(0, 200);
+    }
+
     // === DISH NAMES ===
     const DISH_WORDS = ('shakshuka shashlik sashimi teriyaki bulgogi bibimbap tikka masala korma biryani tagine paella risotto gnocchi frittata quesadilla enchilada fajita burrito taco ' +
         'gyoza ramen udon soba pho laksa satay larb curry stir fry casserole lasagna bolognese carbonara pesto minestrone gazpacho tabbouleh falafel shawarma souvlaki gyro hummus ' +
@@ -1261,7 +1424,7 @@
         }).join('');
     }
 
-    const api = { applyDayRules, weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { describe, cleanDescription, ownProtein, applyDayRules, weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -662,6 +662,8 @@ async function aiDescribe(run, meal) {
 const DESC_STAPLE = /^(salt|pepper|black pepper|water|oil|olive oil|vegetable oil|butter|sugar|flour|cooking spray|garlic|onion|kosher salt|sea salt|ice)$/i;
 function describeFromRecipe(meal) {
     if (!meal || !meal.name) return '';
+    // What the dish is (planner.js describe): its main foods, how it's cooked, how long it takes.
+    if (Planner && Planner.describe) { try { const made = Planner.describe(meal); if (made) return made; } catch (e) { /* the simple way below */ } }
     const names = (meal.ingredients || []).map(l => String(l).toLowerCase()
         .replace(/\([^)]*\)/g, ' ').replace(/,.*$/, '')
         .replace(/^[\d\s/.½¼¾⅓⅔-]+/, '')

@@ -9,7 +9,7 @@
     const Units = root.NourishUnits || (typeof require === 'function' ? require('./units.js') : null);
     const FOODS = root.NourishFoods || (typeof require === 'function' ? (() => { try { return require('./nutrition-data.js'); } catch (e) { return {}; } })() : {});
 
-    const ML = { tsp: 5, tbsp: 15, cup: 240, 'fl oz': 30, pint: 480, quart: 960, ml: 1, l: 1000 };
+    const ML = { tsp: 5, tbsp: 15, cup: 240, 'fl oz': 30, pint: 480, quart: 960, gallon: 3840, ml: 1, l: 1000 };
     const G = { oz: 28.35, lb: 453.6, g: 1, kg: 1000 };
     // Words that describe how an ingredient is cut or prepared, not what it is.
     const PREP = /\b(chopped|finely|roughly|coarsely|thinly|thickly|diced|minced|sliced|grated|shredded|crushed|peeled|seeded|deseeded|cored|trimmed|halved|quartered|cubed|julienned|torn|packed|loosely|lightly|heaping|level|rounded|softened|melted|room temperature|cold|warm|hot|cooked|uncooked|raw|fresh|freshly|frozen|thawed|drained|rinsed|and rinsed|divided|optional|to taste|for serving|for garnish|garnish|plus more|or more|as needed|about|approximately|large|medium|small|extra|boneless|skinless|skin-on|bone-in|organic|good quality|low[- ]sodium|reduced[- ]sodium|unsalted|salted|whole|ground|dried|toasted|roasted|fat[- ]free|lean|of|the|a|an)\b/g;
@@ -30,6 +30,12 @@
         'plain flour': 'flour', 'self raising flour': 'flour', 'self-raising flour': 'flour', 'wholemeal flour': 'flour', 'caster sugar': 'sugar', 'demerara sugar': 'brown sugar',
         'icing sugar': 'powdered sugar', 'beetroot': 'beet', 'beetroots': 'beet', 'back bacon': 'bacon', 'streaky bacon': 'bacon', 'gammon': 'ham', 'prawns': 'shrimp', 'king prawns': 'shrimp',
         'single cream': 'half and half', 'soured cream': 'sour cream', 'mince': 'ground beef', 'beef mince': 'ground beef', 'pork mince': 'ground pork', 'turkey mince': 'ground turkey', 'lamb mince': 'ground lamb',
+        // Cuts the table names differently (their bones are taken off below: EDIBLE).
+        'lamb shanks': 'lamb', 'lamb shank': 'lamb', 'rack of lamb': 'lamb chop', 'racks of lamb': 'lamb chop', 'lamb rack': 'lamb chop', 'lamb racks': 'lamb chop',
+        't-bone steaks': 'beef steak', 't-bone steak': 'beef steak', 't-bone': 'beef steak', 'porterhouse': 'beef steak', 'tomahawk': 'beef steak',
+        'ham hocks': 'pork shoulder', 'ham hock': 'pork shoulder', 'pork hocks': 'pork shoulder',
+        'branzino': 'cod', 'sea bass': 'cod', 'snapper': 'cod', 'red snapper': 'cod', 'whole fish': 'cod', 'sea bream': 'cod', 'white fish': 'cod',
+        'chicken pieces': 'chicken', 'chicken legs': 'chicken', 'chicken leg quarters': 'chicken', 'leg quarters': 'chicken',
         'tenderstem': 'broccoli', 'sweetcorn': 'corn', 'mangetout': 'snow peas', 'sugar snap peas': 'snow peas', 'chestnut mushrooms': 'mushrooms', 'baby plum tomatoes': 'cherry tomatoes',
     };
     // Common foods the USDA extract doesn't carry (per 100 g: kcal, protein, carbs, fat; USDA SR
@@ -46,11 +52,23 @@
         'yeast extract': { n: [260, 39, 24, 0.5, 3.5, 0, 70, 2600, 180], a: ['marmite', 'vegemite'], u: [[5, 'tsp']] },
         'creme fraiche': { n: [292, 2.4, 2.8, 30, 0, 0.3, 75, 100, 8], a: ['crème fraîche'], u: [[15, 'tbsp']] },
         'double cream': { n: [340, 2.8, 2.7, 36, 0, 1.6, 66, 95, 7], a: ['heavy cream', 'whipping cream'], u: [[15, 'tbsp'], [238, 'cup']] },
+        // Bone marrow is almost pure fat (USDA SR Legacy, bone marrow, raw). 0.1.12 read "beef marrow
+        // bones" as beef steak, whole bones and all: a fatty starter became a 46 g protein meal.
+        'bone marrow': { n: [786, 6.7, 0, 84.4, 0, 0, 2, 13, 1], a: ['marrow bones', 'marrow bone', 'beef marrow bones', 'beef marrow bone', 'beef marrow', 'veal marrow bones', 'marrow'], u: [[28, 'oz']] },
+        // Ribs (USDA SR Legacy: pork spareribs, raw; beef short ribs, raw), per 100 g of meat and fat.
+        'pork ribs': { n: [277, 15.5, 0, 23.4, 0, 0.6, 15, 242, 15], a: ['baby back ribs', 'baby back pork ribs', 'back ribs', 'pork back ribs', 'spare ribs', 'spareribs', 'pork spare ribs', 'pork spareribs', 'st louis ribs', 'st. louis ribs', 'country style ribs', 'pork ribs', 'ribs'], u: [] },
+        'beef short ribs': { n: [388, 14.4, 0, 36.2, 0, 0.1, 9, 232, 14], a: ['short ribs', 'short rib', 'beef short rib', 'beef ribs', 'flanken'], u: [] },
+        oxtail: { n: [262, 19, 0, 20, 0, 0, 10, 220, 15], a: ['oxtails', 'beef oxtail'], u: [] },
+        lobster: { n: [77, 16.5, 0, 0.8, 0, 0, 84, 275, 43], a: ['lobster meat', 'lobster tails', 'lobster tail', 'lobsters'], u: [[145, 'cup']] },
+        clams: { n: [86, 14.7, 3.6, 1, 0, 0, 46, 314, 9], a: ['clam', 'littleneck clams', 'cockles'], u: [] },
     };
     Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });
 
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
-    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20 };
+    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, 'cherry tomatoes': 17, 'grape tomatoes': 8,
+        'pork ribs': 1000, 'beef short ribs': 300, oxtail: 150, 'lamb chop': 700, 'bone marrow': 250, lobster: 600, 'beef steak': 300, clams: 20, 'pork shoulder': 600 };
+    // "2 racks of ribs", "1 slab": one rack weighs a set amount (EACH), not "one rib".
+    const EACH_RACK = /\b(racks?|slabs?)\b/;
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
     // A cup of something light and airy (chips, flakes) weighs far less than a cup of water.
     const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60 };
@@ -154,6 +172,52 @@
     ];
     // "Juice of 1 lemon", "juice of ½ lime": the juice, about 45 g a lemon, 30 g a lime, 80 g an orange.
     const JUICE = /^(?:the\s+)?juice\s+(?:of|from)\s+(\d+(?:\.\d+)?|½|half|a|an|one|two|1\/2)\s+(?:\w+\s+)?(lemons?|limes?|oranges?)\b/i;
+    // === WHAT'S EATEN ===
+    // Bones and shells aren't eaten: a bone-in or shell-on food counts only its edible part (USDA's
+    // "refuse" for the cut). [pattern on the line, edible share, what's left, not when this matches].
+    const BONELESS = /\b(boneless|shelled|peeled|meat\b|fillets?|filets?|ground|minced|picked|bone[- ]free|deboned)\b/i;
+    const EDIBLE = [
+        [/\bmarrow bones?\b|\bbones?\b.*\bmarrow\b|\bmarrow\b.*\bbones?\b/i, 0.2, 'the marrow (the bones aren\'t eaten)'],
+        [/\bshort ribs?\b/i, 0.6, 'without the bones'],
+        [/\bribs\b/i, 0.7, 'without the bones', /\bcelery\b/i],
+        [/\boxtails?\b/i, 0.5, 'without the bones'],
+        [/\bwings?\b/i, 0.55, 'without the bones'],
+        [/\bdrumsticks?\b/i, 0.7, 'without the bones'],
+        [/\bwhole (chicken|duck|turkey)s?\b/i, 0.68, 'without the bones'],
+        [/\bwhole (fish|branzino|trout|snapper|sea bass|sea bream|mackerel|salmon)\b/i, 0.5, 'without the head and bones'],
+        [/\b(leg quarters?|chicken legs?|chicken pieces|turkey legs?)\b/i, 0.72, 'without the bones'],
+        [/\bshanks?\b/i, 0.6, 'without the bones'],
+        [/\bhocks?\b/i, 0.5, 'without the bones and skin'],
+        [/\b(t-bone|porterhouse|tomahawk)\b/i, 0.8, 'without the bone'],
+        [/\bracks? of lamb\b|\blamb racks?\b/i, 0.75, 'without the bones'],
+        [/\bhead[- ]on\b/i, 0.55, 'without heads and shells'],
+        [/\bshell[- ]on\b|\bin (the |their )?shells?\b|\bunpeeled\b/i, 0.85, 'without the shells'],
+        [/\bmussels\b/i, 0.4, 'without the shells', /\b(frozen cooked)\b/i],
+        [/\b(clams|cockles|oysters)\b/i, 0.2, 'without the shells', /\b(chopped|canned|minced)\b/i],
+        [/\bcrab legs?\b|\bwhole crabs?\b/i, 0.5, 'without the shells'],
+        [/\bwhole lobsters?\b|\blobsters?\b(?! (meat|tails?))/i, 0.35, 'without the shell'],
+        [/\bbone[- ]in\b|\bon the bone\b/i, 0.78, 'without the bones'],
+    ];
+    function edibleShare(raw) {
+        const t = String(raw).toLowerCase().replace(/\([^)]*\)/g, ' ');
+        if (BONELESS.test(t.replace(/\bbone[- ]in\b|\bshell[- ]on\b|\bhead[- ]on\b/g, ''))) return null;
+        const hit = EDIBLE.find(([re, , , not]) => re.test(t) && !(not && not.test(t)));
+        return hit ? { share: hit[1], note: hit[2] } : null;
+    }
+    // What's thrown away isn't eaten: a brine, soaking water. Frying oil is mostly left in the pot:
+    // what a fried food takes up counts (about a tablespoon a serving), not the potful.
+    const DISCARDED = /\(\s*for (the )?(brine|brining|soaking)\s*\)|\bfor (the )?(brine|brining|soaking)\b|^brine:/i;
+    const FRYING = /\b(for (deep[- ]?|shallow[- ]?|pan[- ]?)?frying|to (deep[- ]?)?fry|for the (deep[- ]?)?fryer|for deep[- ]fat frying|frying oil)\b/i;
+    const FAT = /\b(oil|lard|shortening|ghee|dripping|fat)\b/i;
+    function isDiscarded(raw) { return DISCARDED.test(String(raw)); }
+
+    // Things counted by their size: "4 4-ounce salmon fillets", "2 x 180g snapper fillets",
+    // "1 whole chicken (about 4 pounds)", "2 racks of lamb (about 1 1/2 pounds each)".
+    const SIZE = /^(?:x\s*)?(\d+(?:\.\d+)?)\s*-?\s*(ounces?|oz|grams?|g|pounds?|lbs?|kg)\b\.?/i;
+    const BRACKET = /\((?:about|approx\.?|around|roughly|at least)?\s*((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?|[½¼¾])\s*-?\s*(pounds?|lbs?|ounces?|oz|grams?|g|kilograms?|kg)\b([^)]*)\)/i;
+    const toGrams = (n, unit) => n * (/^(pound|lb)/i.test(unit) ? 453.6 : /^(ounce|oz)/i.test(unit) ? 28.35 : /^k/i.test(unit) ? 1000 : 1);
+    function fraction(t) { const m = String(t).trim().match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/); return m ? Number(m[1] || 0) + Number(m[2]) / Number(m[3]) : ({ '½': 0.5, '¼': 0.25, '¾': 0.75 }[t] || Number(t)); }
+
     function readLine(line, servings = 1) {
         let raw = String(line || '').trim();
         if (!raw) return null;
@@ -165,6 +229,7 @@
             if (FOODS[key]) return { grams: n * ({ lemon: 45, lime: 30, orange: 80 }[fruit]), key, free: false };
         }
         if (/^(?:the\s+)?(?:finely\s+)?(?:grated\s+)?zest\s+(?:of|from)\b/i.test(raw)) return { grams: 0, key: null, free: true };
+        if (isDiscarded(raw)) return { grams: 0, key: null, free: true, discarded: 'thrown away (brine or soaking water)' };
         let item = Units ? Units.splitIngredient(raw) : { qty: null, unit: '', text: raw };
         if (item.qty == null) {
             const w = WORD_AMOUNT.find(([re]) => re.test(raw));
@@ -182,7 +247,16 @@
         let qty = item.qty;
         let grams = null;
         const pack = raw.match(PACK);
-        if (pack && /\b(cans?|tins?|packages?|packets?|jars?|bags?|containers?|cartons?|blocks?|boxes?)\b/i.test(raw)) {
+        const size = !item.unit && qty != null ? String(item.text || '').match(SIZE) : null;
+        const bracket = raw.match(BRACKET);
+        const packWord = /\b(cans?|tins?|packages?|packets?|jars?|bags?|containers?|cartons?|blocks?|boxes?)\b/i.test(raw);
+        if (size && !packWord) grams = qty * toGrams(Number(size[1]), size[2]);   // "4 4-ounce fillets": 4 × 4 oz
+        else if (bracket && !packWord && (qty == null || !item.unit || ['piece', 'fillet', 'slice', 'head', 'bunch'].indexOf(item.unit) >= 0)) {
+            // A weight in brackets: the whole amount ("about 4 pounds"), or each one's ("1 1/2 pounds each").
+            const w = toGrams(fraction(bracket[1]), bracket[2]);
+            const after = raw.slice(raw.indexOf(bracket[0]) + bracket[0].length, raw.indexOf(bracket[0]) + bracket[0].length + 8);
+            grams = /\beach\b/i.test(bracket[3] || '') || /^\s*each\b/i.test(after) ? w * (qty || 1) : w;
+        } else if (pack && packWord) {
             const size = Number(pack[1]);
             const unit = pack[2].toLowerCase();
             const each = /^(oz|ounce)/.test(unit) ? size * 28.35 : /^(lb|pound)/.test(unit) ? size * 453.6 : size;
@@ -205,6 +279,7 @@
             else if (unit === 'scoop') grams = qty * 30;
             else if (unit === 'fillet') grams = qty * (portionGrams(food, ['fillet']) || 150);
             else if (unit === 'piece') grams = qty * eachGrams(food, m.key, m.phrase);
+            else if (!unit && EACH_RACK.test(clean(raw)) && EACH[m.key]) grams = qty * EACH[m.key];
             else if (!unit && /^\s*[\d.\/½¼¾]+\s+leaves?\b/i.test(raw)) grams = qty * (/lettuce|cabbage|chard|kale|spinach|collard/.test(m.key) ? 10 : 0.5);   // 8 lettuce leaves, 6 basil leaves
             else if (!unit && FREE.test(clean(words)) && /\b(sticks?|star anise|anise|pods?|cloves|bay lea(?:f|ves)|leaves|sprigs?|whole)\b/.test(clean(raw))) grams = qty * 1.5;   // 2 cinnamon sticks, 3 star anise
             else grams = qty * eachGrams(food, m.key, m.phrase);
@@ -216,6 +291,12 @@
             if (typical) return { grams: typical.grams * Math.max(1, Number(servings) || 1), key: m.key, assumed: typical.label };
             return { unmatched: true, line: raw, key: m.key };
         }
+        const per = Math.max(1, Number(servings) || 1);
+        // Frying oil: only what the food takes up (about a tablespoon a serving), never the potful.
+        if (FRYING.test(raw) && FAT.test(`${m.key} ${clean(words)}`) && grams > 14 * per) return { grams: 14 * per, key: m.key, free: false, assumed: 'about 1 tbsp a serving (what frying takes up; the rest stays in the pot)' };
+        // Bones and shells: only the edible part counts.
+        const edible = edibleShare(raw);
+        if (edible && grams > 0) return { grams: grams * edible.share, key: m.key, free, edible: edible.note, whole: Math.round(grams) };
         return { grams: Math.max(0, grams), key: m.key, free };
     }
 
@@ -249,6 +330,7 @@
             const r = readLine(line, per);
             if (!r) return;
             if (r.unmatched) { unmatched.push(r.line); return; }
+            if (r.discarded) { lines.push({ line, key: null, grams: 0, kcal: 0, discarded: r.discarded }); return; }
             const n = r.key ? FOODS[r.key].n : [0, 0, 0, 0];
             const f = r.grams / 100;
             total.calories += n[0] * f; total.protein_g += n[1] * f; total.carbs_g += n[2] * f; total.fat_g += n[3] * f;
@@ -256,7 +338,7 @@
             micros.vitd += (n[5] || 0) * f; micros.ca += (n[6] || 0) * f; micros.k += (n[7] || 0) * f; micros.mg += (n[8] || 0) * f;
             grams += r.grams;
             // Per line, per serving: the breakdown people can check.
-            lines.push({ line, key: r.key, grams: Math.round(r.grams), kcal: Math.round(n[0] * f / per), assumed: r.assumed || undefined });
+            lines.push({ line, key: r.key, grams: Math.round(r.grams), kcal: Math.round(n[0] * f / per), assumed: r.assumed || undefined, edible: r.edible ? `${r.edible} (${r.whole} g as bought)` : undefined });
             if (r.assumed) assumed.push({ line: String(line), amount: r.assumed });
         });
         const round = v => Math.round(v / per);
@@ -273,8 +355,38 @@
     // A recipe's nutrition, settled: our calculation, unless the source's own numbers agree with it
     // (then the source's are kept). Sets nutrition, nutrition_basis ('calculated' | 'source') and
     // nutrition_unmatched (lines we couldn't match: the numbers are approximate).
+    // A brine or a pot of frying oil that the recipe doesn't label: its steps say so ("dissolve the
+    // salt in the water… discard the brine", "heat the oil to 350°F and deep-fry"). Those lines get
+    // labelled ("1 gallon water (for the brine)"), so every later count, and the person, knows.
+    const ML_OF = { tsp: 5, tbsp: 15, cup: 240, pint: 480, quart: 960, gallon: 3840, ml: 1, l: 1000, 'fl oz': 30 };
+    function mlOf(line) { const it = Units ? Units.splitIngredient(line) : { qty: null }; return it.qty != null && ML_OF[it.unit] ? it.qty * ML_OF[it.unit] : 0; }
+    function labelThrownAway(recipe) {
+        const steps = (recipe.steps || []).map(String).join(' ');
+        const lines = recipe.ingredients;
+        if (/\bbrin(e|ing|ed)\b/i.test(steps)) {
+            const sentences = steps.split(/(?<=[.!?])\s+/).filter(x => /\b(brin(e|ing)|dissolve[ds]?)\b/i.test(x));
+            const said = word => sentences.some(x => new RegExp(`\\b${word}\\b`, 'i').test(x));
+            lines.forEach((l, i) => {
+                const t = clean(l);
+                if (isDiscarded(l) || /\b(in|packed in|canned in) brine\b/i.test(l)) return;
+                const ml = mlOf(l);
+                const water = /^(cold |warm |hot |boiling )?water$/.test(t.replace(/^[\d\s/.]+\w*\s+/, '').trim()) || /\bwater\b/.test(t) && !/\b(coconut|rose|sparkling|tonic|soda)\b/.test(t);
+                const brineWater = water && ml >= 480 && said('water');
+                const salt = /\bsalt\b/.test(t) && ml >= 30 && said('salt');
+                const sweet = /\b(sugar|brown sugar|honey|maple syrup|molasses)\b/.exec(t);
+                const sugar = sweet && said(sweet[1].split(' ').pop()) && !/\b(rub|glaze|sauce|dredge|batter)\b/i.test(sentences.filter(x => new RegExp(`\\b${sweet[1].split(' ').pop()}\\b`, 'i').test(x)).join(' ')) && lines.some(x => /\bwater\b/i.test(x) && mlOf(x) >= 480);
+                if (brineWater || salt || sugar) lines[i] = `${l} (for the brine)`;
+            });
+        }
+        if (/\bdeep[- ]?fr(y|ied|ying)\b|\bheat the oil to \d{3}\b|\boil (reaches|registers|is) \d{3}\b/i.test(steps)) {
+            lines.forEach((l, i) => { if (!FRYING.test(l) && FAT.test(clean(l)) && mlOf(l) >= 480) lines[i] = `${l} (for frying)`; });
+        }
+        return recipe;
+    }
+
     function settle(recipe) {
         if (!recipe || !Array.isArray(recipe.ingredients)) return recipe;
+        labelThrownAway(recipe);
         const servings = Math.max(1, Number(recipe.servings) || 1);
         const c = calculate(recipe.ingredients, servings);
         const own = recipe.nutrition && Number(recipe.nutrition.calories) > 0 ? recipe.nutrition : null;
@@ -309,7 +421,7 @@
         } catch (e) { return null; }
     }
 
-    const api = { calculate, settle, readLine, matchFood, isMinor, lookupOnline, FOODS };
+    const api = { calculate, settle, labelThrownAway, edibleShare, readLine, matchFood, isMinor, lookupOnline, FOODS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishNutrition = api;
 })(typeof window !== 'undefined' ? window : globalThis);
