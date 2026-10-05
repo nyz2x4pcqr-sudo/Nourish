@@ -185,7 +185,10 @@
         if (!t) return '';
         const parts = t.match(/[^.!?]+[.!?]+(?:["'”’)]+)?(?=\s|$)/g) || [];
         let out = '';
-        for (const p of parts) { const next = (out + ' ' + p.trim()).trim(); if (next.length > max) break; out = next; }
+        // Bits of a site's nutrition panel or recipe card that end up in its description ("17g salt.",
+        // "320 kcal.", "Serves 4.") aren't sentences about the dish.
+        const card = /^\s*(?:\d+(?:\.\d+)?\s*(?:g|mg|kcal|cal|calories)\b[^.!?]*|(?:serves|makes|prep|cook|total)\b[^.!?]{0,20})[.!?]+\s*$/i;
+        for (const p of parts) { if (card.test(p)) continue; const next = (out + ' ' + p.trim()).trim(); if (next.length > max) break; out = next; }
         return out.length >= 20 ? out : '';
     }
     function fromJsonLd(doc, url) {

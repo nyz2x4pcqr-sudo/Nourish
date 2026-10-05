@@ -134,9 +134,11 @@
     }
     function recipeProfile(r0) {
         // The recipe as written: what Nourish added (a protein or fiber food, its step) doesn't make it harder.
-        const added = new Set([].concat(r0.protein_added || [], r0.fiber_added || []).map(String));
+        // By the food, not the exact line: a resized portion turns "2 eggs" into "3 eggs".
+        const food = l => String(l).toLowerCase().replace(/^[\d\s/.½¼¾⅓⅔⅛-]+/, '').replace(/^(cups?|oz|scoops?|tbsp|tsp)\s+/, '').trim();
+        const added = new Set([].concat(r0.protein_added || [], r0.fiber_added || []).map(food));
         const addedSteps = new Set((r0.added_steps || []).map(String));
-        const r = added.size || addedSteps.size ? Object.assign({}, r0, { ingredients: (r0.ingredients || []).filter(l => !added.has(String(l))), steps: (r0.steps || []).filter(st => !addedSteps.has(String(st))) }) : r0;
+        const r = added.size || addedSteps.size ? Object.assign({}, r0, { ingredients: (r0.ingredients || []).filter(l => !added.has(food(l))), steps: (r0.steps || []).filter(st => !addedSteps.has(String(st))) }) : r0;
         const steps = (r.steps || []).map(String);
         const text = `${r.name || ''} ${steps.join(' ')}`;
         const techniques = TECHNIQUES.filter(([, re]) => re.test(text)).map(([name, , min]) => ({ name, min }));
@@ -412,6 +414,22 @@
         if (unit === 'cup' && q < 0.25) { q *= 16; unit = 'tbsp'; }
         if (unit === 'tbsp' && q < 1 && Math.abs(q * 2 - Math.round(q * 2)) > 0.01) { q *= 3; unit = 'tsp'; }
         if (unit === 'tsp' && q >= 0.5 && item.unit !== 'tsp') q = Math.max(0.5, Math.round(q * 2) / 2);
+        // A small share of a can: by weight when the can's size is given ("1¾ oz light coconut milk",
+        // not "½ can", four times too much for one portion of a 4-serving recipe); else quarter cans.
+        if (unit === 'can') {
+            const pack = String(line).match(/(\d+(?:\.\d+)?)\s*-?\s*(oz|ounces?|ounce|g|grams?|ml)\b/i);
+            if (q < 0.5 && pack) {
+                const u = /^(oz|ounce)/i.test(pack[2]) ? 'oz' : /^g/i.test(pack[2]) ? 'g' : 'ml';
+                let w = q * Number(pack[1]);
+                w = u === 'oz' ? Math.max(0.25, Math.round(w * 4) / 4) : Math.max(5, Math.round(w / 5) * 5);
+                const text = String(item.text || '').replace(/\(+[^()]*\d[^()]*\)+/g, ' ').replace(/^\s*(cans?|tins?)\s+(of\s+)?/i, '').replace(/[()]/g, ' ')
+                    .replace(/\s+,/g, ',').replace(/\s+/g, ' ').replace(/,\s*$/, '').trim();
+                return `${U.formatAmount(w, u)} ${text}`.trim();
+            }
+            q = Math.max(0.25, Math.round(q * 4) / 4);
+            const amount = U.formatAmount(q, unit);
+            return item.note !== undefined ? `${item.text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${item.text}`.trim();
+        }
         // Things you can't cook half of (eggs, tortillas, slices, fillets…) stay whole.
         if ((!unit || unit === 'slice' || unit === 'piece' || unit === 'fillet') && WHOLE.test(item.text || '')) q = Math.max(1, Math.round(q));
         else if (!unit || unit === 'clove' || unit === 'can' || unit === 'slice' || unit === 'piece' || unit === 'fillet') q = Math.max(0.5, Math.round(q * 2) / 2);
@@ -580,8 +598,10 @@
     function sourceKey(r) {
         if (!r) return 'other';
         if (r.from_book) return `book:${r.book_id || r.book || r.source_name || '?'}`;
+        // The website, the same way whether the recipe still has its source id or only its link.
+        if (r.source_url) { try { return new URL(r.source_url).hostname.replace(/^(www|m)\./, ''); } catch (e) { /* not a link */ } }
         if (r.source_id) return r.source_id;
-        try { return new URL(r.source_url).hostname.replace(/^www\./, ''); } catch (e) { return r.ai ? 'ai' : 'other'; }
+        return r.ai ? 'ai' : 'other';
     }
     // Luxury or hard-to-find ingredients: left out unless the budget is "No limit".
     const LUXURY = /\b(wagyu|kobe|a5\b|caviar|truffles?(?! (cake|brownies?|balls?))|truffle oil|foie gras|beluga|osetra|uni\b|sea urchin|abalone|langoustines?|king crab|lobster|iberico|ib[eé]rico|jam[oó]n ib|gold leaf|bluefin|toro|matsutake|morels?|white asparagus|dry[- ]aged)\b/i;
@@ -727,6 +747,12 @@
                 const shared = fits.filter(x => !overCap(x.r));
                 if (shared.length) { fits.filter(x => overCap(x.r)).forEach(x => { rejected[`${m}: ${x.r.name}`] = `already ${cap} meals from ${x.r.book || x.r.source_name || sourceKey(x.r)} this week`; }); fits.length = 0; shared.forEach(x => fits.push(x)); }
                 else fits.forEach(x => { x.cost += 2; });
+                // Nourish's own recipes are a backup: with at least 3 web or book recipes that fit this
+                // slot, they're not in the running at all (a weaker fit from the web still comes first).
+                if (ctx.builtinMode === 'backup' && fits.filter(x => x.r.source_id !== 'builtin').length >= 3) {
+                    const web = fits.filter(x => x.r.source_id !== 'builtin');
+                    fits.length = 0; web.forEach(x => fits.push(x));
+                }
                 // Recent plans' dishes only when nothing new fits (favourites are always welcome).
                 const fresh = fits.filter(x => isFav(x.r) || !recent.has(x.r.name));
                 top[m] = (fresh.length ? fresh : fits.map(x => ({ r: x.r, cost: x.cost + 1 }))).sort((a, b) => a.cost - b.cost).slice(0, 8);
@@ -926,10 +952,11 @@
     // protein-less breakfast: a smoothie or oats get protein powder or Greek yogurt, an egg breakfast
     // more eggs or egg whites, a lunch or dinner lean chicken, tofu or tuna. Anything the person
     // avoids, is allergic to or doesn't eat (diet) is never used. `need`: grams of protein per person.
+    const BOOST_MOST = { tempeh: 6, 'cooked lentils': 1, eggs: 4, 'egg whites': 1, 'chicken breast': 6, 'firm tofu': 6, 'canned tuna': 5, edamame: 1, 'protein powder': 2, 'greek yogurt': 1.5, 'cottage cheese': 1 };
     const BOOSTERS = {
         sweet: [['protein powder', 'scoop', 24, 'Stir or blend in the protein powder.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt (stirred in or on the side).'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.']],
         savory: [['eggs', '', 6.3, 'Cook the extra eggs with the rest, or scramble them on the side.'], ['egg whites', 'cup', 26, 'Scramble the egg whites and serve alongside.'], ['cottage cheese', 'cup', 23, 'Serve with the cottage cheese on the side.'], ['greek yogurt', 'cup', 17, 'Serve with the Greek yogurt on the side.']],
-        main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 4.9, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 5.4, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.']],
+        main: [['chicken breast', 'oz', 6.4, 'Season the chicken breast and pan-fry it for 6–7 minutes a side; slice and serve with the dish.'], ['firm tofu', 'oz', 4.9, 'Cube the tofu, pan-fry until golden and add to the dish.'], ['canned tuna', 'oz', 5.4, 'Drain the tuna and serve it on top.'], ['edamame', 'cup', 18, 'Warm the edamame and serve alongside.'], ['tempeh', 'oz', 5.7, 'Slice the tempeh, pan-fry until golden and serve with the dish.'], ['cooked lentils', 'cup', 18, 'Warm the lentils and stir them in or serve alongside.']],
     };
     const SWEET_BREAKFAST_DISH = /\b(smoothie|shake|oat|oats|oatmeal|porridge|granola|muesli|bircher|chia|yogh?urt|parfait|pancakes?|waffles?|crepes?|muffins?|fruit|acai|bowl|toast with (jam|honey|nut))\b/i;
     function boostProtein(meal, need, mealType, people = 1, exclude) {
@@ -943,16 +970,23 @@
             const hit = BOOSTERS[kind].concat(BOOSTERS.main, BOOSTERS.sweet, BOOSTERS.savory).find(([food]) => already.indexOf(food) >= 0);
             if (!hit) return meal;
             const [food, unit, perUnit] = hit;
-            const item = U ? U.splitIngredient(already) : null;
+            // The line as it is now (a resized portion changed its amount), found by its food.
+            const idx = (meal.ingredients || []).map(String).findIndex(l => l.toLowerCase().indexOf(food) >= 0 && /^[\d½¼¾⅓⅔]/.test(l.trim()));
+            if (idx < 0) return meal;
+            const now = meal.ingredients[idx];
+            const item = U ? U.splitIngredient(now) : null;
             const have = item && item.qty ? item.qty / n : 0;
             const more = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
-            const qty = (have + more) * n;
+            // Never more than a sensible amount a person: 4 eggs, 6 oz chicken, 2 scoops, 1½ cups.
+            const most = BOOST_MOST[food] || (unit === 'oz' ? 6 : unit === 'cup' ? 1.5 : unit === 'scoop' ? 2 : 4);
+            const per = Math.min(most, have + more);
+            if (!(per > have)) return meal;
+            const qty = per * n;
             const line = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}`.replace(/^1 eggs$/, '1 egg');
-            if (line === already) return meal;
-            const before = N.calculate([already], n).nutrition, after = N.calculate([line], n).nutrition;
+            const before = N.calculate([now], n).nutrition, after = N.calculate([line], n).nutrition;
             if (!(after.protein_g > before.protein_g)) return meal;
             const out = JSON.parse(JSON.stringify(meal));
-            out.ingredients = out.ingredients.map(l => (l === already ? line : l));
+            out.ingredients[idx] = line;
             const nu = out.nutrition || {};
             ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'].forEach(k => { if (after[k] != null) nu[k] = Math.round((Number(nu[k]) || 0) - (before[k] || 0) + after[k]); });
             out.nutrition = nu;
@@ -961,7 +995,7 @@
         }
         for (const [food, unit, perUnit, step] of BOOSTERS[kind]) {
             // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces.
-            const units = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
+            const units = Math.min(unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit), BOOST_MOST[food] || 4);
             const qty = units * n;
             const line = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}${unit === '' && qty === 1 ? '' : ''}`.replace(/^1 eggs$/, '1 egg');
             if (exclude && exclude({ name: food, ingredients: [line] })) continue;
@@ -1001,7 +1035,8 @@
             if (short > 0) {
                 meals().sort((a, b) => cur[a].nutrition.protein_g - cur[b].nutrition.protein_g).forEach(m => {
                     if (short <= 0) return;
-                    const room = T.mealProtein.max - (Number(cur[m].nutrition.protein_g) || 0);
+                    // 40 g a meal, or more when the day's own target needs it (2 g per kg on 1,800 kcal is 170 g).
+                    const room = Math.max(T.mealProtein.max, Math.ceil(T.protein / meals().length) + 5) - (Number(cur[m].nutrition.protein_g) || 0);
                     if (room < 5) return;
                     const b = boostProtein(cur[m], Math.min(room, short + 2), m, people, exclude);
                     if (b === cur[m]) return;
@@ -1171,7 +1206,7 @@
         // What was added has calories: a day now more than 5% over its target is sized again (whole,
         // half or quarter portions), then protein and fiber are checked one last time.
         const kcal = targetsOf(settings || {}).kcal;
-        if (kcal > 0 && dayTotals(again.day).kcal > kcal * 1.05) {
+        for (let round = 0; round < 3 && kcal > 0 && dayTotals(again.day).kcal > kcal * 1.05; round++) {
             const resized = fitDay(again.day, settings, people);
             const p2 = balanceProtein(resized, settings, people, exclude);
             const f2 = balanceFiber(p2.day, settings, people, exclude);

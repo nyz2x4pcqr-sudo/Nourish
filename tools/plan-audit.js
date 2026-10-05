@@ -84,7 +84,7 @@ const NOT_MEAL_WORDS = [
 ];
 const MEAL_WORDS = /\b(chicken|beef|pork|turkey|lamb|fish|salmon|tuna|shrimp|tofu|eggs?|lentils?|beans|chickpeas|quinoa|rice|pasta|noodles|potato(es)?|bowls?|salads?|soups?|stews?|curry|curries|chili|tacos?|wraps?|sandwich(es)?|burgers?|pot pie|shepherd|quiche|frittata|omelet|omelette|oats|porridge|pancakes|waffles|toast|pizza|flatbread|risotto|lasagn[ae])\b/i;
 const DINNER_DISH = /\b(ribs|pot roast|roast (chicken|pork|beef|lamb)|pork shoulder|pernil|brisket|oxtail|osso buco|fried chicken|fish and chips|beer[- ]battered|prime rib|leg of lamb|whole chicken|lasagn[ae])\b/i;
-const LONG_WAIT = /\b(overnight|for (\d+ (to|or|-) )?(\d{1,2}) hours?|at least (\d+) hours?|(\d+)[- ]?(to|-)[- ]?(\d+) hours?|brine|brining|marinate for (\d+) hours)\b/i;
+const LONG_WAIT = /\b(brine|brining)\b|\b(marinate|soak|refrigerate|chill|rest|rise|proof)\b[^.]{0,40}\b(overnight|(\d+|several) (to \d+ )?hours?)\b/i;
 const DISCARDED = /\b(for (the )?brine|for brining|for (deep[- ]?|shallow[- ]?)?frying|to (deep[- ]?)?fry|for soaking|soaking water|for boiling|cooking water|water to cover)\b/i;
 const BONE_IN = /\b(bone[- ]in|on the bone|marrow bones?|ribs?|rack of|oxtail|drumsticks?|chicken wings?|whole chicken|chicken pieces|shanks?|shell[- ]on|in (their|the) shells?|whole (crab|lobster)|crab legs|mussels|clams)\b/i;
 const WEIGHT = /\b(\d+(\.\d+)?|\d+ \d\/\d)\s*(-|\s)?(lbs?|pounds?|kg|kilos?|g|grams?|oz|ounces?)\b/i;
@@ -101,11 +101,11 @@ const AVOID_WORDS = {
     beef: /\b(beef|steak|brisket|oxtail|ground chuck|sirloin|marrow)\b/i,
     eggs: /\beggs?\b(?! noodles)/i,
     chicken: /\bchicken\b/i,
-    fish: /\b(fish|salmon|tuna|cod|tilapia|trout|halibut|sardines?|mackerel|anchov(y|ies)|haddock|sea bass|snapper|mahi)\b/i,
+    fish: /\b(fish|salmon|lox|gravlax|tuna|cod|tilapia|trout|halibut|sardines?|mackerel|anchov(y|ies)|haddock|sea bass|snapper|mahi)\b/i,
     salmon: /\bsalmon\b/i, tuna: /\btuna\b/i,
 };
 const DIET_WORDS = {
-    Vegetarian: /\b(chicken|beef|pork|turkey|lamb|bacon|ham|sausages?|fish|salmon|tuna|cod|shrimp|prawns?|anchov|gelatin|chorizo|steak|ribs|oxtail|marrow|crab|lobster|scallops?|duck|veal|venison)\b/i,
+    Vegetarian: /\b(chicken|beef|pork|turkey|lamb|bacon|ham|sausages?|fish|salmon|lox|gravlax|tuna|cod|shrimp|prawns?|anchov|gelatin|chorizo|steak|ribs|oxtail|marrow|crab|lobster|scallops?|duck|veal|venison)\b/i,
     Pescatarian: /\b(chicken|beef|pork|turkey|lamb|bacon|ham|sausages?|chorizo|steak|ribs|oxtail|marrow|duck|veal|venison)\b/i,
 };
 DIET_WORDS.Vegan = new RegExp(DIET_WORDS.Vegetarian.source.slice(0, -4) + '|eggs?|milk|cheese|butter(?!nut| beans)|cream|yogh?urt|honey|feta|parmesan|ghee|whey)\\b', 'i');
@@ -115,7 +115,7 @@ const words = s => lc(s).split(/[^a-z]+/).filter(w => w.length >= 3).map(w => w.
 // Pairs where the table's food has another name than the line (checked by hand).
 const SAME_FOOD = [[/\bmince\b/, /ground/], [/\bprawns?\b/, /shrimp/], [/\bswede\b/, /rutabaga/], [/\bcourgette/, /zucchini/], [/\baubergine/, /eggplant/], [/\bscallions?|spring onions?|green onions?/, /onion/],
     [/\bbuns?|rolls?|baguette|crusty/, /bread/], [/\bstock\b|bouillon/, /broth/], [/\bchilli|chili|jalape/, /pepper|jalapeno|chili/], [/\bcilantro|coriander/, /coriander|cilantro|parsley/], [/\bpasta|spaghetti|penne|macaroni|fusilli|linguine|rigatoni|orzo/, /pasta|spaghetti|macaroni/],
-    [/\byoghurt/, /yogurt/], [/\bsalt pork|fatback|pancetta|guanciale|pork belly/, /bacon/], [/\bpigeon peas|gandules|black-eyed/, /chickpea|pea/], [/\bsplit peas/, /lentil/], [/\bcornstarch|cornflour/, /corn/],
+    [/\byoghurt/, /yogurt/], [/\bpassata|crushed tomatoes|tomato puree/, /tomato/], [/\bsalt pork|fatback|pancetta|guanciale|pork belly/, /bacon/], [/\bpigeon peas|gandules|black-eyed/, /chickpea|pea/], [/\bsplit peas/, /lentil/], [/\bcornstarch|cornflour/, /corn/],
     [/\bflank|skirt|sirloin|steak|chuck|round/, /beef|steak/], [/\bwraps?\b/, /tortilla/], [/\bmayo\b/, /mayonnaise/], [/\bromaine|little gem|iceberg|salad leaves|greens|spring mix/, /lettuce/],
     [/\bblueberr|raspberr|strawberr|blackberr/, /berr/], [/\blox\b|smoked salmon/, /smoked salmon/], [/\bnoodles?\b|ramen|udon|soba|lo mein|vermicelli/, /pasta|udon|noodle/], [/\bgarbanzo/, /chickpea/],
     [/\bcheese|cotija|manchego|monterey|jack|colby|gruyere|emmental|gouda|pecorino|asiago|fontina|provolone/, /cheese|cheddar|jack|parmesan|mozzarella/], [/\btaco seasoning|seasoning|spice mix|spice blend|curry powder/, /masala|spice|seasoning|chili powder|paprika|cumin|curry/], [/\bcod|haddock|tilapia|pollock|halibut|white fish/, /fish|cod/], [/\bold bay|seasoning|spice|chili powder|paprika|cumin/, /spice|seasoning|paprika|chili|cumin|pepper/]];
@@ -143,7 +143,9 @@ function checkMeal(meal, slot, ctx) {
     // 1. Not really a meal.
     if (truth && !['breakfast', 'lunch', 'dinner', 'main'].includes(truth.is)) add('not a meal', 'problem', `${truth.is} (the book says so), planned as ${slot}`);
     else {
-        const nm = NOT_MEAL_WORDS.find(([re]) => re.test(name));
+        // A smoothie is a breakfast when it's filling (at least 250 kcal and 10 g protein), else a drink; chia pudding is a breakfast.
+        const filling = /smoothie|shake/i.test(name) && kcal >= 250 && p >= 10;
+        const nm = filling || /chia pudding|overnight oats|protein pudding/i.test(name) ? null : NOT_MEAL_WORDS.find(([re]) => re.test(name));
         const isMealish = MEAL_WORDS.test(name.replace(nm ? nm[0] : /$^/, ''));
         if (nm && !(isMealish && !/a starter|an article/.test(nm[1]))) add('not a meal', 'problem', `looks like ${nm[1]}`);
         else if (kcal > 0 && f * 9 / kcal > 0.7 && p * 4 / kcal < 0.12) add('not a meal', 'problem', `${Math.round(f * 9 / kcal * 100)}% of its calories are fat and only ${Math.round(p * 4 / kcal * 100)}% protein: a starter or spread, not a meal`);
@@ -167,7 +169,7 @@ function checkMeal(meal, slot, ctx) {
     try { calc = N.calculate(meal.ingredients || [], servings); } catch (e) { /* none */ }
     (calc ? calc.lines : []).forEach(l => {
         if (l.key && wrongFood(l.line, l.key) && l.kcal >= 30) add('matched to the wrong food', 'problem', `"${l.line}" was counted as ${l.key} (${l.kcal} kcal a serving)`);
-        if (DISCARDED.test(l.line) && l.kcal >= 25) add('discarded ingredient counted', 'problem', `"${l.line}" counted as ${l.kcal} kcal a serving, but it's thrown away`);
+        if (DISCARDED.test(l.line) && l.kcal >= (/fry|frying/i.test(l.line) ? 135 : 25)) add('discarded ingredient counted', 'problem', `"${l.line}" counted as ${l.kcal} kcal a serving, but it's thrown away`);
         if (BONE_IN.test(l.line) && WEIGHT.test(l.line) && l.key) {
             const stated = N.readLine ? (N.readLine(l.line.replace(/\b(bone[- ]in|shell[- ]on|on the bone)\b/gi, ''), servings) || {}).grams : 0;
             if (stated && l.grams >= stated * 0.9) add('bone or shell counted as food', 'problem', `"${l.line}": ${l.grams} g counted, the whole weight with the bones or shells`);
@@ -184,6 +186,13 @@ function checkMeal(meal, slot, ctx) {
     // 4. Added by the app to make it pass.
     if (meal.protein_added) {
         const added = meal.protein_added;
+        // More than a person would eat as an add-on (the app's own limits: 4 eggs, 6 oz chicken, 2 scoops…).
+        const MOST = [[/\begg whites\b/, 1], [/\beggs?\b/, 4], [/\boz\b/, 6], [/\bscoops?\b/, 2], [/\bcups?\b/, 1.5]];
+        [].concat(added).map(String).filter(a => (meal.ingredients || []).includes(a)).forEach(l => {
+            const q = Number((String(l).match(/^(\d+(?:\.\d+)?)/) || [])[1]) / servings;
+            const lim = MOST.find(([re]) => re.test(l.toLowerCase()));
+            if (lim && q > lim[1] * 1.01) add('ingredient added by the app', 'problem', `"${l}": more than a person would add (${q} a serving)`);
+        });
         const bad = (truth && !['breakfast', 'lunch', 'dinner', 'main'].includes(truth.is)) || (origProtein < 8 && slot !== 'breakfast');
         add('ingredient added by the app', bad ? 'problem' : 'note', `${added.line || added.food || 'protein'} added for protein (${Math.round(origProtein)} g of its own)`);
     }

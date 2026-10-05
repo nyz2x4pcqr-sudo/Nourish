@@ -9,7 +9,7 @@
     const Units = root.NourishUnits || (typeof require === 'function' ? require('./units.js') : null);
     const FOODS = root.NourishFoods || (typeof require === 'function' ? (() => { try { return require('./nutrition-data.js'); } catch (e) { return {}; } })() : {});
 
-    const ML = { tsp: 5, tbsp: 15, cup: 240, 'fl oz': 30, pint: 480, quart: 960, ml: 1, l: 1000 };
+    const ML = { tsp: 5, tbsp: 15, cup: 240, 'fl oz': 30, pint: 480, quart: 960, gallon: 3785, ml: 1, l: 1000 };
     const G = { oz: 28.35, lb: 453.6, g: 1, kg: 1000 };
     // Words that describe how an ingredient is cut or prepared, not what it is.
     const PREP = /\b(chopped|finely|roughly|coarsely|thinly|thickly|diced|minced|sliced|grated|shredded|crushed|peeled|seeded|deseeded|cored|trimmed|halved|quartered|cubed|julienned|torn|packed|loosely|lightly|heaping|level|rounded|softened|melted|room temperature|cold|warm|hot|cooked|uncooked|raw|fresh|freshly|frozen|thawed|drained|rinsed|and rinsed|divided|optional|to taste|for serving|for garnish|garnish|plus more|or more|as needed|about|approximately|large|medium|small|extra|boneless|skinless|skin-on|bone-in|organic|good quality|low[- ]sodium|reduced[- ]sodium|unsalted|salted|whole|ground|dried|toasted|roasted|fat[- ]free|lean|of|the|a|an)\b/g;
@@ -58,6 +58,7 @@
     };
     Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });
 
+    const FISH = /\b(salmon|cod|tilapia|trout|haddock|halibut|pollock|mackerel|sea bass|snapper|tuna steak|swordfish|fish)\b/;
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
     const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20 };
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
@@ -169,6 +170,8 @@
         const byPhrase = EACH_PHRASE.find(([re]) => re.test(phrase || ''));
         if (byPhrase) return byPhrase[1];
         if (EACH[key]) return EACH[key];
+        // A fish fillet in a recipe is a portion (about 150–170 g), not USDA's whole side of a fish.
+        if (/\bfillets?\b/.test(phrase || '') || FISH.test(key)) { const g = portionGrams(food, ['fillet']); if (g) return Math.min(g, 170); }
         return portionGrams(food, ['medium', 'large', 'whole', 'breast', 'thigh', 'fillet', 'chop', 'egg', 'fruit', 'pepper', 'clove', 'stalk', 'small', 'piece', 'slice'])
             || ({ garlic: 3, egg: 50, tortilla: 45, 'corn tortilla': 26, bread: 32, pita: 60, bagel: 100, 'english muffin': 60 }[key]) || 100;
     }
@@ -230,7 +233,8 @@
         let qty = item.qty;
         let grams = null;
         // "8 marrow bones (about 3 pounds)", "2 racks ribs (about 4 lb)": the weight in brackets.
-        const about = raw.match(/\((?:about|approx\.?|approximately|roughly|around|total(?:ling)?)?\s*(\d+(?:\.\d+)?|\d+\s+\d\/\d|\d\/\d)\s*(pounds?|lbs?|kg|kilos?|grams?|g|ounces?|oz)\b[^)]*\)/i);
+        const about = raw.match(/\((?:about|approx\.?|approximately|roughly|around|total(?:ling)?)?\s*(\d+(?:\.\d+)?|\d+\s+\d\/\d|\d\/\d)\s*(pounds?|lbs?|kg|kilos?|grams?|g|ounces?|oz)\b[^)]*\)/i)
+            || raw.match(/,\s*(?:about|approx\.?|approximately|roughly|around|total(?:ling)?)\s+(\d+(?:\.\d+)?|\d+\s+\d\/\d|\d\/\d)\s*(pounds?|lbs?|kg|kilos?|grams?|g|ounces?|oz)\b/i);
         if (about && qty != null && !G[item.unit] && !ML[item.unit] && !/\b(cans?|tins?|packages?|packets?|jars?|bags?|containers?|cartons?|blocks?|boxes?)\b/i.test(raw)) {
             const q = about[1].includes('/') ? about[1].split(/\s+/).reduce((a, x) => a + (x.includes('/') ? Number(x.split('/')[0]) / Number(x.split('/')[1]) : Number(x)), 0) : Number(about[1]);
             const u = about[2].toLowerCase();
@@ -255,11 +259,11 @@
             else if (unit === 'handful') grams = qty * (FOODS[m.key].n[0] < 60 ? 20 : 30);
             else if (unit === 'bunch') grams = qty * 100;
             else if (unit === 'sprig') grams = qty * 1;
-            else if (unit === 'head') grams = qty * (portionGrams(food, ['head']) || 500);
+            else if (unit === 'head') grams = qty * (portionGrams(food, ['head']) || (m.key === 'garlic' ? 50 : 500));
             else if (unit === 'stick') grams = qty * (m.key === 'butter' ? 113 : m.key === 'celery' ? 40 : 3);
             else if (unit === 'package') grams = qty * 300;
             else if (unit === 'scoop') grams = qty * 30;
-            else if (unit === 'fillet') grams = qty * (portionGrams(food, ['fillet']) || 150);
+            else if (unit === 'fillet') grams = qty * Math.min(170, portionGrams(food, ['fillet']) || 150);
             else if (unit === 'piece') grams = qty * eachGrams(food, m.key, m.phrase);
             else if (!unit && /^\s*[\d.\/½¼¾]+\s+leaves?\b/i.test(raw)) grams = qty * (/lettuce|cabbage|chard|kale|spinach|collard/.test(m.key) ? 10 : 0.5);   // 8 lettuce leaves, 6 basil leaves
             else if (!unit && FREE.test(clean(words)) && /\b(sticks?|star anise|anise|pods?|cloves|bay lea(?:f|ves)|leaves|sprigs?|whole)\b/.test(clean(raw))) grams = qty * 1.5;   // 2 cinnamon sticks, 3 star anise

@@ -4430,7 +4430,10 @@ async function fillMissingMeals(plan) {
     const run = canWrite ? (onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled: () => localPlanCancelled }) : aiRunner()) : null;
     // A small job for the AI: pick the one they'd enjoy most from a few real recipes.
     const closest = async (list, slot, skip) => {
-        const few = closestFew(list, slot, skip);
+        // Nourish's own recipes are a backup: a web or book recipe that fits comes first.
+        const own = r => r && (r.builtin || r.source_id === 'builtin');
+        let few = settings.builtin_mode === 'off' || settings.builtin_mode === 'mix' ? [] : closestFew(list.filter(r => !own(r)), slot, skip);
+        if (!few.length) few = closestFew(list, slot, skip);
         if (few.length < 2 || !run) return few[0] || null;
         try { return few[await aiChoose(run, slot.meal, few.map(r => r.name))] || few[0]; } catch (e) { return few[0]; }
     };

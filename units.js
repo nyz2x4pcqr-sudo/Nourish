@@ -10,10 +10,10 @@
         cup: 'cup', cups: 'cup', c: 'cup', tbsp: 'tbsp', tbs: 'tbsp', tablespoon: 'tbsp', tablespoons: 'tbsp', tsp: 'tsp', teaspoon: 'tsp', teaspoons: 'tsp',
         oz: 'oz', ounce: 'oz', ounces: 'oz', lb: 'lb', lbs: 'lb', pound: 'lb', pounds: 'lb', g: 'g', gram: 'g', grams: 'g', kg: 'kg', kilogram: 'kg', kilograms: 'kg',
         ml: 'ml', milliliter: 'ml', milliliters: 'ml', millilitre: 'ml', millilitres: 'ml', l: 'l', liter: 'l', liters: 'l', litre: 'l', litres: 'l',
-        floz: 'fl oz', pint: 'pint', pints: 'pint', quart: 'quart', quarts: 'quart',
-        clove: 'clove', cloves: 'clove', slice: 'slice', slices: 'slice', can: 'can', cans: 'can', pinch: 'pinch', handful: 'handful', handfuls: 'handful',
-        piece: 'piece', pieces: 'piece', stick: 'stick', sticks: 'stick', bunch: 'bunch', head: 'head', sprig: 'sprig', sprigs: 'sprig',
-        package: 'package', packages: 'package', pkg: 'package', scoop: 'scoop', scoops: 'scoop', fillet: 'fillet', fillets: 'fillet', dash: 'dash',
+        floz: 'fl oz', pint: 'pint', pints: 'pint', quart: 'quart', quarts: 'quart', gallon: 'gallon', gallons: 'gallon',
+        clove: 'clove', cloves: 'clove', slice: 'slice', slices: 'slice', can: 'can', cans: 'can', pinch: 'pinch', pinches: 'pinch', handful: 'handful', handfuls: 'handful',
+        piece: 'piece', pieces: 'piece', stick: 'stick', sticks: 'stick', bunch: 'bunch', bunches: 'bunch', head: 'head', heads: 'head', sprig: 'sprig', sprigs: 'sprig',
+        package: 'package', packages: 'package', pkg: 'package', scoop: 'scoop', scoops: 'scoop', fillet: 'fillet', fillets: 'fillet', dash: 'dash', dashes: 'dash',
     };
     const PLURAL = { cup: 'cups', clove: 'cloves', slice: 'slices', can: 'cans', handful: 'handfuls', piece: 'pieces', stick: 'sticks', bunch: 'bunches',
         head: 'heads', sprig: 'sprigs', package: 'packages', scoop: 'scoops', fillet: 'fillets', pinch: 'pinches', dash: 'dashes', pint: 'pints', quart: 'quarts' };
