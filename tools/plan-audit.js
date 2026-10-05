@@ -113,7 +113,7 @@ DIET_WORDS.Vegan = new RegExp(DIET_WORDS.Vegetarian.source.slice(0, -4) + '|eggs
 const lc = s => String(s || '').toLowerCase();
 const words = s => lc(s).split(/[^a-z]+/).filter(w => w.length >= 3).map(w => w.replace(/(ies)$/, 'y').replace(/([^s])s$/, '$1'));
 // Pairs where the table's food has another name than the line (checked by hand).
-const SAME_FOOD = [[/\bmince\b/, /ground/], [/\bprawns?\b/, /shrimp/], [/\bswede\b/, /rutabaga/], [/\bmangetout|sugar snap/, /snow peas/], [/\bcourgette/, /zucchini/], [/\baubergine/, /eggplant/], [/\bscallions?|spring onions?|green onions?/, /onion/],
+const SAME_FOOD = [[/\bmince\b/, /ground/], [/\bprawns?\b/, /shrimp/], [/\bswede\b/, /rutabaga/], [/\bmangetout|sugar snap/, /snow peas/], [/\bpanko|bread ?crumbs/, /breadcrumb/], [/\bkimchi/, /sauerkraut|cabbage/], [/\bhot sauce|habanero|piri piri|peri peri/, /sriracha|hot sauce/], [/\bcourgette/, /zucchini/], [/\baubergine/, /eggplant/], [/\bscallions?|spring onions?|green onions?/, /onion/],
     [/\bbuns?|rolls?|baguette|crusty/, /bread/], [/\bstock\b|bouillon/, /broth/], [/\bchilli|chili|jalape/, /pepper|jalapeno|chili/], [/\bcilantro|coriander/, /coriander|cilantro|parsley/], [/\bpasta|spaghetti|penne|macaroni|fusilli|linguine|rigatoni|orzo/, /pasta|spaghetti|macaroni/],
     [/\byoghurt/, /yogurt/], [/\bpassata|crushed tomatoes|tomato puree/, /tomato/], [/\bsalt pork|fatback|pancetta|guanciale|pork belly/, /bacon/], [/\bpigeon peas|gandules|black-eyed/, /chickpea|pea/], [/\bsplit peas/, /lentil/], [/\bcornstarch|cornflour/, /corn/],
     [/\bflank|skirt|sirloin|steak|chuck|round/, /beef|steak/], [/\bwraps?\b/, /tortilla/], [/\bmayo\b/, /mayonnaise/], [/\bromaine|little gem|iceberg|salad leaves|greens|spring mix/, /lettuce/],
@@ -145,7 +145,7 @@ function checkMeal(meal, slot, ctx) {
     else {
         // A smoothie is a breakfast when it's filling (at least 250 kcal and 10 g protein), else a drink; chia pudding is a breakfast.
         const filling = /smoothie|shake/i.test(name) && kcal >= 250 && p >= 10;
-        const nm = filling || /chia pudding|overnight oats|protein pudding/i.test(name) ? null : NOT_MEAL_WORDS.find(([re]) => re.test(name));
+        const nm = filling || /chia( seed)? pudding|overnight oats|protein pudding|bread pudding|savou?ry/i.test(name) ? null : NOT_MEAL_WORDS.find(([re]) => re.test(name));
         const isMealish = MEAL_WORDS.test(name.replace(nm ? nm[0] : /$^/, ''));
         if (nm && !(isMealish && !/a starter|an article/.test(nm[1]))) add('not a meal', 'problem', `looks like ${nm[1]}`);
         else if (kcal > 0 && f * 9 / kcal > 0.7 && p * 4 / kcal < 0.12) add('not a meal', 'problem', `${Math.round(f * 9 / kcal * 100)}% of its calories are fat and only ${Math.round(p * 4 / kcal * 100)}% protein: a starter or spread, not a meal`);
@@ -171,8 +171,12 @@ function checkMeal(meal, slot, ctx) {
         if (l.key && wrongFood(l.line, l.key) && l.kcal >= 30) add('matched to the wrong food', 'problem', `"${l.line}" was counted as ${l.key} (${l.kcal} kcal a serving)`);
         if (DISCARDED.test(l.line) && l.kcal >= (/fry|frying/i.test(l.line) ? 135 : 25)) add('discarded ingredient counted', 'problem', `"${l.line}" counted as ${l.kcal} kcal a serving, but it's thrown away`);
         if (BONE_IN.test(l.line) && WEIGHT.test(l.line) && l.key) {
-            const stated = N.readLine ? (N.readLine(l.line.replace(/\b(bone[- ]in|shell[- ]on|on the bone)\b/gi, ''), servings) || {}).grams : 0;
-            if (stated && l.grams >= stated * 0.9) add('bone or shell counted as food', 'problem', `"${l.line}": ${l.grams} g counted, the whole weight with the bones or shells`);
+            // The weight as written in the line (the app's own reading already takes the bones off).
+            const w = l.line.match(/(\d+(?:\.\d+)?|\d+\s+\d\/\d|\d\/\d|[½¼¾])\s*-?\s*(lbs?|pounds?|kg|kilos?|g|grams?|oz|ounces?)\b/i);
+            const num = w ? (/[½¼¾]/.test(w[1]) ? { '½': 0.5, '¼': 0.25, '¾': 0.75 }[w[1]] : w[1].includes('/') ? w[1].split(/\s+/).reduce((a, x) => a + (x.includes('/') ? Number(x.split('/')[0]) / Number(x.split('/')[1]) : Number(x)), 0) : Number(w[1])) : 0;
+            const stated = w ? num * (/^(lb|pound)/i.test(w[2]) ? 453.6 : /^(kg|kilo)/i.test(w[2]) ? 1000 : /^(oz|ounce)/i.test(w[2]) ? 28.35 : 1) / servings * (/\b(pack|can|tin)s?\b/i.test(l.line) ? 1 : 1) : 0;
+            const perServing = l.grams / servings;
+            if (stated > 0 && perServing >= stated * 0.95) add('bone or shell counted as food', 'problem', `"${l.line}": ${l.grams} g counted, the whole weight with the bones or shells`);
         }
     });
     // Discarded lines in a brine or frying group the line itself doesn't name.
@@ -216,7 +220,7 @@ function checkMeal(meal, slot, ctx) {
         else if (stitched >= 4) add('description', 'problem', `the ingredient list stitched together: "${d.slice(0, 90)}"`);
         if (/\b(water|kosher salt|salt)\b.*\band\b/i.test(d.split(/[.,]/)[0])) add('description', 'problem', `starts with staples, not the dish: "${d.slice(0, 80)}"`);
     } else add('description', 'note', 'no description');
-    if (/^(with|and|or|in|on|of|for|to|the)\b|^[a-z]|\b(and|with|or|of|the|in)$|^\W|\d{2,}$/.test(name.trim()) || name.trim().split(/\s+/).length < 2 && name.length < 8) add('chopped title', 'problem', `"${name}"`);
+    if (/^(with|and|or|in|on|of|for|to|the)\b|^[a-z]|\b(and|with|or|of|the|in)$|^\W|\d{2,}$/.test(name.trim()) ) add('chopped title', 'problem', `"${name}"`);
     const portion = meal.scaled ? Number(meal.scaled.portion) : 1;
     if (portion && Math.abs(portion * 4 - Math.round(portion * 4)) > 0.02) add('odd serving size', 'problem', `${portion} servings`);
 

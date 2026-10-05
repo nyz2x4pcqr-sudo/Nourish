@@ -53,10 +53,13 @@
         'pork ribs': { n: [277, 15.5, 0, 23.4, 0, 0.6, 15, 242, 15], a: ['pork spare ribs', 'pork spareribs', 'spare ribs', 'spareribs', 'baby back ribs', 'baby back pork ribs', 'back ribs', 'st louis ribs', 'pork back ribs', 'ribs'], u: [[700, 'rack']] },
         'beef short ribs': { n: [388, 14.4, 0, 36.2, 0, 0.1, 9, 232, 14], a: ['short ribs', 'beef ribs', 'flanken'], u: [[250, 'rib']] },
         oxtail: { n: [196, 23, 0, 11, 0, 0, 10, 250, 18], a: ['oxtails', 'oxtail pieces'], u: [[150, 'piece']] },
+        barley: { n: [352, 9.9, 77.7, 1.2, 15.6, 0, 29, 280, 79], a: ['pearl barley', 'pot barley', 'hulled barley', 'barley'], u: [[200, 'cup']] },
         plantain: { n: [122, 1.3, 31.9, 0.4, 2.3, 0, 3, 499, 37], a: ['plantains', 'green plantains', 'green plantain', 'ripe plantains', 'platanos'], u: [[179, 'medium']] },
         'sweet chili sauce': { n: [207, 0.4, 51, 0.6, 1, 0, 8, 90, 4], a: ['thai sweet chili sauce', 'sweet chilli sauce', 'thai sweet chilli sauce'], u: [[19, 'tbsp']] },
     };
     Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });
+    // Barley is its own grain, not another name for farro (the USDA extract listed it so).
+    if (FOODS.farro && Array.isArray(FOODS.farro.a)) FOODS.farro.a = FOODS.farro.a.filter(x => !/barley/.test(x));
 
     const FISH = /\b(salmon|cod|tilapia|trout|haddock|halibut|pollock|mackerel|sea bass|snapper|tuna steak|swordfish|fish)\b/;
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
@@ -88,7 +91,7 @@
     // counted as cooked, not dry (a cup of cooked rice is about 205 kcal, dry about 675). A weight
     // "cooked according to the packet" is the dry weight.
     const COOKED_TWIN = { rice: 'cooked rice', 'brown rice': 'cooked brown rice', quinoa: 'cooked quinoa', pasta: 'cooked pasta', 'whole wheat pasta': 'cooked pasta', lentils: 'cooked lentils' };
-    const COOKED_SHARE = { udon: 0.38, 'egg noodles': 0.38, 'rice noodles': 0.3, couscous: 0.35, farro: 0.4, oats: 0.15, 'black beans': 0.38, 'kidney beans': 0.38, 'white beans': 0.38, 'pinto beans': 0.38 };
+    const COOKED_SHARE = { barley: 0.3, udon: 0.38, 'egg noodles': 0.38, 'rice noodles': 0.3, couscous: 0.35, farro: 0.4, oats: 0.15, 'black beans': 0.38, 'kidney beans': 0.38, 'white beans': 0.38, 'pinto beans': 0.38 };
     function saysCooked(raw, unit) {
         const t = String(raw).toLowerCase();
         if (/\b(uncooked|dry|dried|raw)\b/.test(t)) return false;

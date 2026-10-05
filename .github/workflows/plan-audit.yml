@@ -37,4 +37,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: plan-audit
-          path: plan-audit/plan-audit.md
+          path: |
+            plan-audit/plan-audit.md
+            plan-audit/plan-audit.json
