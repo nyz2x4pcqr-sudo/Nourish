@@ -3343,6 +3343,7 @@ function normalizeMeal(m) {
             n.micros && typeof n.micros === 'object' ? { micros: { vitd: toNumber(n.micros.vitd), ca: toNumber(n.micros.ca), k: toNumber(n.micros.k), mg: toNumber(n.micros.mg) } } : {}) : null,
         // What Nourish changed to meet the nutrition rules (shown on the recipe and in the log).
         protein_added: Array.isArray(m.protein_added) && m.protein_added.length ? m.protein_added.map(String).slice(0, 4) : undefined,
+        added_steps: Array.isArray(m.added_steps) && m.added_steps.length ? m.added_steps.map(String).slice(0, 8) : undefined,
         fiber_added: Array.isArray(m.fiber_added) && m.fiber_added.length ? m.fiber_added.map(String).slice(0, 4) : undefined,
         fat_swapped: m.fat_swapped ? String(m.fat_swapped).slice(0, 120) : undefined,
         ingredients,

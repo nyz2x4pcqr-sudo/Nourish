@@ -132,7 +132,11 @@
         }));
         return { active, passive };
     }
-    function recipeProfile(r) {
+    function recipeProfile(r0) {
+        // The recipe as written: what Nourish added (a protein or fiber food, its step) doesn't make it harder.
+        const added = new Set([].concat(r0.protein_added || [], r0.fiber_added || []).map(String));
+        const addedSteps = new Set((r0.added_steps || []).map(String));
+        const r = added.size || addedSteps.size ? Object.assign({}, r0, { ingredients: (r0.ingredients || []).filter(l => !added.has(String(l))), steps: (r0.steps || []).filter(st => !addedSteps.has(String(st))) }) : r0;
         const steps = (r.steps || []).map(String);
         const text = `${r.name || ''} ${steps.join(' ')}`;
         const techniques = TECHNIQUES.filter(([, re]) => re.test(text)).map(([name, , min]) => ({ name, min }));
@@ -211,6 +215,8 @@
         const m = `${r.name || ''} ${(r.ingredients || []).join(' ')}`.match(DINNER_ONLY_PRICEY);
         return m ? m[0].toLowerCase() : '';
     }
+    const LONG_PREP = /\b(brine|brining)\b|\b(marinate|soak|refrigerate|chill)\b[^.]{0,40}\b(overnight|(\d+|several) (to \d+ )?hours?)\b/i;
+    const MAKE_AHEAD_OK = /\b(overnight oats|chia|bircher|soaked oats|refrigerator oats|fridge oats|make[- ]ahead|meal prep|pudding)\b/i;
     function slotProblem(r, meal, limits) {
         const L = limits || slotLimits({}, meal);
         const p = profileOf(r);
@@ -225,6 +231,10 @@
             if (cooking.length || /\b(cook|heat|stove|skillet|preheat)\b/i.test((r.steps || []).join(' '))) return `needs cooking (${cooking[0] || 'heat'}), and this meal is no-cook`;
         }
         if (p.minutes > timeAllowed(L)) return `takes about ${p.minutes} min${p.timeEstimated ? ' (estimated)' : ''}; ${meal} has ${L.minutes} min`;
+        // "Involved" (over 6 of 10) is for dinner, or a meal the schedule gives plenty of time.
+        if (meal !== 'dinner' && p.difficulty > Math.max(6, L.difficulty)) return `is involved (difficulty ${p.difficulty} of 10) for a ${meal}`;
+        // Something that has to brine, marinate or soak for hours first isn't a breakfast or lunch.
+        if (meal !== 'dinner' && LONG_PREP.test((r.steps || []).join(' ')) && !MAKE_AHEAD_OK.test(r.name || '')) return `needs hours of brining, marinating or soaking first`;
         if (meal !== 'dinner') { const x = pricey(r); if (x) return `has ${x}, an expensive ingredient kept for dinner`; }
         return '';
     }
@@ -499,6 +509,7 @@
         const choices = items.map(it => portionOptions((it.base || 1) * it.want / it.r.nutrition.calories).map(abs => {
             const p = abs / (it.base || 1);
             const out = scaleRecipe(it.r, p, people);
+            if (out.scaled) out.scaled.absolute = abs;
             if (Math.abs(p - 1) < 0.01 && Number(it.r.servings) === people) delete out.scaled;
             return { p, out };
         }));
@@ -618,6 +629,8 @@
         const fTarget = ctx.targets.fat * share;
         const p = n.protein_g * f, fat = n.fat_g * f;
         cost += Math.max(0, (pTarget - p) / pTarget) * 1.5 + Math.max(0, (fat - fTarget) / fTarget) * 1.5;
+        // A meal with real protein of its own comes before one Nourish would have to add chicken to.
+        cost += Math.max(0, (MEAL_PROTEIN.min - p) / MEAL_PROTEIN.min) * (ctx.meal === 'breakfast' ? 1 : 2.5);
         cost -= Math.min(2, P.likeScore(r, ctx.likes)) * 0.5;
         if (ctx.goal === 'Cut' && r.healthy) cost -= 0.3;
         cost += goalCost(r, f, ctx.goal);
@@ -821,7 +834,8 @@
         items.forEach(it => {
             const s = sized[it.key];
             // Unchanged unless it really moves: a meal at its portion stays exactly as it was.
-            if (s.scaled && it.prev.scaled) s.scaled = Object.assign({}, s.scaled, { from_servings: it.prev.scaled.from_servings, portion: Math.round(it.prev.scaled.portion * s.scaled.portion * 100) / 100 });
+            if (s.scaled && it.prev.scaled) s.scaled = Object.assign({}, s.scaled, { from_servings: it.prev.scaled.from_servings, portion: s.scaled.absolute || Math.round(it.prev.scaled.portion * s.scaled.portion * 100) / 100 });
+            if (s.scaled) delete s.scaled.absolute;
             if (!s.scaled && !it.r.trimmed) return;
             out[it.key] = s;
         });
@@ -922,8 +936,30 @@
         if (!meal || !(need > 0.5)) return meal;
         const kind = mealType !== 'breakfast' ? 'main' : SWEET_BREAKFAST_DISH.test(meal.name || '') && !/\b(eggs?|savou?ry|masala|indian|peas|tomato|cheese|spinach|bean|congee|upma|poha)\b/i.test(meal.name || '') ? 'sweet' : 'savory';
         const n = Math.max(1, Number(meal.servings) || people || 1);
+        // One added protein food a meal, never two (chicken and tofu in a mango rice bowl): a meal
+        // still short gets more of the same food.
+        const already = (meal.protein_added || [])[0];
+        if (already) {
+            const hit = BOOSTERS[kind].concat(BOOSTERS.main, BOOSTERS.sweet, BOOSTERS.savory).find(([food]) => already.indexOf(food) >= 0);
+            if (!hit) return meal;
+            const [food, unit, perUnit] = hit;
+            const item = U ? U.splitIngredient(already) : null;
+            const have = item && item.qty ? item.qty / n : 0;
+            const more = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
+            const qty = (have + more) * n;
+            const line = `${U ? U.formatQty(qty) : qty}${unit ? ' ' + (unit === 'cup' && qty > 1 ? 'cups' : unit === 'scoop' && qty > 1 ? 'scoops' : unit) : ''} ${food}`.replace(/^1 eggs$/, '1 egg');
+            if (line === already) return meal;
+            const before = N.calculate([already], n).nutrition, after = N.calculate([line], n).nutrition;
+            if (!(after.protein_g > before.protein_g)) return meal;
+            const out = JSON.parse(JSON.stringify(meal));
+            out.ingredients = out.ingredients.map(l => (l === already ? line : l));
+            const nu = out.nutrition || {};
+            ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'].forEach(k => { if (after[k] != null) nu[k] = Math.round((Number(nu[k]) || 0) - (before[k] || 0) + after[k]); });
+            out.nutrition = nu;
+            out.protein_added = [line].concat((meal.protein_added || []).slice(1));
+            return out;
+        }
         for (const [food, unit, perUnit, step] of BOOSTERS[kind]) {
-            if ((meal.protein_added || []).some(l => l.indexOf(food) >= 0)) continue;   // a different food each time: variety, never a second scoop line
             // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces.
             const units = unit === 'cup' ? Math.ceil(need / perUnit * 4) / 4 : Math.ceil(need / perUnit);
             const qty = units * n;
@@ -934,6 +970,7 @@
             const out = JSON.parse(JSON.stringify(meal));
             out.ingredients = (out.ingredients || []).concat(line);
             out.steps = (out.steps || []).concat(step);
+            out.added_steps = (out.added_steps || []).concat(step);
             const nu = out.nutrition || {};
             ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'].forEach(k => { if (add.nutrition[k] != null) nu[k] = Math.round((Number(nu[k]) || 0) + add.nutrition[k]); });
             if (add.micros && nu.micros) Object.keys(add.micros).forEach(k => { nu.micros[k] = Math.round(((nu.micros[k] || 0) + add.micros[k]) * 10) / 10; });
@@ -974,6 +1011,12 @@
                     changed = true;
                 });
             }
+            // Every meal already at its 40 g and the day still a little short: the leanest meal gets the rest (up to 15 g).
+            if (!changed && short > 0 && short <= 15) {
+                const m = meals().sort((a, b) => cur[a].nutrition.protein_g - cur[b].nutrition.protein_g)[0];
+                const b = m ? boostProtein(cur[m], short + 2, m, people, exclude) : null;
+                if (b && b !== cur[m]) { notes.push(`${m} "${cur[m].name}": the day was short of its ${T.protein} g protein; added ${b.protein_added[0]}`); cur = Object.assign({}, cur, { [m]: b }); changed = true; }
+            }
             if (!changed) break;
             cur = fitDay(cur, settings, people);
         }
@@ -1003,6 +1046,7 @@
         const out = JSON.parse(JSON.stringify(meal));
         out.ingredients = (out.ingredients || []).concat(line);
         out.steps = (out.steps || []).concat(step);
+        out.added_steps = (out.added_steps || []).concat(step);
         const nu = out.nutrition || {};
         ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(k => { nu[k] = Math.round((Number(nu[k]) || 0) + (add.nutrition[k] || 0)); });
         nu.fiber_g = Math.round(((Number(nu.fiber_g) || 0) + (add.nutrition.fiber_g || 0)) * 10) / 10;
@@ -1075,7 +1119,11 @@
         let out = days.slice();
         const notes = [];
         const used = dishList(out.flatMap(d => MEALS.map(m => d && d[m] && d[m].name).filter(Boolean)));
+        // Never more than the week's limit from one source (3 by default) because of a swap.
+        const cap = Number(settings.source_cap) > 0 ? Number(settings.source_cap) : 3;
+        const perSource = () => { const c = {}; out.forEach(d => MEALS.forEach(m => { const x = d && d[m]; if (x) { const k = sourceKey(x); c[k] = (c[k] || 0) + 1; } })); return c; };
         weekMicros(out).low.forEach(k => {
+            const counts = perSource();
             const per = r => ((r.nutrition && r.nutrition.micros && Number(r.nutrition.micros[k])) || 0) / Math.max(1, (r.nutrition && r.nutrition.calories) || 1);
             let best = null;
             out.forEach((d, i) => MEALS.forEach(m => {
@@ -1084,6 +1132,7 @@
                 const limits = slotLimits(settings, m, weekday ? weekday(i) : null);
                 (pools[m] || []).forEach(r => {
                     if (!r || !r.nutrition || used.has(r.name) || (exclude && exclude(r)) || slotProblem(r, m, limits)) return;
+                    if ((counts[sourceKey(r)] || 0) >= cap && sourceKey(r) !== sourceKey(cur)) return;
                     const f = cur.nutrition.calories / r.nutrition.calories;
                     if (f < 0.75 || f > 1.33) return;
                     const gain = (per(r) - per(cur)) * cur.nutrition.calories;
@@ -1117,8 +1166,18 @@
         const protein = balanceProtein(fiber.day, settings, people, exclude);
         notes.push(...protein.notes);
         // Adding protein can shrink a portion, and the day's fiber with it: checked once more.
-        const again = balanceFiber(protein.day, settings, people, exclude);
+        let again = balanceFiber(protein.day, settings, people, exclude);
         notes.push(...again.notes);
+        // What was added has calories: a day now more than 5% over its target is sized again (whole,
+        // half or quarter portions), then protein and fiber are checked one last time.
+        const kcal = targetsOf(settings || {}).kcal;
+        if (kcal > 0 && dayTotals(again.day).kcal > kcal * 1.05) {
+            const resized = fitDay(again.day, settings, people);
+            const p2 = balanceProtein(resized, settings, people, exclude);
+            const f2 = balanceFiber(p2.day, settings, people, exclude);
+            notes.push(...p2.notes, ...f2.notes);
+            again = f2;
+        }
         return { day: again.day, notes };
     }
 

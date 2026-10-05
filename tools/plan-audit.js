@@ -44,7 +44,7 @@ const up = port => new Promise(ok => http.get(`http://127.0.0.1:${port}/api/info
 // ---------------------------------------------------------------------------------------------
 // The plans: different goals, calorie targets, avoided foods, diets, budgets and schedules,
 // with and without the books.
-const BASE = { calorie_target: '2200', protein_target: '140', body_weight: '', snacks_per_day: '0', diet: 'No restriction', allergies: '', budget: 'Any', calorie_mode: 'daily', big_days: '', big_days_ok: '', sources_off: '', calorie_split: 'dinner', units: 'imperial' };
+const BASE = { calorie_target: '2200', protein_target: '140', body_weight: '', snacks_per_day: '0', diet: 'No restriction', allergies: '', budget: 'Any', calorie_mode: 'daily', big_days: '', big_days_ok: '', sources_off: '', calorie_split: 'dinner', units: 'metric' };
 const CASES = [
     { id: 'lose-1500', goal: 'Cut', settings: { calorie_target: '1500', body_weight: '70' } },
     { id: 'lose-1800-nobooks', goal: 'Cut', books: false, settings: { calorie_target: '1800', body_weight: '85' } },
@@ -82,10 +82,10 @@ const NOT_MEAL_WORDS = [
     [/\b(cakes?|cupcakes?|cookies?|brownies?|blondies?|flan|pudding|ice cream|mousse|cheesecake|fudge|truffles|tart|pie)\b/i, 'a dessert'],
     [/^(how to|the best|\d+ (easy|quick|best|healthy))\b|\b(ideas|tips|guide)\b/i, 'an article'],
 ];
-const MEAL_WORDS = /\b(chicken|beef|pork|turkey|lamb|fish|salmon|tuna|shrimp|tofu|eggs?|lentils?|beans|chickpeas|quinoa|rice|pasta|noodles|potato|bowl|salad|soup|stew|curry|chili|tacos?|wraps?|sandwich|burgers?|pot pie|shepherd|quiche|frittata|omelet|omelette|oats|porridge|pancakes|waffles)\b/i;
+const MEAL_WORDS = /\b(chicken|beef|pork|turkey|lamb|fish|salmon|tuna|shrimp|tofu|eggs?|lentils?|beans|chickpeas|quinoa|rice|pasta|noodles|potato(es)?|bowls?|salads?|soups?|stews?|curry|curries|chili|tacos?|wraps?|sandwich(es)?|burgers?|pot pie|shepherd|quiche|frittata|omelet|omelette|oats|porridge|pancakes|waffles|toast|pizza|flatbread|risotto|lasagn[ae])\b/i;
 const DINNER_DISH = /\b(ribs|pot roast|roast (chicken|pork|beef|lamb)|pork shoulder|pernil|brisket|oxtail|osso buco|fried chicken|fish and chips|beer[- ]battered|prime rib|leg of lamb|whole chicken|lasagn[ae])\b/i;
 const LONG_WAIT = /\b(overnight|for (\d+ (to|or|-) )?(\d{1,2}) hours?|at least (\d+) hours?|(\d+)[- ]?(to|-)[- ]?(\d+) hours?|brine|brining|marinate for (\d+) hours)\b/i;
-const DISCARDED = /\b(brine|brining|for (deep[- ]?)?frying|to fry|deep[- ]fry|for soaking|soaking water|for boiling|cooking water|to cover)\b/i;
+const DISCARDED = /\b(for (the )?brine|for brining|for (deep[- ]?|shallow[- ]?)?frying|to (deep[- ]?)?fry|for soaking|soaking water|for boiling|cooking water|water to cover)\b/i;
 const BONE_IN = /\b(bone[- ]in|on the bone|marrow bones?|ribs?|rack of|oxtail|drumsticks?|chicken wings?|whole chicken|chicken pieces|shanks?|shell[- ]on|in (their|the) shells?|whole (crab|lobster)|crab legs|mussels|clams)\b/i;
 const WEIGHT = /\b(\d+(\.\d+)?|\d+ \d\/\d)\s*(-|\s)?(lbs?|pounds?|kg|kilos?|g|grams?|oz|ounces?)\b/i;
 const LUXURY = /\b(wagyu|caviar|truffles?|foie gras|lobster|langoustines?|king crab|saffron)\b/i;
@@ -118,7 +118,7 @@ const SAME_FOOD = [[/\bmince\b/, /ground/], [/\bprawns?\b/, /shrimp/], [/\bswede
     [/\byoghurt/, /yogurt/], [/\bsalt pork|fatback|pancetta|guanciale|pork belly/, /bacon/], [/\bpigeon peas|gandules|black-eyed/, /chickpea|pea/], [/\bsplit peas/, /lentil/], [/\bcornstarch|cornflour/, /corn/],
     [/\bflank|skirt|sirloin|steak|chuck|round/, /beef|steak/], [/\bwraps?\b/, /tortilla/], [/\bmayo\b/, /mayonnaise/], [/\bromaine|little gem|iceberg|salad leaves|greens|spring mix/, /lettuce/],
     [/\bblueberr|raspberr|strawberr|blackberr/, /berr/], [/\blox\b|smoked salmon/, /smoked salmon/], [/\bnoodles?\b|ramen|udon|soba|lo mein|vermicelli/, /pasta|udon|noodle/], [/\bgarbanzo/, /chickpea/],
-    [/\bcheese|cotija|manchego|monterey|jack|colby|gruyere|emmental|gouda|pecorino|asiago|fontina|provolone/, /cheese|cheddar|jack|parmesan|mozzarella/], [/\btaco seasoning|seasoning|spice mix|spice blend/, /masala|spice|seasoning|chili powder|paprika|cumin/], [/\bcod|haddock|tilapia|pollock|halibut|white fish/, /fish|cod/], [/\bold bay|seasoning|spice|chili powder|paprika|cumin/, /spice|seasoning|paprika|chili|cumin|pepper/]];
+    [/\bcheese|cotija|manchego|monterey|jack|colby|gruyere|emmental|gouda|pecorino|asiago|fontina|provolone/, /cheese|cheddar|jack|parmesan|mozzarella/], [/\btaco seasoning|seasoning|spice mix|spice blend|curry powder/, /masala|spice|seasoning|chili powder|paprika|cumin|curry/], [/\bcod|haddock|tilapia|pollock|halibut|white fish/, /fish|cod/], [/\bold bay|seasoning|spice|chili powder|paprika|cumin/, /spice|seasoning|paprika|chili|cumin|pepper/]];
 function wrongFood(line, key) {
     const l = lc(line), k = lc(key);
     if (!k || /^(water|salt|pepper)$/.test(k)) return false;
@@ -155,7 +155,7 @@ function checkMeal(meal, slot, ctx) {
     const steps = (meal.steps || []).join(' ');
     const lim = ctx.limits && ctx.limits[slot];
     if (lim && isFinite(lim.minutes) && minutesOf(meal) > lim.minutes * 1.3 + 5) add('too slow for the slot', 'problem', `${minutesOf(meal)} minutes of cooking; ${slot} allows about ${lim.minutes}`);
-    if (slot !== 'dinner' && LONG_WAIT.test(steps) && !meal.make_ahead && !/overnight oats|chia/i.test(name)) add('too involved for the slot', 'problem', `needs "${steps.match(LONG_WAIT)[0]}" before a ${slot}`);
+    if (slot !== 'dinner' && LONG_WAIT.test(steps) && !meal.make_ahead && !/overnight oats|chia|bircher|soaked oats|refrigerator oats|fridge oats|make[- ]ahead|pudding/i.test(name)) add('too involved for the slot', 'problem', `needs "${steps.match(LONG_WAIT)[0]}" before a ${slot}`);
     try {
         const prof = PL.recipeProfile(meal);
         if (prof && prof.difficulty > (lim ? Math.max(lim.difficulty, 6) : 6) && slot !== 'dinner') add('too involved for the slot', 'problem', `difficulty ${prof.difficulty} of 10 ("Involved") at ${slot}`);
@@ -178,7 +178,7 @@ function checkMeal(meal, slot, ctx) {
     (meal.ingredients || []).forEach(l => { if (/^(for the |brine:?$|.*:$)/i.test(l.trim())) g = lc(l); else groups.push([l, g]); });
     groups.forEach(([l, grp]) => { if (/brine|soak/.test(grp) && calc) { const hit = calc.lines.find(x => x.line === l); if (hit && hit.kcal >= 25) add('discarded ingredient counted', 'problem', `"${l}" (in the ${grp.replace(/[:]/g, '')}) counted as ${hit.kcal} kcal a serving`); } });
     if (/\bmarrow\b/i.test(text) && p > 15) add('implausible nutrition', 'problem', `bone marrow is nearly all fat, but this has ${p} g protein`);
-    if (kcal > 0 && p * 4 / kcal > 0.6 && !meal.protein_added) add('implausible nutrition', 'problem', `${Math.round(p * 4 / kcal * 100)}% of the calories from protein: leaner than plain chicken breast`);
+    if (kcal > 0 && p * 4 / kcal > 0.85 && !meal.protein_added) add('implausible nutrition', 'problem', `${Math.round(p * 4 / kcal * 100)}% of the calories from protein: leaner than plain chicken breast`);
     if (kcal > 0 && (kcal < 120 || kcal > 2000)) add('implausible nutrition', 'problem', `${kcal} kcal for a ${slot}`);
 
     // 4. Added by the app to make it pass.
@@ -211,11 +211,11 @@ function checkMeal(meal, slot, ctx) {
     const avoid = String(ctx.avoid || '').split(',').concat(String(ctx.settings.allergies || '').split(',')).map(s => s.trim().toLowerCase()).filter(Boolean);
     avoid.forEach(a => {
         const re = AVOID_WORDS[a] || new RegExp(`\\b${a.replace(/s$/, '')}s?\\b`, 'i');
-        const hit = (meal.ingredients || []).concat([name]).find(l => re.test(l) && !/\b(free|vegan|dairy-free|plant-based|non-dairy|coconut milk|oat milk|almond milk|soy milk|nut-free)\b/i.test(l));
+        const hit = (meal.ingredients || []).concat([name]).find(l => re.test(a === 'dairy' ? l.replace(/\b(peanut|almond|cashew|nut|seed|sunflower|apple|cocoa|shea|soy|oat|coconut|rice|plant|vegan|dairy-free|non-dairy)[- ](butter|milk|cream|yogh?urt|cheese)\b/gi, '') : l) && !/\b(free|vegan|dairy-free|plant-based|non-dairy|coconut milk|oat milk|almond milk|soy milk|nut-free)\b/i.test(l));
         if (hit) add('avoided food present', 'problem', `${a}: "${hit}"`);
     });
     const dietRe = DIET_WORDS[ctx.settings.diet];
-    if (dietRe) { const hit = (meal.ingredients || []).find(l => dietRe.test(l) && !/\b(vegetable|veggie|vegan|plant|meatless|mushroom|stock|broth)\b/i.test(l) && !/\b(free)\b/i.test(l)); if (hit) add('avoided food present', 'problem', `${ctx.settings.diet}: "${hit}"`); }
+    if (dietRe) { const hit = (meal.ingredients || []).find(l => dietRe.test(l.replace(/\b(peanut|almond|cashew|nut|seed|sunflower|apple|cocoa|shea|soy|oat|coconut|rice|plant|vegan|dairy-free|non-dairy)[- ](butter|milk|cream|yogh?urt|cheese)\b/gi, '')) && !/\b(vegetable|veggie|vegan|plant|meatless|mushroom|stock|broth|egg-free|eggless)\b/i.test(l) && !/\b(free)\b/i.test(l)); if (hit) add('avoided food present', 'problem', `${ctx.settings.diet}: "${hit}"`); }
     return out;
 }
 
@@ -329,7 +329,11 @@ async function main() {
             const inPlan = new Set(daysData.flatMap(d => MEALS.map(t => d && d[t] && d[t].name)).filter(Boolean));
             const exclude = NourishPrefs.excluder({ avoid: prefs.hates, allergies: settings.allergies, diet: settings.diet });
             const spareWeb = {};
-            MEALS.forEach(t => { spareWeb[t] = ((lastPlanPools || {})[t] || []).filter(r => r.source_url && !r.from_book && !r.builtin && !inPlan.has(r.name) && !exclude(r) && daysData.some((d, i) => !slotCheck(r, t, i))).length; });
+            const perSite = {};
+            daysData.forEach(d => MEALS.forEach(t => { const m = d && d[t]; if (m && m.source_name) perSite[m.source_name] = (perSite[m.source_name] || 0) + 1; }));
+            const share = { breakfast: 0.25, lunch: 0.3, dinner: 0.45 };
+            MEALS.forEach(t => { spareWeb[t] = ((lastPlanPools || {})[t] || []).filter(r => r.source_url && !r.from_book && !r.builtin && !inPlan.has(r.name) && !exclude(r) && (perSite[r.source_name] || 0) < (Number(settings.source_cap) || 3)
+                && r.nutrition && daysData.some((d, i) => { const f = dayKcalTarget(i) * share[t] / r.nutrition.calories; return f >= 0.5 && f <= 2 && !slotCheck(r, t, i); })).length; });
             return {
                 error, ms: Date.now() - since,
                 days: JSON.parse(JSON.stringify(daysData)).map(d => { MEALS.forEach(t => { const m = d && d[t]; if (m && !m.description && typeof describeFromRecipe === 'function') { m.description = describeFromRecipe(m); m.description_made = true; } }); return d; }),

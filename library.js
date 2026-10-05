@@ -35,7 +35,7 @@
     }
     function timeIn(lines) {
         for (const l of lines) {
-            const m = l.match(/\btotal(?: time)?\b\D{0,10}(?:(\d+)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i);
+            const m = l.match(/\b(?:total(?: time)?|ready in)\b\D{0,10}(?:(\d+)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i);
             if (m && (m[1] || m[2])) return Number(m[1] || 0) * 60 + Number(m[2] || 0);
         }
         return null;
@@ -54,7 +54,7 @@
             for (let k = i - 1; k >= Math.max(floor, i - 15); k--) {
                 if (lines[k] && /^#+\s/.test(lines[k]) && titleLike(lines[k])) { title = lines[k]; titleAt = k; break; }
             }
-            if (!title) for (let k = i - 1; k >= Math.max(floor, i - 15); k--) { if (lines[k] && titleLike(lines[k]) && !/\b(serves|servings|prep|cook|total|yield|makes)\b/i.test(lines[k])) { title = lines[k]; titleAt = k; break; } }
+            if (!title) for (let k = i - 1; k >= Math.max(floor, i - 15); k--) { if (lines[k] && titleLike(lines[k]) && !/\b(serves|servings|prep|cook|total|yield|makes|ready in|minutes|mins|hours?)\b/i.test(lines[k])) { title = lines[k]; titleAt = k; break; } }
             const ingredients = [];
             let j = i + 1;
             for (; j < lines.length && !STEP_HEAD.test(lines[j]) && !ING_HEAD.test(lines[j]); j++) {
@@ -164,6 +164,9 @@
             const seen = new Map();
             lines.forEach((l, i) => {
                 if (!l || l.length > 60 || isIngLine(l)) return;
+                // A recipe's own structure repeats on every page ("Ingredients", "Method", "Serves 4",
+                // "Ready in 30 minutes"): never a running head.
+                if (ING_HEAD.test(l) || STEP_HEAD.test(l) || OTHER_HEAD.test(l) || /\b(serves|servings?|makes|yield|ready in|prep|cook(ing)? time|total time|minutes|mins|hours?)\b/i.test(l)) return;
                 const k = l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ');
                 if (!seen.has(k)) seen.set(k, new Set());
                 seen.get(k).add(pages[i]);

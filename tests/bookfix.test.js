@@ -187,3 +187,14 @@ test('book titles and authors are cleaned of download-site tags', () => {
     assert.equal(L.cleanAuthor('Chau, Andrew'), 'Andrew Chau');
     assert.equal(L.cleanAuthor('Andrew Chau & Bin Chen'), 'Andrew Chau & Bin Chen');
 });
+
+test('a PDF cookbook whose every page says "Ingredients", "Method", "Serves 4": those lines are never taken for running heads (titles and servings were lost)', () => {
+    const L = require('../library.js');
+    const { TEXT_PDF } = require('../tools/audit-recipes.js');
+    const { pageLines } = require('../tools/make-audit-books.js');
+    const pages = TEXT_PDF.recipes.map(r => [r.title].concat(pageLines(r)).join('\n'));
+    const found = L.findRecipesInText(pages.join('\n\f\n'), { fallbackTitle: '' });
+    assert.deepEqual(found.map(r => r.name), TEXT_PDF.recipes.map(r => r.title));
+    found.forEach((r, i) => assert.equal(r.servings, Number(TEXT_PDF.recipes[i].serves.match(/\d+/)[0]), r.name));
+    assert.equal(found.find(r => /Pancakes/.test(r.name)).time_minutes, 15);
+});
