@@ -134,7 +134,7 @@ function checkMeal(m, slot, ctx, add) {
         if (!x.key) return;
         const hit = N.matchFood(x.line);
         const phrase = hit ? hit.phrase : x.key;
-        const words = String(U.splitIngredient(x.line).text || x.line).toLowerCase().replace(/\b(lettuce|romaine|palm|artichoke|celery|cabbage|little gem|gem)( lettuce)? hearts?\b|\bhearts? of (palm|romaine|lettuce|artichoke)\b|\b(celery|chard) ribs?\b|\b(rice|pasta|soup|chicken) bones? broth\b/g, ' ').replace(/\([^)]*\)/g, ' ').replace(/,.*$/, '').replace(/\b(bone|shell|skin|head)[- ](in|on)\b/g, ' ').replace(/\bboneless\b|\bskinless\b/g, ' ');
+        const words = String(U.splitIngredient(x.line).text || x.line).toLowerCase().replace(/\b(lettuce|romaine|palm|artichoke|celery|cabbage|little gem|gem)( lettuce)? hearts?\b|\bhemp hearts?\b|\bhearts? of (palm|romaine|lettuce|artichoke)\b|\b(celery|chard) ribs?\b|\b(rice|pasta|soup|chicken) bones? broth\b/g, ' ').replace(/\([^)]*\)/g, ' ').replace(/,.*$/, '').replace(/\b(bone|shell|skin|head)[- ](in|on)\b/g, ' ').replace(/\bboneless\b|\bskinless\b/g, ' ');
         const nouns = (words.match(NOUNS) || []).map(w => w.toLowerCase().replace(/s$/, ''));
         const covered = `${phrase} ${x.key}`.toLowerCase();
         const missing = nouns.filter(w => covered.indexOf(w) < 0 && !(w === 'breast' && /chicken|turkey|duck/.test(covered)) && !(w === 'thigh' && /chicken/.test(covered)));

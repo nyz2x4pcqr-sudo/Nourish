@@ -3501,6 +3501,10 @@ function checkWeek(days) {
     nlog('plan', `Vitamins and minerals a day this week: ${Object.keys(m.avg).map(k => `${m.names[k]} ${m.avg[k]} ${m.units[k]} (aim ${m.targets[k]})`).join(', ')}`, fixed.flags.length ? fixed.flags : null);
     const totals = days.filter(Boolean).map(d => P.dayTotals(d));
     if (totals.length) nlog('plan', `Protein and fiber a day: ${totals.map((t, i) => `${dayName(i, true)} ${Math.round(t.protein)} g / ${Math.round(t.fiber)} g`).join(', ')} (targets ${proteinTarget()} g protein, 30 g fiber)`);
+    // A day well short of its protein (under 80%) is said plainly, never patched with foods that
+    // don't belong in the dishes: with some diets and recipe libraries there isn't enough.
+    const short = totals.map((t, i) => ({ t, i })).filter(x => x.t.protein < proteinTarget() * 0.8);
+    if (short.length) flags.push(`Lower in protein: ${short.map(x => `${dayName(x.i)} (${Math.round(x.t.protein)} g of ${proteinTarget()} g)`).join(', ')}. A protein snack helps (Settings → Profile → Snacks), or swap a meal for one with more beans, tofu, eggs, fish or meat.`);
     planFlags = flags.concat(fixed.flags);
     try { localStorage.setItem('nourish_plan_flags', JSON.stringify(planFlags)); } catch (e) { /* full */ }
 }

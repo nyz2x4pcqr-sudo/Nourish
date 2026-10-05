@@ -1031,14 +1031,19 @@
             const enough = own / por >= (mealType === 'breakfast' ? 8 : 12);
             if (added <= own + 1 && enough) break;
             const line = extra[extra.length - 1];
-            const minus = N.calculate([line], Math.max(1, Number(out.servings) || 1)).nutrition;
+            const n = Math.max(1, Number(out.servings) || 1);
+            const minus = N.calculate([line], n).nutrition;
             const next = JSON.parse(JSON.stringify(out));
             const idx = next.ingredients.lastIndexOf(line);
-            if (idx >= 0) next.ingredients.splice(idx, 1);
-            next.protein_added = next.protein_added.filter(l => l !== line);
+            // Made smaller to fit when it can be (a cup of yogurt becomes ¾ cup), taken off otherwise.
+            const smaller = enough && minus.protein_g > 0 ? scaleLine(line, Math.max(0, (own - (added - minus.protein_g)) / minus.protein_g) * 0.95) : '';
+            const keep = smaller && smaller !== line && N.calculate([smaller], n).nutrition.protein_g <= own - (added - minus.protein_g) && N.calculate([smaller], n).nutrition.protein_g > 0 ? smaller : '';
+            const plus = keep ? N.calculate([keep], n).nutrition : { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
+            if (idx >= 0) { if (keep) next.ingredients[idx] = keep; else next.ingredients.splice(idx, 1); }
+            next.protein_added = next.protein_added.map(l => (l === line ? keep : l)).filter(Boolean);
             if (!next.protein_added.length) delete next.protein_added;
-            ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(k => { next.nutrition[k] = Math.max(0, Math.round((Number(next.nutrition[k]) || 0) - (minus[k] || 0))); });
-            next.removed = (out.removed || []).concat(line);
+            ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(k => { next.nutrition[k] = Math.max(0, Math.round((Number(next.nutrition[k]) || 0) - (minus[k] || 0) + (plus[k] || 0))); });
+            next.removed = (out.removed || []).concat(keep ? `${line} (now ${keep})` : line);
             out = next;
         }
         return out;
@@ -1070,7 +1075,7 @@
             if ((meal.protein_added || []).some(l => l.indexOf(word) >= 0)) continue;   // a different food each time: variety, never a second scoop line
             // How much, per person, in kitchen amounts: whole eggs, ¼ cups, whole scoops, ounces. Rounded
             // up to cover what's needed, or down when that would be more than the dish's own protein.
-            const step = unit === 'cup' ? 0.25 : 1;
+            const step = unit === 'cup' ? 0.25 : unit === 'scoop' ? 0.5 : 1;
             const up = Math.ceil(need / perUnit / step) * step, down = Math.floor(need / perUnit / step) * step;
             let line = '', add = null;
             for (const units of [...new Set([up, down])].filter(u => u > 0)) {
@@ -1288,7 +1293,10 @@
         if (Math.abs(before.kcal / T.kcal - 1) > 0.05) {
             const refit = fitDay(cur2, settings, people);
             const now = dayTotals(refit);
-            if (Math.abs(now.kcal - T.kcal) < Math.abs(before.kcal - T.kcal) && now.protein >= Math.min(before.protein * 0.9, T.protein * 0.9)) {
+            // Well off (over 10%): back within range comes first, while protein stays at 80% or more.
+            const far = Math.abs(before.kcal / T.kcal - 1) > 0.1;
+            const proteinOk = now.protein >= Math.min(before.protein * 0.9, T.protein * 0.9) || (far && Math.abs(now.kcal / T.kcal - 1) <= 0.1 && now.protein >= T.protein * 0.8);
+            if (Math.abs(now.kcal - T.kcal) < Math.abs(before.kcal - T.kcal) && proteinOk) {
                 notes.push(`with the protein and fiber added, the day came to ${Math.round(before.kcal)} kcal; portions sized again to ${Math.round(now.kcal)} kcal`);
                 cur2 = refit;
             }
@@ -1296,7 +1304,7 @@
         // Sizing rounds whole things (eggs, a glass of milk) differently from the dish: an addition
         // that ends up more than the dish's own protein, or on a dish that no longer has enough of its
         // own, is taken off again.
-        MEALS.forEach(t => { const m = cur2[t]; const fixed = m && trimAdditions(m, t); if (fixed && fixed !== m) { notes.push(`${t} "${m.name}": took off ${fixed.removed.join(', ')} (the protein added was more than the dish's own after sizing)`); delete fixed.removed; cur2 = Object.assign({}, cur2, { [t]: fixed }); } });
+        MEALS.forEach(t => { const m = cur2[t]; const fixed = m && trimAdditions(m, t); if (fixed && fixed !== m) { notes.push(`${t} "${m.name}": made smaller or took off ${fixed.removed.join(', ')} (the protein added was more than the dish's own after sizing)`); delete fixed.removed; cur2 = Object.assign({}, cur2, { [t]: fixed }); } });
         return { day: cur2, notes };
     }
 
