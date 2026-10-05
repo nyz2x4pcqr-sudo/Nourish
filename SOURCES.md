@@ -39,7 +39,7 @@ At plan time Nourish reads only the few pages a plan needs, at most 4 at a time 
 
 | Service | What it adds | Key |
 |---|---|---|
-| [Spoonacular](https://spoonacular.com/food-api) | Large recipe database with nutrition, filtered by diet and allergies | free key, Settings → Advanced → Recipe sources & keys |
+| [Spoonacular](https://spoonacular.com/food-api) | Large recipe database with nutrition, filtered by diet and allergies | free key, Settings → Recipe and nutrition services |
 
 ## Not used, and why
 
@@ -97,3 +97,22 @@ The app lists these too, in Settings → Recipe sites → "Sites Nourish doesn't
 ## Nutrition data
 
 Ingredient nutrition comes from **USDA FoodData Central** (SR Legacy, public domain), built into the app as `nutrition-data.js` by `tools/usda-table.py`. Open Food Facts is asked only for an ingredient the table doesn't have, when online, and the answer is cached.
+
+## Free recipe and nutrition services (0.1.14)
+
+All optional, all free, each enabled with a free key in Settings → Recipe and nutrition services.
+Nourish works with none of them. Only recipe and ingredient text is sent. Keys stay in the iPhone
+Keychain, the Android Keystore, or encrypted on the PC (`.nourish-key` next to the data file), and are
+never logged.
+
+| Service | Used for | Free limit | What its terms ask, and how Nourish follows them |
+|---|---|---|---|
+| Edamam Nutrition Analysis (Developer plan) | A second opinion on each recipe's nutrition, per ingredient | about 400 recipes a month, 10 a minute | Attribution next to the nutrition facts ("Nutrition analysis by Edamam", linked). Caching is limited: Nourish keeps only its own conclusion and the four main numbers (calories, protein, fat, carbs) per recipe, and shows Edamam's per-ingredient breakdown only in the session it was fetched. Not for commercial use on the free plan. |
+| FatSecret Platform (Basic) | Per-ingredient food lookups as another check, and FatSecret's own recipes | about 5,000 calls a day, US foods | "Powered by fatsecret" attribution. Only ids (food_id, recipe_id) may be kept beyond 24 hours: food data is kept 24 hours at most, and FatSecret recipes are used for the plan only. OAuth 1.0 signing, so no IP address has to be registered. |
+| USDA FoodData Central | Per-ingredient food lookups as another check | 1,000 an hour with a free key; the public DEMO_KEY (about 30 an hour) without one | Public domain (CC0): cached freely. Credited as USDA FoodData Central. |
+| Spoonacular (free) | Recipe search with protein and calorie filters | 50 points a day | Data may be cached for 1 hour: Spoonacular recipes are used for the plan only, never kept in the library. Points are counted (from its quota header on the PC, estimated on a phone) and searches stop before the limit. Attribution under its recipes. |
+| TheMealDB | Recipes, no key | | Its free test key is for development and education; TheMealDB asks publicly released apps to become a supporter (paid). Kept as before; noted here. |
+
+Looked at and skipped: Edamam Recipe Search (paid), Nutritionix (no public free plan any more),
+API Ninjas / CalorieNinjas (the free tier leaves out calories and protein, and doesn't allow commercial
+use), unofficial scrapers presented as APIs (python-allrecipes and similar).

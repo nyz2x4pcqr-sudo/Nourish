@@ -59,7 +59,7 @@
         },
         spoonacular: {
             name: 'Spoonacular',
-            what: 'Finds recipes by protein and calories, then Nourish reads them from the recipe’s own site.',
+            what: 'Finds recipes by protein and calories, with their own nutrition (used for your plan, never stored).',
             free: 'Free plan: 50 points a day (a search costs about 1–2 points).',
             signup: 'https://spoonacular.com/food-api/console#Dashboard',
             keys: [['spoonacular_api_key', 'API key']],

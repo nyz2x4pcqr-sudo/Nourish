@@ -1592,3 +1592,4 @@ a.settings-button { display: flex; text-decoration: none; }
 .settings-hint.ok { color: var(--success); }
 .settings-hint.warn { color: var(--danger); }
 .recipe-credit { text-align: center; margin: var(--s-2) 0 var(--s-4); }
+.header-actions .link-btn { white-space: nowrap; }
