@@ -145,9 +145,12 @@ function checkMeal(m, slot, ctx, add) {
         if (Math.abs(fromMacros - kcal) / kcal > 0.25) add('nutrition', 'fail', `calories (${kcal}) don't match its macros (${Math.round(fromMacros)} kcal from P/C/F)`);
         if (/\bmarrow\b/i.test(dish) && fShare < 0.55) add('nutrition', 'fail', `bone marrow is almost pure fat, but only ${Math.round(fShare * 100)}% of the calories are fat (${per.p} g protein)`);
         if (/\b(ribs|short ribs?)\b/i.test(dish) && (fShare < 0.3 || per.p < 10)) add('nutrition', 'fail', `ribs with ${Math.round(fShare * 100)}% fat and ${per.p} g protein`);
-        if (/\bfried\b|\bdeep[- ]fried\b|\bbattered\b/i.test(dish) && kcal / portionOf(m) > 1400) add('nutrition', 'fail', `${Math.round(kcal / portionOf(m))} kcal a serving: the frying oil was counted as eaten`);
-        if (kcal / portionOf(m) > 1700) add('nutrition', 'fail', `${Math.round(kcal / portionOf(m))} kcal in one serving of the recipe`);
-        if (per.p / portionOf(m) > 110) add('nutrition', 'fail', `${Math.round(per.p / portionOf(m))} g protein in one serving`);
+        // One serving of the recipe as written: the meal without what the app added, over its portion.
+        const extra = N.calculate([].concat((m.protein_added || []).filter(l => !/^a bit more\b/i.test(l)), m.fiber_added || []), m.servings || 1).nutrition;
+        const oneKcal = (kcal - extra.calories) / portionOf(m), oneP = (per.p - extra.protein_g) / portionOf(m);
+        if (/\bfried\b|\bdeep[- ]fried\b|\bbattered\b/i.test(dish) && oneKcal > 1400) add('nutrition', 'fail', `${Math.round(oneKcal)} kcal a serving: the frying oil was counted as eaten`);
+        if (oneKcal > 1700) add('nutrition', 'fail', `${Math.round(oneKcal)} kcal in one serving of the recipe`);
+        if (oneP > 110) add('nutrition', 'fail', `${Math.round(oneP)} g protein in one serving of the recipe`);
         // The dish's main protein (by its name) must be counted.
         const main = (dish.match(/\b(chicken|beef|pork|lamb|turkey|salmon|shrimp|cod|tuna|fish|ribs|steak|sausages?|tofu|lentils?)\b/i) || [])[1];
         if (main && !calc.lines.some(x => x.key && new RegExp(`\\b${main.replace(/s$/, '')}`, 'i').test(`${x.line} ${x.key}`) && x.kcal > 0)) add('nutrition', 'fail', `the dish is ${main}, but no ${main} is counted in its nutrition`);
@@ -208,8 +211,9 @@ function checkMeal(m, slot, ctx, add) {
         if (/\b(recipe video|jump to|click|subscribe|this post|affiliate|pin (it|this)|scroll down|printable)\b/i.test(d)) add('description', 'fail', `"${d}": website text, not a description of the dish`);
         if (/\b\d+(\.\d+)?\s*(cups?|tbsp|tsp|tablespoons?|teaspoons?|pounds?|lbs?|oz|ounces?|grams?|g|kg|gallons?|quarts?|pints?|liters?|litres?|ml)\b|\b(gallons?|quarts?|pints?)\b/i.test(d)) add('description', 'fail', `"${d}": reads like an ingredient list (amounts and units)`);
         if (/\b(brine|kosher salt|sea salt|for (deep )?frying|cold water|gallon)\b/i.test(d) || (m.description_made && /\b(water|ice)\b/i.test(d))) add('description', 'fail', `"${d}": mentions water, salt, brine or frying oil, not the dish`);
-        const foodWords = new Set(`${name} ${own(m).join(' ')}`.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3));
-        if (!d.toLowerCase().split(/[^a-z]+/).some(w => w.length > 3 && foodWords.has(w))) add('description', 'fail', `"${d}": doesn't mention anything in the dish`);
+        const one = w => w.replace(/(es|s)$/, '');
+        const foodWords = new Set(`${name} ${own(m).join(' ')}`.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3).map(one));
+        if (!d.toLowerCase().split(/[^a-z]+/).some(w => w.length > 3 && foodWords.has(one(w)))) add('description', 'fail', `"${d}": doesn't mention anything in the dish`);
         if (d.length < 25) add('description', 'fail', `"${d}": too short to describe the dish`);
     }
 

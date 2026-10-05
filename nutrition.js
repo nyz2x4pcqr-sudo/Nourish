@@ -36,6 +36,9 @@
         'ham hocks': 'pork shoulder', 'ham hock': 'pork shoulder', 'pork hocks': 'pork shoulder',
         'branzino': 'cod', 'sea bass': 'cod', 'snapper': 'cod', 'red snapper': 'cod', 'whole fish': 'cod', 'sea bream': 'cod', 'white fish': 'cod',
         'chicken pieces': 'chicken', 'chicken legs': 'chicken', 'chicken leg quarters': 'chicken', 'leg quarters': 'chicken',
+        'french beans': 'green beans', 'fine beans': 'green beans', 'haricots verts': 'green beans', 'string beans': 'green beans',
+        // Nut and seed butters aren't butter (0.1.12 read "nut or seed butter" as dairy butter).
+        'nut butter': 'peanut butter', 'nut or seed butter': 'peanut butter', 'seed butter': 'peanut butter', 'sunflower seed butter': 'peanut butter', 'cashew butter': 'peanut butter',
         'tenderstem': 'broccoli', 'sweetcorn': 'corn', 'mangetout': 'snow peas', 'sugar snap peas': 'snow peas', 'chestnut mushrooms': 'mushrooms', 'baby plum tomatoes': 'cherry tomatoes',
     };
     // Common foods the USDA extract doesn't carry (per 100 g: kcal, protein, carbs, fat; USDA SR
@@ -62,6 +65,8 @@
         lobster: { n: [77, 16.5, 0, 0.8, 0, 0, 84, 275, 43], a: ['lobster meat', 'lobster tails', 'lobster tail', 'lobsters'], u: [[145, 'cup']] },
         clams: { n: [86, 14.7, 3.6, 1, 0, 0, 46, 314, 9], a: ['clam', 'littleneck clams', 'cockles'], u: [] },
         // USDA SR Legacy: tomatillos, raw; broad (fava) beans, raw; mixed cooked grains as cooked brown rice and quinoa.
+        // Frozen unsweetened acai pulp (a packet's label: per 100 g).
+        acai: { n: [60, 1, 6, 5, 3, 0, 20, 100, 15], a: ['acai pulp', 'acai puree', 'frozen acai', 'acai berry'], u: [[100, 'pack']] },
         tomatillo: { n: [32, 1, 5.8, 1, 1.9, 0, 7, 268, 20], a: ['tomatillos'], u: [[34, 'medium'], [132, 'cup']] },
         'fava beans': { n: [88, 7.9, 17.6, 0.7, 7.5, 0, 37, 332, 33], a: ['broad beans', 'fava bean', 'broad bean'], u: [[109, 'cup']] },
         'cooked grains': { n: [120, 3.5, 23, 1.2, 2.2, 0, 10, 60, 50], a: ['mixed grains', 'cooked mixed grains', 'grain mix', 'pouch cooked grains'], u: [[195, 'cup']] },
@@ -70,7 +75,11 @@
 
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
     const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, 'cherry tomatoes': 17, 'grape tomatoes': 8,
-        'pork ribs': 1000, 'beef short ribs': 300, oxtail: 150, 'lamb chop': 700, 'bone marrow': 250, lobster: 600, 'beef steak': 300, clams: 20, 'pork shoulder': 600 };
+        'pork ribs': 1000, 'beef short ribs': 300, oxtail: 150, 'lamb chop': 700, 'bone marrow': 250, lobster: 600, 'beef steak': 300, clams: 20, 'pork shoulder': 600,
+        // One prawn is about 15 g, not 100; a boneless chicken breast about 200 g.
+        shrimp: 15, 'chicken breast': 200 };
+    // A fish fillet as recipes mean it: one portion, about 150 g (USDA's "fillet" is half a side of salmon, 396 g).
+    const FISH = /^(salmon|cod|tilapia|tuna steak|trout|haddock|halibut|sea bass|white fish|pollock|hake|mackerel)$/;
     // "2 racks of ribs", "1 slab": one rack weighs a set amount (EACH), not "one rib".
     const EACH_RACK = /\b(racks?|slabs?)\b/;
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
@@ -143,6 +152,7 @@
     }
     // A whole thing ("2 eggs", "1 onion", "1 chicken breast"): USDA's medium, large or whole size.
     function eachGrams(food, key, phrase) {
+        if (FISH.test(key)) return 150;
         const byPhrase = EACH_PHRASE.find(([re]) => re.test(phrase || ''));
         if (byPhrase) return byPhrase[1];
         if (EACH[key]) return EACH[key];
@@ -219,6 +229,7 @@
     // "1 whole chicken (about 4 pounds)", "2 racks of lamb (about 1 1/2 pounds each)".
     const SIZE = /^(?:x\s*)?(\d+(?:\.\d+)?)\s*-?\s*(ounces?|oz|grams?|g|pounds?|lbs?|kg)\b\.?/i;
     const BRACKET = /\((?:about|approx\.?|around|roughly|at least)?\s*((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?|[½¼¾])\s*-?\s*(pounds?|lbs?|ounces?|oz|grams?|g|kilograms?|kg)\b([^)]*)\)/i;
+    const ABOUT = /,\s*(?:about|approx\.?|around|roughly)\s*((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?)\s*-?\s*(pounds?|lbs?|ounces?|oz|grams?|g|kilograms?|kg)\b(\s*(?:each|total|in all))?/i;
     const toGrams = (n, unit) => n * (/^(pound|lb)/i.test(unit) ? 453.6 : /^(ounce|oz)/i.test(unit) ? 28.35 : /^k/i.test(unit) ? 1000 : 1);
     function fraction(t) { const m = String(t).trim().match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/); return m ? Number(m[1] || 0) + Number(m[2]) / Number(m[3]) : ({ '½': 0.5, '¼': 0.25, '¾': 0.75 }[t] || Number(t)); }
 
@@ -241,7 +252,8 @@
         }
         // A range ("2-3 cloves", "200-250 g") counts as its middle.
         if (item.qtyHigh) item = Object.assign({}, item, { qty: (item.qty + item.qtyHigh) / 2 });
-        const words = (item.text || raw) + (item.note ? ' ' + item.note : '');
+        let words = (item.text || raw) + (item.note ? ' ' + item.note : '');
+        if (/,[^,]*\bor\b[^,]*\b(seeds|nuts|beans|lentils|berries|greens|peppers|mushrooms|cheese|herbs|butters?)\b/i.test(words)) words = words.replace(/,/g, ' ');
         // "fat-free, reduced-sodium chicken broth": the words after a comma can be the food itself.
         const m = matchFood(words) || matchFood(raw) || matchFood(words.replace(/,/g, ' '));
         const low = !m || FOODS[m.key].n[0] < 400 || /spray/.test(m.key);
@@ -252,7 +264,7 @@
         let grams = null;
         const pack = raw.match(PACK);
         const size = !item.unit && qty != null ? String(item.text || '').match(SIZE) : null;
-        const bracket = raw.match(BRACKET);
+        const bracket = raw.match(BRACKET) || raw.match(ABOUT);
         const packWord = /\b(cans?|tins?|packages?|packets?|jars?|bags?|containers?|cartons?|blocks?|boxes?)\b/i.test(raw);
         if (size && !packWord) grams = qty * toGrams(Number(size[1]), size[2]);   // "4 4-ounce fillets": 4 × 4 oz
         else if (bracket && !packWord && (qty == null || !item.unit || ['piece', 'fillet', 'slice', 'head', 'bunch'].indexOf(item.unit) >= 0)) {
@@ -264,14 +276,17 @@
             const size = Number(pack[1]);
             const unit = pack[2].toLowerCase();
             const each = /^(oz|ounce)/.test(unit) ? size * 28.35 : /^(lb|pound)/.test(unit) ? size * 453.6 : size;
-            const count = qty != null && raw.indexOf(pack[0]) > raw.search(/\d/) ? qty : 1;
+            const count = qty != null && raw.indexOf(pack[0]) > raw.search(/[\d½¼¾⅓⅔⅛⅜⅝⅞]/) ? qty : 1;
             grams = each * (count || 1);
+            // Canned beans and lentils, drained: what's left without the can's liquid (about 60%).
+            if (/\b(drained|rinsed)\b/i.test(raw) && /\b(beans?|chickpeas|lentils|garbanzos?|black-eyed peas|pigeon peas|cannellini|butter beans|kidney beans)\b/i.test(raw)) grams *= 0.6;
         } else if (qty != null) {
             const unit = item.unit;
             if (G[unit]) grams = qty * G[unit];
             else if (ML[unit]) grams = CUP[m.key] ? qty * ML[unit] / 240 * CUP[m.key] : qty * ML[unit] * gramsPerMl(food);
             else if (unit === 'clove') grams = qty * (portionGrams(food, ['clove']) || 3);
-            else if (unit === 'can') grams = qty * (portionGrams(food, ['can']) || 400);
+            // A can: USDA's own can weight when it has one; otherwise 400 g, drained beans about 60% of that.
+            else if (unit === 'can') grams = qty * (portionGrams(food, ['can']) || 400 * (/\b(drained|rinsed)\b/i.test(raw) && /\b(beans?|chickpeas|lentils|garbanzos?)\b/i.test(raw) ? 0.6 : 1));
             else if (unit === 'slice') grams = qty * (portionGrams(food, ['slice']) || 30);
             else if (unit === 'pinch' || unit === 'dash') grams = qty * 0.4;
             else if (unit === 'handful') grams = qty * (FOODS[m.key].n[0] < 60 ? 20 : 30);

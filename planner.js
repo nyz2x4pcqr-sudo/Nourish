@@ -52,8 +52,9 @@
         const ings = (r.ingredients || []).join(' ').toLowerCase();
         if (ARTICLE.test(name)) return { breakfast: false, lunch: false, dinner: false, why: 'an article or guide, not a recipe' };
         if (SMOOTHIE.test(name) && !/\bbowls?\b/i.test(name)) {
-            const n = r.nutrition;
-            if (n && Number(n.calories) > 0 && (Number(n.calories) < SMOOTHIE_MEAL.calories || Number(n.protein_g || 0) < SMOOTHIE_MEAL.protein_g)) {
+            // Judged on one serving of the recipe, not a portion sized for the day.
+            const n = r.nutrition, por = r.scaled && Number(r.scaled.portion) > 0 ? Number(r.scaled.portion) : 1;
+            if (n && Number(n.calories) > 0 && (Number(n.calories) / por < SMOOTHIE_MEAL.calories || Number(n.protein_g || 0) / por < SMOOTHIE_MEAL.protein_g)) {
                 return { breakfast: false, lunch: false, dinner: false, why: `a drink (a smoothie of ${Math.round(n.calories)} kcal and ${Math.round(n.protein_g || 0)} g protein is too light to be a meal)` };
             }
             return { breakfast: true, lunch: false, dinner: false, why: '' };
@@ -397,7 +398,20 @@
     // === PORTIONS ===
     const FATTY = /\b(oil|butter|ghee|margarine|lard|shortening|mayonnaise|mayo)\b/i;
     const SWEET = /\b(sugar|honey|maple syrup|syrup|agave|molasses|jam|chocolate chips)\b/i;
-    const WHOLE = /\b(eggs?|egg whites?|egg yolks?|tortillas?|wraps?|pitas?|buns?|bagels?|english muffins?|muffins?|rolls?|slices?|fillets?|breasts?|thighs?|drumsticks?|wings?|chops?|sausages?|patt(y|ies)|burgers?|hot dogs?|crackers?|rice cakes?|cloves?)\b/i;
+    const WHOLE = /\b(eggs?|egg whites?|egg yolks?|tortillas?|wraps?|pitas?|buns?|bagels?|english muffins?|muffins?|rolls?|slices?|drumsticks?|wings?|chops?|sausages?|patt(y|ies)|burgers?|hot dogs?|crackers?|rice cakes?|cloves?)\b/i;
+    // A weight in brackets or after "about" is the whole amount's ("2 pork chops (1 1/2 pounds
+    // total)"): it's scaled with the line (0.1.12 kept "(1 1/2 pounds total)" on one chop).
+    const LINE_WEIGHT = /(\(\s*(?:about|approx\.?|around|roughly)?\s*|,\s*(?:about|approx\.?|around|roughly)\s+)((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?)(\s*-?\s*(?:pounds?|lbs?|ounces?|oz|grams?|g|kilograms?|kg)\b)(?![^)]*\beach\b)/i;
+    function scaleWeight(line, k) {
+        return String(line).replace(LINE_WEIGHT, (m, pre, num, unit) => {
+            const n = U.parseNumber(num.trim());
+            if (!n) return m;
+            const v = n.value * k;
+            const metric = /\b(g|grams?|kg|kilograms?)\b/i.test(unit);
+            const q = metric ? Math.max(5, Math.round(v / 5) * 5) : Math.max(0.125, Math.round(v * 4) / 4);
+            return `${pre}${metric ? q : U.formatQty(q)}${!metric && q <= 1 ? unit.replace(/(pound|ounce)s\b/i, '$1') : unit}`;
+        });
+    }
     function scaleLine(line, k) {
         const item = U.splitIngredient(line);
         if (item.qty == null || Math.abs(k - 1) < 0.01) return String(line);
@@ -421,6 +435,7 @@
             q = whole + best;
         } else q = q >= 0.3 ? Math.max(0.25, Math.round(q * 4) / 4) : Math.max(0.125, Math.round(q * 8) / 8);   // kitchen fractions: ¼ ½ ¾ (⅛ for pinches)
         const amount = U.formatAmount(q, unit);
+        if (LINE_WEIGHT.test(item.text || '')) item.text = scaleWeight(item.text, q / item.qty);
         return item.note !== undefined ? `${item.text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${item.text}`.trim();
     }
     // Cuts oil, butter and sugar (to no less than half, keeping at least a teaspoon of oil) to save
@@ -459,6 +474,9 @@
         const from = Math.max(1, Number(r.servings) || 1);
         const k = factor * people / from;
         out.ingredients = (r.ingredients || []).map(l => scaleLine(l, k));
+        // What the rules added scales with the meal, so it still matches its line in the ingredients.
+        if (Array.isArray(r.protein_added)) out.protein_added = r.protein_added.map(l => (/^a bit more of its own: /.test(l) ? `a bit more of its own: ${scaleLine(l.replace(/^a bit more of its own: /, ''), k)}` : scaleLine(l, k)));
+        if (Array.isArray(r.fiber_added)) out.fiber_added = r.fiber_added.map(l => scaleLine(l, k));
         out.servings = people;
         if (Math.abs(factor - 1) > 0.05 || from !== people) out.scaled = { from_servings: from, portion: Math.round(factor * 100) / 100 };
         delete out._lines; delete out._fit;
@@ -1415,7 +1433,9 @@
         });
         if (!names.length) return '';
         const text = `${r.name} ${ownSteps(r).join(' ')}`.toLowerCase();
-        const method = METHODS.find(([stem]) => new RegExp(`\\b${stem.replace('-', '[- ]?')}`).test(text));
+        const full = `${text} ${(r.ingredients || []).join(' ')}`.toLowerCase();
+        // A cooking word only when the recipe uses that very word ("baked" for a recipe that says "bake" in the oven is fine; it must say so).
+        const method = METHODS.find(([stem, word]) => new RegExp(`\\b${stem.replace('-', '[- ]?')}`).test(text) && (!/(baked|fried)$/i.test(word) || full.indexOf(word.toLowerCase().match(/(baked|fried)$/)[1]) >= 0));
         // Up to two main foods (what the dish is), then up to two that go with them (spices, a sauce).
         const mains = picked.filter(p => p.main).slice(0, 2).map(p => p.n);
         const main = mains.length ? mains : names.slice(0, 1);

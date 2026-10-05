@@ -18,8 +18,10 @@ test('metric amounts, British names, ranges and brand or packaged items are read
     assert.equal(grams('1.5kg potatoes'), 1500);
     assert.equal(grams('250ml semi-skimmed milk') > 240, true);
     assert.equal(grams('2 tbsp crème fraîche'), 30);
-    assert.equal(grams('1 x 400g tin chickpeas, drained'), 400);
-    assert.equal(grams('1 (15-oz.) can no-salt-added black beans, rinsed'), 425);
+    // Drained or rinsed canned beans: what's left without the can's liquid (about 60%).
+    assert.equal(grams('1 x 400g tin chickpeas, drained'), 240);
+    assert.equal(grams('1 (15-oz.) can no-salt-added black beans, rinsed'), 255);
+    assert.equal(grams('1 (14 oz) can coconut milk'), 397, 'only beans are drained');
     assert.equal(grams('1/4 cup fat-free, reduced-sodium chicken broth') > 50, true);
     assert.equal(grams('1 Tbsp. Smart Balance spread'), 14);
     assert.equal(grams('Juice of 1 lemon'), 45);

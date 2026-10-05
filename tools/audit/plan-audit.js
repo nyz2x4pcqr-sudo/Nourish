@@ -7,7 +7,8 @@
 //   node tools/audit/plan-audit.js --books-dir "C:\path\to\Nourish"   also use real books from a
 //        Nourish folder (its "Recipe Books" and "My Recipes"); can be given more than once
 //   node tools/audit/plan-audit.js --saved nourish-data.json   also audit the plan saved in a data file
-//   node tools/audit/plan-audit.js --only 3        just scenario 3 (1-based), with every finding
+//   node tools/audit/plan-audit.js --only 3        just scenario 3 (1-based)
+//   node tools/audit/plan-audit.js --only 3 --show "Pork Chops"   and every line of the meals with that in their name
 //
 // Writes tools/audit/.cache/report.md (plain English) and report.json; exits with 1 when any plan
 // has a failing finding. Test books: tests/fixtures/books (tools/audit/make-test-books.js).
@@ -20,6 +21,7 @@ const { auditPlan, CHECKS } = require('./checks.js');
 const W = require('./web-cache.js');
 const PL = require('../../planner.js');
 const P = require('../../prefs.js');
+const N = require('../../nutrition.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const OUT = path.join(__dirname, '.cache');
@@ -62,6 +64,7 @@ function args() {
         else if (a[i] === '--only') out.only = Number(a[++i]);
         else if (a[i] === '--python') out.python = a[++i];
         else if (a[i] === '--quiet') out.quiet = true;
+        else if (a[i] === '--show') out.show = a[++i];
     }
     return out;
 }
@@ -100,6 +103,13 @@ async function main() {
         const sources = {};
         res.days.forEach(d => PL.MEALS.forEach(m => { const r = d[m]; if (!r) return; const k = r.from_book ? 'books' : r.builtin || r.quick || r.source_id === 'builtin' ? 'nourish' : 'web'; sources[k] = (sources[k] || 0) + 1; }));
         results.push({ n: o.only || i + 1, scenario: sc, res, audit, sources, seconds: (Date.now() - t0) / 1000 });
+        if (o.show) res.days.forEach((d, k) => PL.MEALS.forEach(m => {
+            const r = d[m];
+            if (!r || r.name.indexOf(o.show) < 0) return;
+            console.log(`day ${k + 1} ${m}: ${r.name}, serves ${r.servings}, portion ${r.scaled ? r.scaled.portion : 1}, ${r.nutrition_basis || ''} ${JSON.stringify(r.nutrition)}`);
+            if (r.protein_added || r.fiber_added) console.log(`  added: ${[].concat(r.protein_added || [], r.fiber_added || []).join('; ')}`);
+            N.calculate(r.ingredients, r.servings).lines.forEach(l => console.log(`    ${l.line} → ${l.key || '(not counted)'} ${l.grams} g, ${l.kcal} kcal`));
+        }));
         if (!o.quiet) console.log(`${String(o.only || i + 1).padStart(2)}. ${sc.label}: ${audit.fails} failing finding${audit.fails === 1 ? '' : 's'} (web ${sources.web || 0}, books ${sources.books || 0}, Nourish ${sources.nourish || 0})`);
     }
     // A plan saved in a data file (nourish-data.json), audited as it is.
