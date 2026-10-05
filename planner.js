@@ -1357,7 +1357,53 @@
                 again = { day: kcal > 0 && dayTotals(day2).kcal > kcal * 1.05 ? fitDay(day2, settings, people) : day2 };
             }
         }
+        // Still over by more than 8% (what was added can't be sized down with the dish): the added
+        // foods go again, fiber ones first, then protein ones while the day keeps 90% of its protein.
+        if (kcal > 0 && dayTotals(again.day).kcal > kcal * 1.08) {
+            const trimmed = trimAddOns(again.day, kcal * 1.05, T.protein * 0.9, people);
+            notes.push(...trimmed.notes);
+            again = { day: trimmed.day };
+        }
         return { day: again.day, notes };
+    }
+    // Takes one added line back out of a meal (its nutrition and its step with it).
+    function removeAdded(meal, line, key, people) {
+        const out = JSON.parse(JSON.stringify(meal));
+        const at = (out.ingredients || []).map(String).lastIndexOf(String(line));
+        if (at < 0) return null;
+        const n = Math.max(1, Number(out.servings) || people || 1);
+        const sub = N.calculate([line], n).nutrition;
+        out.ingredients.splice(at, 1);
+        out[key] = (out[key] || []).filter(l => l !== line);
+        if (!out[key].length) delete out[key];
+        const word = String(U.splitIngredient(line).text || '').toLowerCase().split(/\s+/).pop();
+        const step = (out.added_steps || []).find(st => word && String(st).toLowerCase().includes(word));
+        if (step) { out.added_steps = out.added_steps.filter(st => st !== step); out.steps = (out.steps || []).filter(st => st !== step); }
+        const nu = out.nutrition || {};
+        ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'].forEach(k => { if (nu[k] != null) nu[k] = Math.max(0, Math.round(((Number(nu[k]) || 0) - (sub[k] || 0)) * 10) / 10); });
+        if (sub.micros && nu.micros) Object.keys(sub.micros).forEach(k => { nu.micros[k] = Math.max(0, Math.round(((Number(nu.micros[k]) || 0) - sub.micros[k]) * 10) / 10); });
+        out.nutrition = nu;
+        return out;
+    }
+    function trimAddOns(day, kcalMost, proteinLeast, people = 1) {
+        const notes = [];
+        let cur = Object.assign({}, day);
+        for (const key of ['fiber_added', 'protein_added']) {
+            for (let i = 0; i < 8 && dayTotals(cur).kcal > kcalMost; i++) {
+                const options = [];
+                MEALS.forEach(t => (cur[t] && Array.isArray(cur[t][key]) ? cur[t][key] : []).forEach(line => {
+                    const meal = removeAdded(cur[t], line, key, people);
+                    if (!meal) return;
+                    const next = Object.assign({}, cur, { [t]: meal });
+                    options.push({ t, line, next, totals: dayTotals(next) });
+                }));
+                const ok = options.filter(o => key !== 'protein_added' || o.totals.protein >= proteinLeast).sort((a, b) => a.totals.kcal - b.totals.kcal);
+                if (!ok.length) break;
+                cur = ok[0].next;
+                notes.push(`${ok[0].t} "${cur[ok[0].t].name}": the day was over its calories; took out the added ${ok[0].line}`);
+            }
+        }
+        return { day: cur, notes };
     }
 
     // === SNACKS ===
@@ -1519,7 +1565,7 @@
         }).join('');
     }
 
-    const api = { applyDayRules, weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { applyDayRules, trimAddOns, weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

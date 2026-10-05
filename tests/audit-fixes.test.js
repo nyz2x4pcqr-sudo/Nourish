@@ -104,3 +104,28 @@ test('amount ranges ending in a written fraction, and frozen dumplings counted b
     assert.equal(d.key, 'dumplings');
     assert.ok(d.grams <= 700, `${d.grams} g`);
 });
+
+test('a day over its calories has added foods taken back out, fiber first, never under 90% of its protein', () => {
+    const meal = (name, kcal, p) => ({ name, servings: 1, ingredients: ['x'], steps: ['Cook.'], nutrition: { calories: kcal, protein_g: p, carbs_g: 50, fat_g: 10, fiber_g: 5 } });
+    let b = meal('Porridge', 400, 30);
+    b = Object.assign(b, { ingredients: ['x', '2 tbsp chia seeds'], fiber_added: ['2 tbsp chia seeds'], added_steps: ['Stir in the chia seeds.'], steps: ['Cook.', 'Stir in the chia seeds.'] });
+    b.nutrition.calories += 120;
+    let l = meal('Salad', 500, 40);
+    l = Object.assign(l, { ingredients: ['x', '6 oz firm tofu'], protein_added: ['6 oz firm tofu'] });
+    l.nutrition.calories += 140; l.nutrition.protein_g += 15;
+    const day = { breakfast: b, lunch: l, dinner: meal('Curry', 600, 40) };
+    const before = PL.dayTotals(day);
+    const out = PL.trimAddOns(day, before.kcal - 100, 0, 1);
+    assert.ok(!out.day.breakfast.fiber_added, 'the chia seeds go first');
+    assert.ok(!out.day.breakfast.ingredients.includes('2 tbsp chia seeds'));
+    assert.ok(!out.day.breakfast.steps.includes('Stir in the chia seeds.'));
+    assert.ok(PL.dayTotals(out.day).kcal < before.kcal - 100);
+    const kept = PL.trimAddOns(day, before.kcal - 300, before.protein - 1, 1);
+    assert.ok(kept.day.lunch.protein_added, 'protein stays when it would drop under the floor');
+});
+
+test('whole spices with no unit weigh what a berry or a pod weighs, not 100 g', () => {
+    assert.ok(N.calculate(['6 allspice berries'], 1).nutrition.calories < 10);
+    assert.ok(N.calculate(['10 black peppercorns'], 1).nutrition.calories < 10);
+    assert.ok(N.calculate(['1 nutmeg'], 1).nutrition.calories < 40);
+});

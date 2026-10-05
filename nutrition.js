@@ -57,6 +57,10 @@
         plantain: { n: [122, 1.3, 31.9, 0.4, 2.3, 0, 3, 499, 37], a: ['plantains', 'green plantains', 'green plantain', 'ripe plantains', 'platanos'], u: [[179, 'medium']] },
         // Frozen filled dumplings, counted by the piece (about 25 g each), never as the meat in them.
         dumplings: { n: [210, 8.5, 27, 7.5, 1.5, 2.2, 25, 150, 15], a: ['dumpling', 'potstickers', 'potsticker', 'pot stickers', 'gyoza', 'wontons', 'wonton', 'dim sum', 'mandu', 'momos', 'chicken potstickers', 'pork potstickers', 'chicken dumplings', 'pork dumplings', 'shrimp dumplings', 'vegetable dumplings', 'veggie dumplings', 'chicken gyoza', 'pork gyoza', 'vegetable gyoza', 'chicken wontons', 'pork wontons', 'shrimp wontons', 'frozen potstickers', 'frozen dumplings', 'frozen gyoza', 'frozen wontons', 'chicken and vegetable potstickers', 'pork and chive dumplings'], u: [[25, 'piece'], [25, 'none']] },
+        // Whole dried berries and seeds put in a pot and fished out (a few tenths of a gram each).
+        'whole spice berries': { n: [263, 6, 72, 8.7, 21.6, 2.5, 661, 1044, 135], a: ['allspice berries', 'allspice berry', 'whole allspice', 'juniper berries', 'juniper berry', 'peppercorns', 'black peppercorns', 'whole peppercorns', 'whole black peppercorns', 'pink peppercorns', 'szechuan peppercorns', 'sichuan peppercorns'], u: [[0.2, 'berry'], [0.2, 'none'], [2, 'tsp'], [6, 'tbsp']] },
+        // A whole nutmeg weighs about 7 g.
+        'whole nutmeg': { n: [525, 5.8, 49.3, 36.3, 20.8, 25.9, 184, 350, 183], a: ['nutmeg seed', 'whole nutmegs'], u: [[7, 'none'], [7, 'whole']] },
         'chili crisp': { n: [600, 4, 12, 58, 4, 8, 30, 200, 30], a: ['chili crunch', 'chilli crisp', 'chili oil crisp', 'spicy chili crisp', 'chili onion crunch'], u: [[13, 'tbsp'], [4, 'tsp']] },
         'sweet chili sauce': { n: [207, 0.4, 51, 0.6, 1, 0, 8, 90, 4], a: ['thai sweet chili sauce', 'sweet chilli sauce', 'thai sweet chilli sauce'], u: [[19, 'tbsp']] },
     };
@@ -66,7 +70,7 @@
 
     const FISH = /\b(salmon|cod|tilapia|trout|haddock|halibut|pollock|mackerel|sea bass|snapper|tuna steak|swordfish|fish)\b/;
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
-    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20 };
+    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, dumplings: 25, 'whole spice berries': 0.2, 'whole nutmeg': 7, nutmeg: 2 };
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
     // A cup of something light and airy (chips, flakes) weighs far less than a cup of water.
     const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60 };
