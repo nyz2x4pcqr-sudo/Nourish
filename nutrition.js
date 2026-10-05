@@ -65,12 +65,18 @@
         'sweet chili sauce': { n: [207, 0.4, 51, 0.6, 1, 0, 8, 90, 4], a: ['thai sweet chili sauce', 'sweet chilli sauce', 'thai sweet chilli sauce'], u: [[19, 'tbsp']] },
     };
     Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });
+    // Corrections to the USDA extract for what people actually buy. USDA's "tofu" is a dense firm tofu
+    // set with calcium sulfate (683 mg calcium per 100 g); a typical supermarket block is about a third
+    // of that, with fewer calories (0.1.13 credited one tofu dish with 1,830 mg more calcium). A block
+    // is 14 oz (396 g), not 100 g. Silken tofu is lighter still.
+    FOODS.tofu = { n: [110, 12, 2.5, 6.5, 1, 1, 200, 180, 40], a: ['firm tofu', 'extra firm tofu', 'extra-firm tofu', 'medium firm tofu', 'super firm tofu', 'tofu block'], u: [[396, 'block'], [396, 'package'], [252, 'cup']] };
+    FOODS['silken tofu'] = { n: [55, 4.8, 2.9, 2.7, 0.1, 0.4, 31, 120, 29], a: ['soft tofu', 'silken'], u: [[340, 'block'], [340, 'package'], [248, 'cup']] };
     // Barley is its own grain, not another name for farro (the USDA extract listed it so).
     if (FOODS.farro && Array.isArray(FOODS.farro.a)) FOODS.farro.a = FOODS.farro.a.filter(x => !/barley/.test(x));
 
     const FISH = /\b(salmon|cod|tilapia|trout|haddock|halibut|pollock|mackerel|sea bass|snapper|tuna steak|swordfish|fish)\b/;
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
-    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, dumplings: 25, 'whole spice berries': 0.2, 'whole nutmeg': 7, nutmeg: 2 };
+    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, dumplings: 25, 'whole spice berries': 0.2, 'whole nutmeg': 7, nutmeg: 2, tofu: 396, 'silken tofu': 340 };
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
     // A cup of something light and airy (chips, flakes) weighs far less than a cup of water.
     const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60 };

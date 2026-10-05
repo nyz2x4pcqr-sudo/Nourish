@@ -79,12 +79,12 @@ test('bland savory recipes are re-seasoned with amounts, including salt', () => 
     assert.equal(PL.flavorCheck(r).ok, true);
 });
 
-test('trimming calories cuts oil and sugar, never seasoning', () => {
+test('making a meal lighter only makes the portion smaller: oil, sugar and seasoning stay as written', () => {
     const r = { name: 'x', servings: 1, ingredients: ['1/4 cup olive oil', '2 tbsp sugar', '1 tsp salt', '1 tsp cumin', '1 lb chicken breast'], steps: [] };
-    PL.trimRich(r, 400);
-    assert.ok(r.ingredients.includes('1 tsp salt'));
-    assert.ok(r.ingredients.includes('1 tsp cumin'));
-    assert.ok(!r.ingredients.includes('1/4 cup olive oil'));
+    N.settle(r);
+    const out = PL.lighten(r, 400, 1);
+    assert.deepEqual(PL.ingredientFoods(out), PL.ingredientFoods(r));
+    assert.ok(out.scaled.portion >= 0.75 && out.nutrition.calories < r.nutrition.calories);
 });
 
 test('calorie split: bigger dinner by default, other choices and custom', () => {

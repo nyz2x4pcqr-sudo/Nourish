@@ -8,7 +8,9 @@ const IN_PHONE_APP = /\bNourishApp\//.test(navigator.userAgent);
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
-const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', 'snack-1': 'Snack', 'snack-2': 'Snack', 'snack-3': 'Snack' };
+const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', 'snack-1': 'Snack', 'snack-2': 'Snack', 'snack-3': 'Snack', 'snack-4': 'Snack', 'snack-5': 'Snack' };
+// A slot's name as shown: a protein extra (Greek yogurt, a shake…) says what it is.
+const slotLabel = (t, meal) => (meal && meal.protein_extra ? 'Protein extra' : MEAL_LABELS[t] || 'Snack');
 const MEAL_ICONS = { breakfast: 'i-sunrise', lunch: 'i-sun', dinner: 'i-moon', 'snack-1': 'i-leaf', 'snack-2': 'i-leaf', 'snack-3': 'i-leaf' };
 const isSnackSlot = t => /^snack-\d$/.test(t);
 // A plan day's meal in a slot: breakfast, lunch, dinner, or snack-1… (day.snacks).
@@ -94,7 +96,8 @@ const SETTINGS_DEFAULTS = {
     body_weight: '',              // in kg (metric) or lb (imperial); protein then follows body weight
     protein_auto: 'on',           // 'off': use protein_target even when the body weight is known
     macro_pref: 'balanced',       // 'balanced' | 'lower-carb' | 'lower-fat'
-    fat_swap: 'on',               // oil instead of butter or lard where the dish allows
+    fat_swap: 'on',               // a tip on recipes: oil instead of butter for cooking where the dish allows (the recipe isn't changed)
+    balance_micros: 'off',        // Advanced: also swap meals to balance vitamins and minerals (off: a weekly summary only)
     calorie_mode: 'daily',        // 'daily' or 'weekly' (a week's budget with big days)
     big_days: '',                 // Weekly mode: JSON [{ weekday 0–6 (Monday = 0), kcal }]
     big_days_ok: '',              // the big days the person confirmed when they push other days to the 75% floor
@@ -1830,10 +1833,11 @@ const SETTINGS_RENDERERS = {
                     ? infoRow('Protein', `${proteinTarget()} g a day (${prefs.goal === 'Cut' ? '2.0' : '1.6'} g per kg)`)
                     : settingsRow('Protein (g)', settingsInput('protein_target', { type: 'number', inputmode: 'numeric', min: '20', max: '400' })),
                 bodyWeightKg() ? settingsToggle('protein_auto', 'Protein from my body weight', { hint: 'Off: type your own protein target', onchange: () => renderSettings() }) : null,
+                (() => { const note = NourishPlanner.proteinNote(plannerSettings()); return note ? h('div', { class: 'settings-row look-note', role: 'note', text: note.text }) : null; })(),
                 settingsRow('Carbs and fat', settingsSelect('macro_pref', { balanced: 'Balanced', 'lower-carb': 'Lower-carb', 'lower-fat': 'Lower-fat' })),
                 settingsRow('Calories by meal', settingsSelect('calorie_split', Object.assign({ dinner: 'Bigger dinner', even: 'Even', breakfast: 'Bigger breakfast', frontload: 'Front-load my day' },
                     settings.calorie_split === 'custom' ? { custom: 'Custom (Advanced)' } : {}))),
-            ], 'Each day of your plan is sized to land within about 5% of your calories. "Bigger dinner" gives about 25% at breakfast, 30% at lunch and 45% at dinner; "Front-load my day" moves more to breakfast and lunch (33%, 37%, 30%). Every main meal has 25–40 g protein, breakfast at least 25 g, and each day at least 30 g fiber.'),
+            ], 'Each day of your plan is sized to land within about 5% of your calories. "Bigger dinner" gives about 25% at breakfast, 30% at lunch and 45% at dinner; "Front-load my day" moves more to breakfast and lunch (33%, 37%, 30%). Protein is reached by choosing recipes that have it; recipes are cooked as written, only the portion changes (¾ to 1½ servings). A day still short gets at most two simple protein extras (like Greek yogurt or a shake), shown as their own items.'),
             ...(settings.calorie_mode === 'weekly' ? bigDaysGroup() : []),
             ...settingsGroup('Food', [
                 settingsRow('Diet', settingsSelect('diet', DIETS)),
@@ -1841,7 +1845,7 @@ const SETTINGS_RENDERERS = {
                 settingsRow('Love', textInput(() => prefs.likes, v => { setPref('likes', v); showToast('Saved ✓', false); }, { placeholder: 'e.g. chicken, pasta' })),
                 settingsRow('Avoid', textInput(() => prefs.hates, v => { setPref('hates', v); showToast('Saved ✓', false); }, { placeholder: 'e.g. mushrooms' })),
                 settingsRow('Cuisines', settingsInput('cuisines', { placeholder: 'e.g. Mexican, Thai' })),
-                settingsToggle('fat_swap', 'Oil instead of butter', { hint: 'Olive oil for cooking where the dish allows (not baking or butter sauces)' }),
+                settingsToggle('fat_swap', 'Oil instead of butter tip', { hint: 'A tip on recipes that cook with butter: olive oil works too. Recipes are never changed.' }),
             ], 'Allergies are never included by the AI and are filtered out of recipe searches.'),
             ...settingsGroup('Meals each day', MEAL_TYPES.map(mealSlotToggle).concat([
                 settingsRow('Snacks', settingsSelect('snacks_per_day', { 0: 'None', 1: '1 a day', 2: '2 a day', 3: '3 a day' }), { hint: 'Small snacks inside your calories' }),
@@ -1914,6 +1918,9 @@ const SETTINGS_RENDERERS = {
                     setSetting('source_priority', ids.join(','));
                 }, { placeholder: 'e.g. Skinnytaste, Budget Bytes' })),
             ], help('Sites named here are preferred when their recipes fit just as well.', 'Type site names separated by commas, in the order you prefer them.')),
+            ...settingsGroup('Vitamins and minerals', [
+                settingsToggle('balance_micros', 'Also balance vitamins and minerals', { hint: 'Off (recommended): a weekly summary with foods that help. On: a meal can be swapped for another recipe with more of a low one.' }),
+            ], help('Fiber, vitamin D, calcium, potassium and magnesium are shown as information, never forced.', 'Nourish never adds an ingredient to a recipe for them. With this on, it may choose a different recipe for a meal when the week is low in one of them.')),
             ...settingsGroup('Calories by meal (custom)', [
                 settingsRow('Breakfast %', textInput(() => settings.split_breakfast, v => { setSetting('split_breakfast', v); setSetting('calorie_split', 'custom', { quiet: true }); }, { type: 'number', inputmode: 'numeric', min: '10', max: '60' })),
                 settingsRow('Lunch %', textInput(() => settings.split_lunch, v => { setSetting('split_lunch', v); setSetting('calorie_split', 'custom', { quiet: true }); }, { type: 'number', inputmode: 'numeric', min: '10', max: '60' })),
@@ -2294,7 +2301,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
     // Ticked ingredients and the step you're on stay while this recipe is open (also after the heart is tapped).
     const progressKey = `${meal.name}|${dayIndex}|${mealType}|${cookbookId}`;
     if (!recipeProgress || recipeProgress.key !== progressKey) recipeProgress = { key: progressKey, ticked: new Set(), step: -1 };
-    const where = dayIndex != null ? `${MEAL_LABELS[mealType] || ''} · ${isToday(dayIndex) ? 'Today' : dayName(dayIndex)}` : MEAL_LABELS[mealType] || '';
+    const where = dayIndex != null ? `${slotLabel(mealType, meal)} · ${isToday(dayIndex) ? 'Today' : dayName(dayIndex)}` : MEAL_LABELS[mealType] || '';
 
     setChildren(content,
         h('div', { class: `recipe-hero art-${mealType}` },
@@ -2493,11 +2500,14 @@ function nutritionNotes(meal) {
     else if (meal.nutrition_basis === 'calculated') notes.push('Numbers worked out from the ingredients with USDA data.');
     if (meal.nutrition_unmatched) notes.push(`Not counted (not in the food table): ${meal.nutrition_unmatched.join('; ')}.`);
     if (meal.scaled && Math.abs(meal.scaled.portion - 1) > 0.05) notes.push(`Portion: ${portionLabel(meal)} (${portionWords(meal.scaled.portion)} the recipe's serving), sized to fit this day. The ingredient amounts and calories are for that portion, so the same recipe can show different calories on different days.`);
-    if (meal.trimmed) notes.push('Less oil or sugar than the original, to fit your calories. Seasoning is unchanged.');
-    if (meal.protein_added) notes.push(`Added for protein (every meal has at least 25 g): ${meal.protein_added.join(', ')}.`);
-    if (meal.fiber_added) notes.push(`Added for fiber (at least 30 g a day): ${meal.fiber_added.join(', ')}.`);
+    // Plans from older versions may still carry these changes; new plans never change a recipe.
+    if (meal.trimmed) notes.push('Less oil or sugar than the original (an older plan).');
+    if (meal.protein_added) notes.push(`Added by an older version for protein: ${meal.protein_added.join(', ')}.`);
+    if (meal.fiber_added) notes.push(`Added by an older version for fiber: ${meal.fiber_added.join(', ')}.`);
     if (meal.fat_swapped) notes.push(meal.fat_swapped);
     if (meal.reseasoned) notes.push(`Seasoning added: ${meal.reseasoned.join(', ')}.`);
+    if (meal.protein_extra) notes.push("A protein extra: added on its own to reach the day's protein. No recipe was changed.");
+    if (settings.fat_swap !== 'off' && !meal.protein_extra && typeof NourishPlanner !== 'undefined') { const tip = NourishPlanner.fatTip(meal); if (tip) notes.push(tip); }
     return notes;
 }
 
@@ -2785,7 +2795,7 @@ function updateTodayScreen() {
 // "How today adds up": each meal, snack and extra with its calories, the real total and how far it
 // is from the target, in plain words. The total is never rounded or nudged to the target.
 function dayBreakdown(day, entry, total, target) {
-    const rows = daySlots(day).map(([t, m]) => [MEAL_LABELS[t] || 'Snack', m.name, m.nutrition && m.nutrition.calories, (entry.meals || {})[t]]);
+    const rows = daySlots(day).map(([t, m]) => [slotLabel(t, m), m.name, m.nutrition && m.nutrition.calories, (entry.meals || {})[t]]);
     (entry.items || []).forEach(it => rows.push(['Extra', it.name, it.nutrition && it.nutrition.calories, '']));
     const diff = Math.round(total - target);
     const pct = Math.abs(diff) / Math.max(1, target);
@@ -2805,7 +2815,7 @@ function mealCard(type, meal, dayIndex, status) {
     const card = h('button', { type: 'button', class: 'meal-card' + (status ? ` ${status}` : ''), onclick: () => openRecipeSheet(type, meal, dayIndex) },
         h('div', { class: `meal-art art-${type}` }, icon(MEAL_ICONS[type])),
         h('div', { class: 'meal-content' },
-            h('div', { class: 'meal-type', text: MEAL_LABELS[type] }),
+            h('div', { class: 'meal-type', text: slotLabel(type, meal) }),
             h('div', { class: 'meal-name', text: meal.name }),
             h('div', { class: 'meal-badges' },
                 h('span', { class: 'chip' }, icon('i-clock'), mealTime(meal).text),
@@ -3123,9 +3133,14 @@ function updatePlanScreen() {
             .concat((day.snacks || []).map((m, i) => h('button', { type: 'button', class: 'plan-meal', 'data-meal-type': 'snack', onclick: () => openRecipeSheet(`snack-${i + 1}`, m, idx) },
                 h('span', { class: 'dot art-snack' }, icon('i-leaf')),
                 h('span', { class: 'plan-meal-body' },
-                    h('span', { class: 'plan-meal-type', text: 'Snack' }),
+                    h('span', { class: 'plan-meal-type', text: slotLabel(`snack-${i + 1}`, m) }),
                     h('span', { class: 'plan-meal-name', text: m.name })),
-                h('span', { class: 'plan-meal-meta', text: on('show_nutrition') ? `${formatCalories(m.nutrition && m.nutrition.calories)} kcal` : mealTime(m).text })))))));
+                h('span', { class: 'plan-meal-meta', text: on('show_nutrition') ? `${formatCalories(m.nutrition && m.nutrition.calories)} kcal` : mealTime(m).text }))))
+            .concat(day.protein_gap ? [h('p', { class: 'plan-day-note', text: proteinGapText(day.protein_gap) })] : []))));
+}
+// The honest number when real recipes (and up to two extras) can't reach the protein target.
+function proteinGapText(g) {
+    return `This day reaches ${g.have} g of your ${g.target} g protein with real recipes${g.extras ? ` and ${g.extras} protein extra${g.extras > 1 ? 's' : ''}` : ''}. Nothing was added to a recipe to fake it.`;
 }
 
 // === GROCERY SCREEN ===
@@ -3140,7 +3155,7 @@ const GROCERY_ORDER = NourishGrocery.CATEGORIES.map(c => c[0]).concat(['Other'])
 function groceryItems() {
     const items = {};
     const withSnacks = daysData.map(d => Object.assign({}, d, Object.fromEntries((d.snacks || []).map((m, i) => [`snack-${i + 1}`, m]))));
-    NourishGrocery.buildList(withSnacks, MEAL_TYPES.concat(['snack-1', 'snack-2', 'snack-3']), unitSystem()).forEach(row => {
+    NourishGrocery.buildList(withSnacks, MEAL_TYPES.concat(['snack-1', 'snack-2', 'snack-3', 'snack-4', 'snack-5']), unitSystem()).forEach(row => {
         if (!items[row.category]) items[row.category] = [];
         items[row.category].push(row);
     });
@@ -3367,6 +3382,10 @@ function normalizeMeal(m) {
         time_estimated: m.time_estimated ? true : undefined,
         leftover: m.leftover ? true : undefined,
         builtin: m.builtin ? true : undefined,
+        snack: m.snack ? true : undefined,
+        // A protein extra (Greek yogurt, a shake…): an item of its own, added to reach the day's protein.
+        protein_extra: m.protein_extra ? true : undefined,
+        filler: m.filler ? true : undefined,   // a snack that makes up a big day's calories
         adapted: Array.isArray(m.adapted) && m.adapted.length ? m.adapted.map(String).slice(0, 4) : undefined,
         // Whole sentences only: a description is never shown cut off mid-sentence.
         description: m.description ? (NourishImport.wholeSentences(String(m.description), 260) || undefined) : undefined,
@@ -3413,8 +3432,11 @@ function normalizePlan(data, strict = true) {
         .filter(d => d && typeof d === 'object')
         .map(d => {
             const out = Object.fromEntries(MEAL_TYPES.map(t => [t, normalizeMeal(d[t])]));
-            const snacks = (Array.isArray(d.snacks) ? d.snacks : []).map(normalizeMeal).filter(Boolean).slice(0, 3);
+            const all = (Array.isArray(d.snacks) ? d.snacks : []).map(normalizeMeal).filter(Boolean);
+            // Up to 3 snacks (Settings) and up to 2 protein extras.
+            const snacks = all.filter(x => !x.protein_extra).slice(0, 3).concat(all.filter(x => x.protein_extra).slice(0, 2));
             if (snacks.length) out.snacks = snacks;
+            if (d.protein_gap && Number(d.protein_gap.target) > 0) out.protein_gap = { have: toNumber(d.protein_gap.have), target: toNumber(d.protein_gap.target), extras: toNumber(d.protein_gap.extras) || 0 };
             return out;
         })
         .filter(d => MEAL_TYPES.some(t => d[t]) || (d.snacks && d.snacks.length))
@@ -3478,16 +3500,18 @@ function dayRules(day, i) {
     const s = plannerSettings(dayTargetsFor(i));
     const people = servingsWanted();
     const ex = nutritionExcluder();
-    // Oil for butter (Settings → Profile), fiber, protein: planner.js applyDayRules.
-    const res = P.applyDayRules(day, s, people, ex, { fatSwapOn: settings.fat_swap !== 'off' });
+    // Portions sized to the day's calories, then protein extras if the day is short (planner.js
+    // balanceDay). Recipes are never changed.
+    const res = P.balanceDay(day, s, people, ex, i);
     res.notes.forEach(n => nlog('plan', `${dayName(i)}: ${n}`));
     const cur = res.day;
     MEAL_TYPES.forEach(t => { if (cur[t]) cur[t] = normalizeMeal(cur[t]); });
     return cur;
 }
-// The week's own checks: fatty fish about once a week, and vitamin D, calcium, potassium and
-// magnesium (a meal swapped in when the pools have a better one, otherwise a plain flag on the
-// Plan screen). Logged either way.
+// The week's own checks, as information: fatty fish about once a week, fiber, and vitamin D,
+// calcium, potassium and magnesium, in a weekly summary with foods that help. They never add an
+// ingredient. Only with Settings → Advanced → "Also balance vitamins and minerals" can a meal be
+// swapped for another recipe that has more of a low one. Logged either way.
 function checkWeek(days) {
     const P = NourishPlanner;
     const fish = days.findIndex(d => d && MEAL_TYPES.some(t => P.isFattyFish(d[t])));
@@ -3498,26 +3522,35 @@ function checkWeek(days) {
         nlog('plan', noFish ? 'No fatty fish this week (your diet, allergies or dislikes leave it out)' : 'No fatty fish fitted this week', null, noFish ? 'info' : 'warn');
         if (!noFish) flags.push('No oily fish this week. Salmon, trout, mackerel or sardines about once a week are good for your heart.');
     }
-    const fixed = P.fixMicros(days, { pools: lastPlanPools || {}, settings: plannerSettings(), people: servingsWanted(), exclude: nutritionExcluder(), weekday: d => (dayBase() + d) % 7 });
-    fixed.notes.forEach(n => nlog('plan', n));
-    fixed.days.forEach((d, i) => { if (d !== days[i]) days[i] = dayRules(d, i); });
-    const m = fixed.micros;
-    nlog('plan', `Vitamins and minerals a day this week: ${Object.keys(m.avg).map(k => `${m.names[k]} ${m.avg[k]} ${m.units[k]} (aim ${m.targets[k]})`).join(', ')}`, fixed.flags.length ? fixed.flags : null);
+    let micros;
+    if (settings.balance_micros === 'on') {
+        const fixed = P.fixMicros(days, { pools: lastPlanPools || {}, settings: plannerSettings(), people: servingsWanted(), exclude: nutritionExcluder(), weekday: d => (dayBase() + d) % 7 });
+        fixed.notes.forEach(n => nlog('plan', n));
+        fixed.days.forEach((d, i) => { if (d !== days[i]) days[i] = dayRules(d, i); });
+        micros = P.weekMicros(days);
+    } else micros = P.weekMicros(days);
+    const microFlags = micros.low.map(k => `Low in ${micros.names[k]} this week (about ${micros.avg[k]} ${micros.units[k]} a day; aim for ${micros.targets[k]}). ${micros.foods[k].charAt(0).toUpperCase() + micros.foods[k].slice(1)} help.`);
+    nlog('plan', `Vitamins and minerals a day this week (information only${settings.balance_micros === 'on' ? '; balancing is on' : ''}): ${Object.keys(micros.avg).map(k => `${micros.names[k]} ${micros.avg[k]} ${micros.units[k]} (aim ${micros.targets[k]})`).join(', ')}`, microFlags.length ? microFlags : null);
     const totals = days.filter(Boolean).map(d => P.dayTotals(d));
-    if (totals.length) nlog('plan', `Protein and fiber a day: ${totals.map((t, i) => `${dayName(i, true)} ${Math.round(t.protein)} g / ${Math.round(t.fiber)} g`).join(', ')} (targets ${proteinTarget()} g protein, 30 g fiber)`);
-    planFlags = flags.concat(fixed.flags);
+    if (totals.length) {
+        nlog('plan', `Protein and fiber a day: ${totals.map((t, i) => `${dayName(i, true)} ${Math.round(t.protein)} g / ${Math.round(t.fiber)} g`).join(', ')} (targets ${proteinTarget()} g protein, 30 g fiber)`);
+        const fiber = Math.round(totals.reduce((a, t) => a + t.fiber, 0) / totals.length);
+        if (fiber < 25) flags.push(`About ${fiber} g of fiber a day this week (aim for 30 g). Beans, lentils, whole grains, berries, vegetables, nuts and seeds help.`);
+    }
+    planFlags = flags.concat(microFlags);
     try { localStorage.setItem('nourish_plan_flags', JSON.stringify(planFlags)); } catch (e) { /* full */ }
 }
 function applyNutritionRules(days) {
     days.forEach((d, i) => { days[i] = dayRules(d, i); });
-    // The added protein and fiber have calories too: a day they pushed more than 8% off its target
-    // gets its furthest-off meal swapped (never a repeat, always fitting the slot), then the rules again.
+    // A day still more than 8% off its calories (portions only go from ¾ to 1½) gets its furthest-off
+    // meal swapped for another recipe (never a repeat, always fitting the slot), then sized once more.
+    // Each step runs once: nothing here can go round in circles.
     if (lastPlanPools) {
         try {
             const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (lastPlanPools[m] || []).concat(typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off' ? NourishBuiltins.forMeal(m) : [])]));
             const kept = NourishPlanner.keepToTargets(days, { pools, settings: plannerSettings(), people: servingsWanted(), exclude: nutritionExcluder(), weekday: d => (dayBase() + d) % 7, already: recentPlanDishes(), tolerance: 0.08 });
             if (kept.changes.length) {
-                nlog('plan', `After adding protein and fiber, ${kept.changes.length} day(s) kept to the calorie target`, kept.changes);
+                nlog('plan', `${kept.changes.length} day(s) kept to the calorie target by choosing another recipe`, kept.changes);
                 kept.days.forEach((d, i) => { if (d !== days[i]) days[i] = dayRules(d, i); });
             }
         } catch (e) { nlog('plan', `Keeping days to target after the rules failed: ${e.message}`, null, 'warn'); }
@@ -4489,21 +4522,6 @@ async function fillMissingMeals(plan) {
         // 2. The built-in recipes (all of them, whatever the pool held).
         if (!meal && typeof NourishBuiltins !== 'undefined' && settings.builtin_mode !== 'off') { meal = await closest(NourishBuiltins.forMeal(slot.meal), slot, recent); if (meal) how = 'a Nourish recipe'; }
         if (meal) meal = JSON.parse(JSON.stringify(meal));
-        // 2b. A real recipe with one disliked ingredient: the AI suggests a swap (a small job).
-        if (!meal && run && (plan.adaptable || []).length) {
-            for (const { r, term } of plan.adaptable.slice(0, 3)) {
-                try {
-                    const sub = await aiSubstitute(run, r.name, term);
-                    const changed = sub && NourishPlanner.adapt(r, term, sub);
-                    if (!changed) continue;
-                    NourishNutrition.settle(changed);
-                    if (exclude(changed) || slotCheck(changed, slot.meal, slot.day) || inPlan().has(changed.name) || !(changed.nutrition && changed.nutrition.calories > 0)) continue;
-                    meal = changed; how = `a real recipe with ${term} swapped for ${sub}`;
-                    plan.adaptable = plan.adaptable.filter(x => x.r !== r);
-                    break;
-                } catch (e) { /* next one */ }
-            }
-        }
         // 3. The AI, as the last resort.
         if (!meal && canWrite) {
             const others = plan.days.flatMap(d => MEAL_TYPES.map(t => d[t] && d[t].name).filter(Boolean));

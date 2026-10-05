@@ -1,5 +1,6 @@
-// The nutrition rules on a whole week, as the app runs them (planner.js planWeek, then fitDay and
-// applyDayRules on every day): Daily mode, and Weekly mode with one big day.
+// The nutrition rules on a whole week, as the app runs them (planner.js planWeek, then balanceDay on
+// every day): Daily mode, and Weekly mode with one big day. Since 0.1.14 a recipe is never changed:
+// protein comes from choosing recipes, plus at most two protein extras as items of their own.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const PL = require('../planner.js');
@@ -25,37 +26,48 @@ function runWeek(settings) {
     const notes = [];
     const days = plan.days.map((d, i) => {
         const s = Array.isArray(settings.day_kcal) ? Object.assign({}, settings, { calorie_target: settings.day_kcal[i] }) : settings;
-        const res = PL.applyDayRules(PL.fitDay(d, s, 1), s, 1, exclude);
+        const res = PL.balanceDay(d, s, 1, exclude, i);
         notes.push(...res.notes);
         return res.day;
     });
     return { days, notes };
 }
-function checkWeek(days, settings) {
+const foods = r => PL.ingredientFoods(r).join('|');
+function checkWeek(days, settings, pool) {
     const T = PL.targetsOf(settings);
+    const original = name => MEALS.flatMap(m => pool[m]).find(r => r.name === name);
     days.forEach((d, i) => {
         const t = PL.dayTotals(d);
         const kcal = Array.isArray(settings.day_kcal) ? settings.day_kcal[i] : T.kcal;
         MEALS.filter(m => m !== 'dinner').forEach(m => assert.equal(PL.pricey(d[m]), '', `day ${i + 1} ${m} "${d[m].name}" has an expensive ingredient`));
         (d.snacks || []).forEach(sn => assert.equal(PL.pricey(sn), '', `snack ${sn.name}`));
-        assert.ok(d.breakfast.nutrition.protein_g >= 25, `day ${i + 1} breakfast "${d.breakfast.name}": ${d.breakfast.nutrition.protein_g} g protein`);
-        MEALS.forEach(m => assert.ok(d[m].nutrition.protein_g >= 24.5, `day ${i + 1} ${m}: ${d[m].nutrition.protein_g} g protein`));
-        assert.ok(t.protein >= T.protein * 0.97, `day ${i + 1}: ${Math.round(t.protein)} g protein of ${T.protein}`);
-        assert.ok(t.fiber >= 29.5, `day ${i + 1}: ${Math.round(t.fiber)} g fiber`);
+        // Cooked as written: the same foods as the recipe, only the portion changes (¾ to 1½).
+        MEALS.forEach(m => {
+            const r = d[m];
+            assert.ok(!r.protein_added && !r.fiber_added && !r.fat_swapped && !r.trimmed, `day ${i + 1} ${m} "${r.name}" was changed`);
+            const o = original(r.name);
+            if (o) assert.equal(foods(r), foods(o), `day ${i + 1} ${m} "${r.name}": its ingredients changed`);
+            const portion = r.scaled ? r.scaled.portion : 1;
+            assert.ok(portion >= 0.75 && portion <= 1.5 && Math.abs(portion * 4 - Math.round(portion * 4)) < 0.01, `day ${i + 1} ${m}: portion ${portion}`);
+        });
+        const extras = (d.snacks || []).filter(x => x.protein_extra);
+        assert.ok(extras.length <= 2, `day ${i + 1}: ${extras.length} protein extras`);
+        // Protein met, or the honest number shown.
+        if (t.protein < T.protein * 0.97) assert.ok(d.protein_gap && d.protein_gap.have === Math.round(t.protein), `day ${i + 1}: ${Math.round(t.protein)} g protein of ${T.protein} with no note`);
         assert.ok(Math.abs(t.kcal / kcal - 1) <= 0.12, `day ${i + 1}: ${Math.round(t.kcal)} kcal against ${kcal}`);
     });
 }
 
-test('Daily mode, a full week: no expensive food outside dinner, every breakfast ≥ 25 g protein, daily protein and fiber met', () => {
+test('Daily mode, a full week: no expensive food outside dinner, recipes cooked as written, protein met or said honestly', () => {
     for (const goal of ['Maintain', 'Cut']) {
         const settings = { calorie_target: 2200, body_weight_kg: 80, goal, snacks_per_day: '1' };
         assert.equal(PL.targetsOf(settings).protein, goal === 'Cut' ? 160 : 128, '1.6 g/kg, 2.0 g/kg when losing weight');
         const { days, notes } = runWeek(settings);
-        checkWeek(days, settings);
+        checkWeek(days, settings, pools());
         assert.ok(!days.some(d => /Steak and Eggs|Lobster Roll/.test(d.breakfast.name + d.lunch.name)));
-        // The low-protein smoothie never stays protein-less: if chosen, protein is added; the log says so.
-        days.filter(d => /Strawberry Banana Smoothie/.test(d.breakfast.name)).forEach(d => assert.ok(d.breakfast.protein_added && d.breakfast.nutrition.protein_g >= 25));
-        notes.forEach(n => assert.match(n, /(protein|fiber|olive oil)/i));
+        // The low-protein smoothie is a drink, never a breakfast padded with protein.
+        assert.ok(!days.some(d => /Strawberry Banana Smoothie/.test(d.breakfast.name)));
+        notes.forEach(n => assert.match(n, /protein/i));
     }
 });
 
@@ -68,7 +80,7 @@ test('Weekly mode with one big day: the big day gets its calories, the other day
     assert.ok(w.perDay.every(k => k >= 2200 * 0.75));
     const settings = { calorie_target: 2200, body_weight_kg: 80, goal: 'Maintain', snacks_per_day: '1', day_kcal: w.perDay };
     const { days } = runWeek(settings);
-    checkWeek(days, settings);
+    checkWeek(days, settings, pools());
     const totals = days.map(d => PL.dayTotals(d).kcal);
     assert.ok(totals[5] > totals[4] * 1.25, `the big day is bigger: ${totals.map(Math.round).join(', ')}`);
     // Two very big days would push the others under the floor: they stay at 75% and the week is over budget, said plainly.

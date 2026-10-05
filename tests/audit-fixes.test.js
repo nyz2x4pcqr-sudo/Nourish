@@ -71,18 +71,16 @@ test('avoided foods: a word ending in y also catches its -ies plural (anchovies 
     assert.ok(P.excluder({ avoid: 'turkey' })({ name: 'x', ingredients: ['2 turkeys'] }));
 });
 
-test('portions stay whole, half or quarter servings, and an added protein food stays within what a person would add', () => {
+test('portions stay quarter servings between ¾ and 1½, and the recipe itself never changes (0.1.13 added chicken, eggs and powder to recipes)', () => {
     const r = { name: 'Black Bean Tacos', servings: 4, ingredients: ['2 cans black beans', '8 corn tortillas', '1 avocado', '1/2 cup salsa'], steps: ['Warm the beans.', 'Fill the tortillas.'] };
     N.settle(r);
-    let day = { breakfast: null, lunch: PL.scaleRecipe(r, 1.75, 1), dinner: null };
-    day = PL.fitDay(day, { calorie_target: 1500 }, 1);
-    const portion = day.lunch.scaled ? day.lunch.scaled.portion : 1;
-    assert.ok(Math.abs(portion * 4 - Math.round(portion * 4)) < 0.01, `${portion}`);
-    let m = day.lunch;
-    for (let i = 0; i < 6; i++) m = PL.boostProtein(m, 30, 'lunch', 1, null);
-    const added = m.ingredients.filter(l => /chicken breast|tofu/.test(l));
-    assert.equal(added.length, 1, added.join(' | '));
-    assert.ok(Number(added[0].match(/^\d+/)[0]) <= 6, added[0]);
+    for (const kcal of [1200, 1500, 2600, 4000]) {
+        const res = PL.balanceDay({ breakfast: null, lunch: PL.scaleRecipe(r, 1, 1), dinner: null }, { calorie_target: kcal, protein_target: 150 }, 1, null, 0);
+        const portion = res.day.lunch.scaled ? res.day.lunch.scaled.portion : 1;
+        assert.ok(portion >= 0.75 && portion <= 1.5 && Math.abs(portion * 4 - Math.round(portion * 4)) < 0.01, `${kcal}: ${portion}`);
+        assert.deepEqual(PL.ingredientFoods(res.day.lunch), PL.ingredientFoods(r), 'the same foods as the recipe');
+        assert.ok(!res.day.lunch.protein_added && !res.day.lunch.fiber_added && !res.day.lunch.fat_swapped);
+    }
 });
 
 test('a description made from the recipe never carries amounts, units or brackets ("Sandwich made with to 4 slices bacon…")', () => {
@@ -105,23 +103,33 @@ test('amount ranges ending in a written fraction, and frozen dumplings counted b
     assert.ok(d.grams <= 700, `${d.grams} g`);
 });
 
-test('a day over its calories has added foods taken back out, fiber first, never under 90% of its protein', () => {
-    const meal = (name, kcal, p) => ({ name, servings: 1, ingredients: ['x'], steps: ['Cook.'], nutrition: { calories: kcal, protein_g: p, carbs_g: 50, fat_g: 10, fiber_g: 5 } });
-    let b = meal('Porridge', 400, 30);
-    b = Object.assign(b, { ingredients: ['x', '2 tbsp chia seeds'], fiber_added: ['2 tbsp chia seeds'], added_steps: ['Stir in the chia seeds.'], steps: ['Cook.', 'Stir in the chia seeds.'] });
-    b.nutrition.calories += 120;
-    let l = meal('Salad', 500, 40);
-    l = Object.assign(l, { ingredients: ['x', '6 oz firm tofu'], protein_added: ['6 oz firm tofu'] });
-    l.nutrition.calories += 140; l.nutrition.protein_g += 15;
-    const day = { breakfast: b, lunch: l, dinner: meal('Curry', 600, 40) };
-    const before = PL.dayTotals(day);
-    const out = PL.trimAddOns(day, before.kcal - 100, 0, 1);
-    assert.ok(!out.day.breakfast.fiber_added, 'the chia seeds go first');
-    assert.ok(!out.day.breakfast.ingredients.includes('2 tbsp chia seeds'));
-    assert.ok(!out.day.breakfast.steps.includes('Stir in the chia seeds.'));
-    assert.ok(PL.dayTotals(out.day).kcal < before.kcal - 100);
-    const kept = PL.trimAddOns(day, before.kcal - 300, before.protein - 1, 1);
-    assert.ok(kept.day.lunch.protein_added, 'protein stays when it would drop under the floor');
+test('a day short of protein gets at most two protein extras as items of their own, and says honestly what it reaches', () => {
+    const meal = (name, kcal, p, list) => ({ name, servings: 1, ingredients: list, steps: ['Cook.'], nutrition: { calories: kcal, protein_g: p, carbs_g: 60, fat_g: 12, fiber_g: 5 } });
+    const day = { breakfast: meal('Porridge', 380, 12, ['1 cup oats', '1 cup milk']), lunch: meal('Lentil Soup', 420, 18, ['1 cup lentils', '1 onion']), dinner: meal('Veggie Pasta', 560, 20, ['4 oz pasta', '1 zucchini']) };
+    const s = { calorie_target: 1500, protein_target: 150 };
+    const res = PL.balanceDay(day, s, 1, null, 0);
+    const extras = (res.day.snacks || []).filter(x => x.protein_extra);
+    assert.ok(extras.length >= 1 && extras.length <= 2, `${extras.length} extras`);
+    extras.forEach(x => assert.match(x.name, /yogurt|cottage|shake|tuna|eggs|jerky|edamame/i));
+    PL.MEALS.forEach(m => assert.deepEqual(PL.ingredientFoods(res.day[m]), PL.ingredientFoods(day[m]), `${m} unchanged`));
+    const t = PL.dayTotals(res.day);
+    assert.ok(Math.abs(t.kcal / 1500 - 1) <= 0.1, `${Math.round(t.kcal)} kcal`);
+    // These recipes can't reach 150 g even with two extras: the honest number is kept for the plan screen.
+    assert.ok(res.day.protein_gap && res.day.protein_gap.have === Math.round(t.protein) && res.day.protein_gap.target === 150);
+    // A vegan day never gets dairy or tuna.
+    const vegan = PL.balanceDay(day, s, 1, require('../prefs.js').excluder({ diet: 'Vegan' }), 0);
+    (vegan.day.snacks || []).forEach(x => assert.match(x.name, /plant protein shake|edamame/i));
+    // A day that already meets its protein gets none.
+    const rich = { breakfast: meal('Egg White Scramble', 380, 45, ['1 cup egg whites']), lunch: meal('Chicken Salad', 450, 50, ['6 oz chicken breast']), dinner: meal('Salmon', 620, 55, ['6 oz salmon']) };
+    assert.equal((PL.balanceDay(rich, s, 1, null, 0).day.snacks || []).length, 0);
+});
+
+test('a high protein target for the calories gets a plain note with a range real meals reach', () => {
+    const note = PL.proteinNote({ calorie_target: 1500, protein_target: 150 });
+    assert.equal(note.share, 40);
+    assert.equal(note.lo, 95); assert.equal(note.hi, 130);
+    assert.match(note.text, /limits which recipes fit/);
+    assert.equal(PL.proteinNote({ calorie_target: 2000, protein_target: 120 }), null);
 });
 
 test('whole spices with no unit weigh what a berry or a pod weighs, not 100 g', () => {

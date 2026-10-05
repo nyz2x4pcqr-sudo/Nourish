@@ -142,15 +142,9 @@
     function turnedAway(ctx, why) { const w = ctx.stats.why || (ctx.stats.why = {}); w[why] = (w[why] || 0) + 1; return null; }
     function vet(r, ctx) {
         if (!r) return null;
+        // Something the person avoids: the recipe is left out. A recipe is never changed to fit.
         const avoided = ctx.exclude(r);
         if (avoided) {
-            // Only a disliked side ingredient (never an allergy or the diet): swapped for something
-            // similar when there's a sensible swap; otherwise kept aside for the AI to suggest one.
-            const hard = ctx.excludeHard(r);
-            const sub = !hard && PL.substituteFor(avoided);
-            const changed = sub && PL.adapt(r, avoided, sub);
-            if (changed && !ctx.exclude(changed)) { ctx.stats.adapted = (ctx.stats.adapted || 0) + 1; return vet(changed, ctx); }
-            if (!hard && ctx.adaptable.length < 40 && PL.adapt(r, avoided, 'x')) ctx.adaptable.push({ r, term: avoided });
             ctx.stats.excluded++;
             return turnedAway(ctx, 'has something you avoid');
         }
@@ -175,11 +169,8 @@
         const fit = PL.mealFit(r);
         if (!fit.breakfast && !fit.lunch && !fit.dinner) return turnedAway(ctx, fit.why || 'not a meal');
         r._fit = fit;
-        if (!PL.flavorCheck(r).ok) {
-            PL.reseason(r);
-            N.settle(r);
-            if (!PL.flavorCheck(r).ok) { ctx.stats.bland++; return turnedAway(ctx, 'bland'); }
-        }
+        // A recipe that looks bland is kept as written (never re-seasoned); it just comes after others.
+        if (!PL.flavorCheck(r).ok) { ctx.stats.bland++; r.bland = true; }
         r.sameAs = [PL.dishKey(r.name)];
         return r;
     }
