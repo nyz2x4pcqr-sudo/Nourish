@@ -37,7 +37,7 @@
         'branzino': 'cod', 'sea bass': 'cod', 'snapper': 'cod', 'red snapper': 'cod', 'whole fish': 'cod', 'sea bream': 'cod', 'white fish': 'cod',
         'chicken pieces': 'chicken', 'chicken legs': 'chicken', 'chicken leg quarters': 'chicken', 'leg quarters': 'chicken',
         'fresh fruit': 'berries', 'frozen fruit': 'berries', 'mixed fruit': 'berries', fruit: 'berries',
-        'mange tout': 'snow peas', 'mange-tout': 'snow peas',
+        'mange tout': 'snow peas', 'mange-tout': 'snow peas', 'salad leaves': 'lettuce', 'mixed leaves': 'lettuce', 'salad greens': 'lettuce', 'mixed greens': 'lettuce', 'spring mix': 'lettuce',
         'french beans': 'green beans', 'fine beans': 'green beans', 'haricots verts': 'green beans', 'string beans': 'green beans',
         // Nut and seed butters aren't butter (0.1.12 read "nut or seed butter" as dairy butter).
         'nut butter': 'peanut butter', 'nut or seed butter': 'peanut butter', 'seed butter': 'peanut butter', 'sunflower seed butter': 'peanut butter', 'cashew butter': 'peanut butter',
@@ -330,6 +330,8 @@
             else if (!unit && EACH_RACK.test(clean(raw)) && EACH[m.key]) grams = qty * EACH[m.key];
             else if (!unit && /^\s*[\d.\/½¼¾]+\s+leaves?\b/i.test(raw)) grams = qty * (/lettuce|cabbage|chard|kale|spinach|collard/.test(m.key) ? 10 : 0.5);   // 8 lettuce leaves, 6 basil leaves
             else if (!unit && FREE.test(clean(words)) && /\b(sticks?|star anise|anise|pods?|cloves|bay lea(?:f|ves)|leaves|sprigs?|whole)\b/.test(clean(raw))) grams = qty * 1.5;   // 2 cinnamon sticks, 3 star anise
+            // A chicken thigh: about 115 g boneless, 170 g bone-in (its bone is taken off below).
+            else if (m.key === 'chicken thigh') grams = qty * (/\bbone[- ]in\b|\bon the bone\b/i.test(raw) ? 170 : 115);
             else grams = qty * eachGrams(food, m.key, m.phrase);
         } else {
             // No amount ("salt to taste", "cooking spray"): seasonings count as nothing; anything else

@@ -513,7 +513,7 @@
         if (!recipes.length) {
             const letters = (text.match(/[a-z]/gi) || []).length;
             why = !total ? 'This PDF has no pages Nourish could open.'
-                : letters < total * 40 ? `No text could be read from its ${total} pages${scanned ? ' (they are pictures, and the text recognition found almost nothing on them)' : ''}.`
+                : letters < total * 40 ? `No text could be read from its ${total} pages${scanned ? ' (they are pictures, and the text recognition found almost nothing on them)' : ': they look like pictures of pages (a scanned book). The iPhone app can read scanned books; put it in the Recipe Books folder there'}.`
                     : `Read all ${total} pages${scanned ? ` (${scanned} scanned)` : ''}, but no recipe was recognised: no ingredient lists followed by steps were found.`;
         }
         notes.forEach(n => { n.book = title; });

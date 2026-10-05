@@ -232,8 +232,9 @@
             if (cooking.length || /\b(cook|heat|stove|skillet|preheat)\b/i.test((r.steps || []).join(' '))) return `needs cooking (${cooking[0] || 'heat'}), and this meal is no-cook`;
         }
         if (p.minutes > timeAllowed(L)) return `takes about ${p.minutes} min${p.timeEstimated ? ' (estimated)' : ''}; ${meal} has ${L.minutes} min`;
-        // "Involved" (the recipe screen's label over 6 of 10) is for dinner, or a meal with no rush.
-        if (meal !== 'dinner' && p.difficulty > Math.max(6, L.difficulty + 0.5)) return `is involved (difficulty ${p.difficulty} of 10): too much work for ${meal}`;
+        // "Involved" (the recipe screen's label over 6 of 10) is for dinner, or a meal with no rush
+        // (a little margin: later changes, like olive oil for butter in the steps, can nudge the score).
+        if (meal !== 'dinner' && p.difficulty > Math.max(6, L.difficulty + 0.5) - 0.3) return `is involved (difficulty ${p.difficulty} of 10): too much work for ${meal}`;
         if (meal !== 'dinner') { const x = pricey(r); if (x) return `has ${x}, an expensive ingredient kept for dinner`; }
         return '';
     }
@@ -436,13 +437,15 @@
             const best = [0, 0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1].reduce((a, b) => (Math.abs(b - part) < Math.abs(a - part) ? b : a));
             q = whole + best;
         } else q = q >= 0.3 ? Math.max(0.25, Math.round(q * 4) / 4) : Math.max(0.125, Math.round(q * 8) / 8);   // kitchen fractions: ¼ ½ ¾ (⅛ for pinches)
-        const eff = q / item.qty;   // the factor this line really changed by (whole things are rounded)
+        // The factor this line changed by: things counted whole are rounded (1½ breasts → 2), but a
+        // change of unit (½ cup → 1¼ tbsp) isn't a change of amount (0.1.12's "(50g)" became "(125g)").
+        const eff = (!unit || unit === item.unit) && Math.abs(Math.log(q / item.qty / k)) < Math.log(2) ? q / item.qty : k;
         if (unit === 'kg' && q < 1) { q = Math.max(5, Math.round(q * 1000 / 5) * 5); unit = 'g'; }
         if (unit === 'l' && q < 1) { q = Math.max(5, Math.round(q * 1000 / 5) * 5); unit = 'ml'; }
         const amount = U.formatAmount(q, unit);
         if (LINE_WEIGHT.test(item.text || '')) item.text = scaleWeight(item.text, eff);
         // A second amount for the same thing ("/ 2 lb", "/ 14oz") is scaled too.
-        item.text = String(item.text || '').replace(/^\/\s*((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?|[½¼¾])\s*(lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|cups?)\b/i, (m0, num, u) => {
+        item.text = String(item.text || '').replace(/^\/\s*((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?|[½¼¾])\s*(lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|litres?|liters?|cups?|tbsp|tsp|tablespoons?|teaspoons?|quarts?)\b/i, (m0, num, u) => {
             const n = U.parseNumber(num); if (!n) return m0;
             const v = n.value * eff, metric = /^(g|grams?|kg|ml|l)$/i.test(u);
             return `/ ${metric ? Math.max(5, Math.round(v / 5) * 5) : U.formatQty(Math.max(0.125, Math.round(v * 4) / 4))} ${u}`;
@@ -677,6 +680,9 @@
         const p = n.protein_g * f, fat = n.fat_g * f;
         cost += Math.max(0, (pTarget - p) / pTarget) * 1.5 + Math.max(0, (fat - fTarget) / fTarget) * 1.5;
         if (p < pTarget * 0.5) cost += 2;   // well under half its share of the day's protein
+        // No meal is a mountain of meat: over 100 g of protein in one sitting isn't a sensible portion
+        // (0.1.12 planned 6 chicken thighs, 194 g of protein, for one dinner).
+        if (p > 100) return Infinity;
         cost -= Math.min(2, P.likeScore(r, ctx.likes)) * 0.5;
         if (ctx.goal === 'Cut' && r.healthy) cost -= 0.3;
         cost += goalCost(r, f, ctx.goal);

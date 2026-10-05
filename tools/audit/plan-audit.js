@@ -128,6 +128,9 @@ async function main() {
         const settings = Object.assign({}, (data.settings || {}).value || {});
         const prefs = (data.prefs || {}).value || {};
         const days = (((data.plan || {}).value) || []).map(d => Object.assign(Object.fromEntries(PL.MEALS.map(t => [t, d && d[t] ? normalizeMeal(d[t]) : null])), d && d.snacks ? { snacks: d.snacks } : {}));
+        // The app writes a meal's description when it's first opened (no AI here: made from the recipe).
+        const O = require('../../ondevice.js');
+        days.forEach(d => PL.MEALS.forEach(t => { const m = d[t]; if (m && !m.description) { const text = O.describeFromRecipe(m); if (text) { m.description = text; m.description_made = true; } } }));
         const s = Object.assign(settings, { goal: prefs.goal, budget: { 'Budget-friendly': 'budget', 'No limit': 'any' }[settings.budget] || 'normal' });
         const sc = { label: `Saved plan in ${path.basename(file)}`, avoid: prefs.hates || '', goal: prefs.goal };
         const res = { days, pools: {}, settings: s, exclude: P.excluder({ avoid: prefs.hates || '', allergies: s.allergies, diet: s.diet }), targets: PL.targetsOf(s), log: [] };
