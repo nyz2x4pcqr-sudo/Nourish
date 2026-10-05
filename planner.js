@@ -578,8 +578,22 @@
     function sourceKey(r) {
         if (!r) return 'other';
         if (r.from_book) return `book:${r.book_id || r.book || r.source_name || '?'}`;
+        if (r.builtin || r.quick) return 'builtin';
         if (r.source_id) return r.source_id;
         try { return new URL(r.source_url).hostname.replace(/^www\./, ''); } catch (e) { return r.ai ? 'ai' : 'other'; }
+    }
+    // Meals per source in a plan, so a later swap (calories, vitamins) keeps to the weekly share too:
+    // 0.1.12's swaps could put a 4th meal from one site into the week.
+    function sourceCounts(days) {
+        const c = {};
+        (days || []).forEach(d => MEALS.forEach(m => { if (d && d[m]) { const k = sourceKey(d[m]); c[k] = (c[k] || 0) + 1; } }));
+        return c;
+    }
+    function overCap(r, counts, settings, leaving) {
+        const k = sourceKey(r);
+        if (k === 'builtin') return false;
+        const cap = Math.max(1, Number(settings && settings.source_cap) || 3);
+        return (counts[k] || 0) - (leaving && sourceKey(leaving) === k ? 1 : 0) >= cap;
     }
     // Luxury or hard-to-find ingredients: left out unless the budget is "No limit".
     const LUXURY = /\b(wagyu|kobe|a5\b|caviar|truffles?(?! (cake|brownies?|balls?))|truffle oil|foie gras|beluga|osetra|uni\b|sea urchin|abalone|langoustines?|king crab|lobster|iberico|ib[eé]rico|jam[oó]n ib|gold leaf|bluefin|toro|matsutake|morels?|white asparagus|dry[- ]aged)\b/i;
@@ -617,11 +631,15 @@
         let f = kcalTarget / n.calories;
         const rich = r._richKcal || 0;   // calories trimRich could save per serving
         if (f < 0.6 && n.calories - rich > 0) f = Math.max(f, kcalTarget / (n.calories - rich) * 0.95);
+        // A dish that's too small for the slot even doubled (a 3,400 kcal day) still fits, at double,
+        // when nothing bigger does: the other meals make up the rest. 0.1.12 left dinner empty.
+        let short = 0;
+        if (f > 2 && f <= 3) { short = f - 2; f = 2; }
         if (f < 0.55 || f > 2) return Infinity;
         // Recipes that are close to the slot as written come first; a realistic portion that still
         // misses counts against it too.
         const portion = snapPortion(f);
-        let cost = Math.abs(Math.log(f)) * 1.5 + Math.abs(Math.log(f / portion)) * 2;
+        let cost = Math.abs(Math.log(f)) * 1.5 + Math.abs(Math.log(f / portion)) * 2 + short * 4;
         const share = kcalTarget / ctx.targets.kcal;
         const pTarget = ctx.targets.protein * share;
         const fTarget = ctx.targets.fat * share;
@@ -804,7 +822,7 @@
         const total = PORTIONS.filter(p => p <= prev + 1e-9 && p >= prev * 0.75 - 1e-9).reduce((a, p) => (Math.abs(Math.log(p / (prev * want / r.nutrition.calories))) < Math.abs(Math.log(a / (prev * want / r.nutrition.calories))) ? p : a), snapPortion(prev));
         const f = Math.min(1, total / prev);
         const out = scaleRecipe(Object.assign({}, r, { servings: people || r.servings || 1 }), f, people || r.servings || 1);
-        out.scaled = { from_servings: (meal.scaled && meal.scaled.from_servings) || r.servings || 1, portion: Math.round(prev * f * 100) / 100 };
+        out.scaled = { from_servings: (meal.scaled && meal.scaled.from_servings) || r.servings || 1, portion: Math.round(prev * f * 4) / 4 };
         return out;
     }
     // Sizes the portions of a day that was made another way (by the AI, or edited) so it lands on the
@@ -830,7 +848,7 @@
         items.forEach(it => {
             const s = sized[it.key];
             // Unchanged unless it really moves: a meal at its portion stays exactly as it was.
-            if (s.scaled && it.prev.scaled) s.scaled = Object.assign({}, s.scaled, { from_servings: it.prev.scaled.from_servings, portion: Math.round(it.prev.scaled.portion * s.scaled.portion * 100) / 100 });
+            if (s.scaled && it.prev.scaled) s.scaled = Object.assign({}, s.scaled, { from_servings: it.prev.scaled.from_servings, portion: Math.round(it.prev.scaled.portion * s.scaled.portion * 4) / 4 });
             if (!s.scaled && !it.r.trimmed) return;
             out[it.key] = s;
         });
@@ -844,6 +862,7 @@
         const base = targetsOf(settings);
         const split = splitOf(settings);
         const used = dishList(days.flatMap(d => MEALS.map(m => d && d[m] && d[m].name).filter(Boolean)));
+        const counts = sourceCounts(days);
         const changes = [];
         const out = days.map((day, d) => {
             if (!day) return day;
@@ -863,11 +882,13 @@
                 const limits = slotLimits(settings, worst.m, weekday ? weekday(d) : null);
                 const others = MEALS.filter(m => m !== worst.m).map(m => cur[m]).filter(Boolean);
                 const pick = (pools[worst.m] || []).filter(r => r && r.nutrition && r.nutrition.calories > 0 && !used.has(r.name) && !(exclude && exclude(r)) && !slotProblem(r, worst.m, limits)
-                    && !others.some(o => mainProtein(o) && mainProtein(o) === mainProtein(r)))
+                    && !others.some(o => mainProtein(o) && mainProtein(o) === mainProtein(r)) && !overCap(r, counts, settings, cur[worst.m]))
                     .map(r => ({ r, f: want / r.nutrition.calories })).filter(x => x.f >= 0.55 && x.f <= 2)
                     .sort((a, b) => (recent.has(a.r.name) ? 1 : 0) - (recent.has(b.r.name) ? 1 : 0) || Math.abs(Math.log(a.f)) - Math.abs(Math.log(b.f)))[0];
                 if (!pick) break;
                 changes.push(`day ${d + 1}: ${Math.round(total)} kcal against ${targets.kcal}; ${worst.m} "${cur[worst.m].name}" → "${pick.r.name}"`);
+                counts[sourceKey(cur[worst.m])] = (counts[sourceKey(cur[worst.m])] || 1) - 1;
+                counts[sourceKey(pick.r)] = (counts[sourceKey(pick.r)] || 0) + 1;
                 used.add(pick.r.name);
                 cur = fitDay(Object.assign({}, cur, { [worst.m]: JSON.parse(JSON.stringify(pick.r)) }), daySettings, people);
             }
@@ -1140,6 +1161,7 @@
         let out = days.slice();
         const notes = [];
         const used = dishList(out.flatMap(d => MEALS.map(m => d && d[m] && d[m].name).filter(Boolean)));
+        const counts = sourceCounts(out);
         weekMicros(out).low.forEach(k => {
             const per = r => ((r.nutrition && r.nutrition.micros && Number(r.nutrition.micros[k])) || 0) / Math.max(1, (r.nutrition && r.nutrition.calories) || 1);
             let best = null;
@@ -1148,7 +1170,7 @@
                 if (!cur || !cur.nutrition || cur.leftover) return;
                 const limits = slotLimits(settings, m, weekday ? weekday(i) : null);
                 (pools[m] || []).forEach(r => {
-                    if (!r || !r.nutrition || used.has(r.name) || (exclude && exclude(r)) || slotProblem(r, m, limits)) return;
+                    if (!r || !r.nutrition || used.has(r.name) || (exclude && exclude(r)) || slotProblem(r, m, limits) || overCap(r, counts, settings, cur)) return;
                     const f = cur.nutrition.calories / r.nutrition.calories;
                     if (f < 0.75 || f > 1.33) return;
                     const gain = (per(r) - per(cur)) * cur.nutrition.calories;
@@ -1157,6 +1179,8 @@
             }));
             if (!best || best.gain < MICRO_TARGETS[k] * 0.1) return;
             const old = out[best.i][best.m];
+            counts[sourceKey(old)] = (counts[sourceKey(old)] || 1) - 1;
+            counts[sourceKey(best.r)] = (counts[sourceKey(best.r)] || 0) + 1;
             out[best.i] = fitDay(Object.assign({}, out[best.i], { [best.m]: JSON.parse(JSON.stringify(best.r)) }), settings, people);
             used.add(best.r.name);
             notes.push(`The week was low in ${MICRO_NAMES[k]}: day ${best.i + 1} ${best.m} "${old.name}" swapped for "${best.r.name}" (about ${Math.round(best.gain)} ${MICRO_UNITS[k]} more)`);
@@ -1184,7 +1208,20 @@
         // Sizing for protein can shrink portions under the fiber again: checked once more.
         const after = balanceFiber(protein.day, settings, people, exclude);
         notes.push(...after.notes);
-        return { day: after.day, notes };
+        // What was added (fiber, protein) has calories too: the day is sized to its target once more
+        // when it's drifted (0.1.12 left days 15–25% over), as long as that keeps its protein.
+        let cur2 = after.day;
+        const T = targetsOf(settings || {});
+        const before = dayTotals(cur2);
+        if (Math.abs(before.kcal / T.kcal - 1) > 0.05) {
+            const refit = fitDay(cur2, settings, people);
+            const now = dayTotals(refit);
+            if (Math.abs(now.kcal - T.kcal) < Math.abs(before.kcal - T.kcal) && now.protein >= Math.min(before.protein, T.protein * 0.9)) {
+                notes.push(`with the protein and fiber added, the day came to ${Math.round(before.kcal)} kcal; portions sized again to ${Math.round(now.kcal)} kcal`);
+                cur2 = refit;
+            }
+        }
+        return { day: cur2, notes };
     }
 
     // === SNACKS ===
@@ -1424,7 +1461,7 @@
         }).join('');
     }
 
-    const api = { describe, cleanDescription, ownProtein, applyDayRules, weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { sourceCounts, overCap, describe, cleanDescription, ownProtein, applyDayRules, weeklyTargets, WEEKDAYS, balanceFiber, fatSwap, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, boostProtein, balanceProtein, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, trimRich, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

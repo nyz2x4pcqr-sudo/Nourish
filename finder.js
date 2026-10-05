@@ -140,6 +140,8 @@
     }
     // Why recipes were turned away, counted for the log ("a drink: 3, a dessert: 5…").
     function turnedAway(ctx, why) { const w = ctx.stats.why || (ctx.stats.why = {}); w[why] = (w[why] || 0) + 1; return null; }
+    const MAIN_FOOD = /\b(chicken|beef|pork|lamb|turkey|duck|veal|fish|salmon|tuna|cod|shrimp|prawns?|crab|lobster|scallops?|sausages?|steak|ribs|tofu|tempeh)\b/i;
+    const BIG_AMOUNT = /^\s*(\d+(\.\d+)?|\d+\s*\/\s*\d+)\s*(lbs?|pounds?|kg)\b|^\s*([2-9]\d{2,}|\d{4,})\s*g\b/i;
     function vet(r, ctx) {
         if (!r) return null;
         const avoided = ctx.exclude(r);
@@ -170,6 +172,10 @@
         }
         const major = unread.filter(l => !N.isMinor(l));
         if (r.nutrition_basis === 'calculated' && major.length && (major.length >= 3 || major.length > r.ingredients.length * 0.25)) { ctx.stats.unsure++; return turnedAway(ctx, 'ingredients the calculator can\'t read'); }
+        // Its main food can't be counted (the dish's meat or fish, or a big amount of anything): its
+        // numbers would be made up, whoever's they are.
+        const mainWord = (String(r.name || '').match(MAIN_FOOD) || [])[0];
+        if (major.some(l => MAIN_FOOD.test(l) && (!mainWord || new RegExp(`\\b${mainWord.replace(/s$/i, '')}`, 'i').test(l)) || BIG_AMOUNT.test(l))) { ctx.stats.unsure++; return turnedAway(ctx, 'its main ingredient can\'t be counted'); }
         if (unread.length) r.nutrition_approximate = true;
         if (!r.nutrition || !(r.nutrition.calories > 40)) return turnedAway(ctx, 'too few calories to be a meal');
         const fit = PL.mealFit(r);

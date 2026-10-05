@@ -73,7 +73,7 @@ async function makePlan(scenario, shared) {
     const slotCheck = (meal, type, d) => PL.slotProblem(meal, type, PL.slotLimits(s, type, d % 7));
     const closest = (list, slot) => {
         const used = inPlan();
-        return list.filter(r => r && r.nutrition && r.nutrition.calories > 0 && slot.kcal / r.nutrition.calories >= 0.55 && slot.kcal / r.nutrition.calories <= 2 && !used.has(r.name) && !exclude(r) && !slotCheck(r, slot.meal, slot.day))
+        return list.filter(r => r && r.nutrition && r.nutrition.calories > 0 && slot.kcal / r.nutrition.calories >= 0.55 && slot.kcal / r.nutrition.calories <= 2 && !used.has(r.name) && !exclude(r) && !slotCheck(r, slot.meal, slot.day) && !PL.overCap(r, PL.sourceCounts(plan.days), plannerSettings()))
             .sort((a, b) => Math.abs(Math.log(slot.kcal / a.nutrition.calories)) - Math.abs(Math.log(slot.kcal / b.nutrition.calories)))[0] || null;
     };
     for (const slot of plan.missing) {
@@ -83,7 +83,8 @@ async function makePlan(scenario, shared) {
         if (meal) { plan.days[slot.day][slot.meal] = normalizeMeal(JSON.parse(JSON.stringify(meal))) || meal; log.push(`day ${slot.day + 1} ${slot.meal}: ${how} (${meal.name})`); }
         else log.push(`day ${slot.day + 1} ${slot.meal}: nothing fits; left empty`);
     }
-    let days = plan.days.map(d => PL.fitDay(d, plannerSettings(), people));
+    const dayTargets = i => (Array.isArray(s.day_kcal) && s.day_kcal[i] > 0 ? { calorie_target: s.day_kcal[i] } : {});   // app.js dayTargetsFor
+    let days = plan.days.map((d, i) => PL.fitDay(d, plannerSettings(dayTargets(i)), people));
     const pools = Object.fromEntries(MEAL_TYPES.map(m => [m, (plan.pools[m] || []).concat(s.builtin_mode !== 'off' ? B.forMeal(m) : [])]));
     const kept = PL.keepToTargets(days, { pools, settings: plannerSettings(), people, exclude, weekday: d => d % 7, already: [] });
     days = kept.days;
@@ -115,7 +116,7 @@ async function makePlan(scenario, shared) {
     }));
     if (PL.snacksOf(s)) days.forEach((d, i) => { if (d.snacks && d.snacks.length) return; PL.addSnacks(d, s, i, people, exclude, db ? db.extras().filter(r => !r.review && r.nutrition && r.nutrition.calories > 0).slice(0, 60) : []); if (d.snacks) d.snacks = d.snacks.map(normalizeMeal).filter(Boolean); });
     const dayRules = (d, i) => {
-        const res = PL.applyDayRules(d, plannerSettings(), people, exclude, { fatSwapOn: s.fat_swap !== 'off' });
+        const res = PL.applyDayRules(d, plannerSettings(dayTargets(i)), people, exclude, { fatSwapOn: s.fat_swap !== 'off' });
         res.notes.forEach(n => log.push(`day ${i + 1}: ${n}`));
         MEAL_TYPES.forEach(t => { if (res.day[t]) res.day[t] = normalizeMeal(res.day[t]); });
         return res.day;

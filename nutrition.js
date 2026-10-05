@@ -61,6 +61,10 @@
         oxtail: { n: [262, 19, 0, 20, 0, 0, 10, 220, 15], a: ['oxtails', 'beef oxtail'], u: [] },
         lobster: { n: [77, 16.5, 0, 0.8, 0, 0, 84, 275, 43], a: ['lobster meat', 'lobster tails', 'lobster tail', 'lobsters'], u: [[145, 'cup']] },
         clams: { n: [86, 14.7, 3.6, 1, 0, 0, 46, 314, 9], a: ['clam', 'littleneck clams', 'cockles'], u: [] },
+        // USDA SR Legacy: tomatillos, raw; broad (fava) beans, raw; mixed cooked grains as cooked brown rice and quinoa.
+        tomatillo: { n: [32, 1, 5.8, 1, 1.9, 0, 7, 268, 20], a: ['tomatillos'], u: [[34, 'medium'], [132, 'cup']] },
+        'fava beans': { n: [88, 7.9, 17.6, 0.7, 7.5, 0, 37, 332, 33], a: ['broad beans', 'fava bean', 'broad bean'], u: [[109, 'cup']] },
+        'cooked grains': { n: [120, 3.5, 23, 1.2, 2.2, 0, 10, 60, 50], a: ['mixed grains', 'cooked mixed grains', 'grain mix', 'pouch cooked grains'], u: [[195, 'cup']] },
     };
     Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });
 

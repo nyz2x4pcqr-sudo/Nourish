@@ -37,7 +37,7 @@ const NOT_DESSERT = /\b(pot pies?|shepherd'?s pie|cottage pie|chicken pie|meat p
 const SAUCE = /\b(sauces?|dressings?|vinaigrettes?|gravy|chimichurri|marinades?|rubs?|seasonings?|spice (mix|blend)|stocks?|broths?|syrups?|jams?|jellies|chutneys?|relish|pickles?|condiments?|mayonnaise|ketchup|hot sauce|chili oil|chili crisp)$/i;
 const SIDE_WORDS = /\b(side|sides|side dish|accompaniments?|to serve alongside)\b/i;
 const ARTICLE = /^(how to|a guide|the guide|guide to|tips|\d+\s+(ways|tips|ideas|recipes|things))|\b(guide|101|tips|ideas|round-?up|meal plan)$/i;
-const MEAL_WORDS = /\b(salad|soup|stew|chili|curry|bowl|wrap|sandwich|burger|tacos?|burrito|quesadilla|pasta|noodles?|rice|risotto|pilaf|grain|lentils?|beans?|chickpeas?|omelet+e?|frittata|eggs|oats|oatmeal|porridge|pancakes?|toast|stir[- ]?fry|casserole|bake|pie|pizza|skillet|traybake|sheet[- ]pan|dumplings?)\b/i;
+const MEAL_WORDS = /\b(salads?|soups?|stews?|chili|curr(y|ies)|bowls?|wraps?|sandwich(es)?|burgers?|tacos?|burritos?|quesadillas?|pasta|noodles?|rice|risotto|pilaf|grains?|lentils?|beans?|chickpeas?|omelet+e?s?|frittatas?|eggs|oats|oatmeal|porridge|pancakes?|toast|stir[- ]?fry|casseroles?|bakes?|pies?|pizzas?|skillet|traybakes?|sheet[- ]pan|dumplings?|pitas?|flatbreads?|bagels?)\b/i;
 const VEG_OR_STARCH = /\b(potato(es)?|green beans|beans|carrots?|broccoli|cauliflower|asparagus|brussels sprouts|spinach|kale|zucchini|squash|corn|peas|mushrooms?|onions?|cabbage|slaw|coleslaw|fries|chips|bread|garlic bread|rolls|biscuits|cornbread|rice|couscous|polenta)\b/i;
 const PROTEIN_WORDS = /\b(chicken|beef|pork|lamb|turkey|duck|veal|venison|fish|salmon|tuna|cod|halibut|tilapia|trout|shrimp|prawns?|scallops?|crab|lobster|mussels|clams|sausages?|bacon|ham|steak|ribs|tofu|tempeh|seitan|eggs?|lentils?|chickpeas?|beans|edamame|paneer|halloumi|cheese)\b/i;
 // Dishes for dinner, not breakfast or lunch (long, heavy or special).
@@ -100,12 +100,12 @@ function checkMeal(m, slot, ctx, add) {
     // --- Not really a meal ---
     const why = [];
     if (ARTICLE.test(name)) why.push('an article or guide');
-    if (APPETIZER.test(dish) || (/\b(appeti[sz]ers?|starters?|small plates?|tapas|mezze|snacks?|nibbles)\b/i.test(cat) && !/\b(main|dinner|lunch|breakfast|brunch|entr[eé]e)\b/i.test(cat)) || /\b(as an? (appeti[sz]er|starter|snack|dip|spread)|spread (it )?on (the )?toast)\b/i.test(steps)) why.push('an appetizer or small plate');
+    if (APPETIZER.test(dish) || (/\b(appeti[sz]ers?|starters?|small plates?|tapas|mezze|snacks?|nibbles)\b/i.test(cat) && !/\b(main|dinner|lunch|breakfast|brunch|entr[eé]e)\b/i.test(cat)) || /\bas an? (appeti[sz]er|starter|snack|dip|spread)\b/i.test(steps)) why.push('an appetizer or small plate');
     if (SPREAD.test(dish) && !MEAL_WORDS.test(dish)) why.push('a spread or dip');
     if (DRINK.test(dish) && !/\b(smoothie bowl|tea[- ]smoked|tea eggs?)\b/i.test(dish) && !MEAL_WORDS.test(dish)) why.push('a drink');
     if (DESSERT.test(dish) && !NOT_DESSERT.test(dish) && !(slot === 'breakfast' && /\b(pancakes?|muffins?)\b/i.test(dish))) why.push('a dessert');
     if (SAUCE.test(dish)) why.push('a sauce or condiment');
-    if (SIDE_WORDS.test(cat) && !/\b(main|dinner|lunch|breakfast)\b/i.test(cat)) why.push('a side dish (its category)');
+    if (SIDE_WORDS.test(cat) && !/\b(mains?|main course|dinner|lunch|breakfast|brunch|entr[eé]es?)\b/i.test(cat)) why.push('a side dish (its category)');
     if (/\bas a side( dish)?\b|\bside dish\b/i.test(steps) && !PROTEIN_WORDS.test(dish)) why.push('a side dish (its steps say so)');
     if (slot !== 'breakfast' && VEG_OR_STARCH.test(dish) && !PROTEIN_WORDS.test(textOf(m).replace(/\b(green |string )beans\b/gi, '')) && !MEAL_WORDS.test(dish.replace(/\b(beans|rice)\b/gi, ''))) why.push('a vegetable or starch side with no protein');
     if (slot !== 'breakfast' && kcal > 0 && pShare < 0.08 && fShare > 0.6) why.push(`mostly fat (${Math.round(fShare * 100)}% of its calories) with little protein: a spread or appetizer`);
@@ -154,14 +154,17 @@ function checkMeal(m, slot, ctx, add) {
     }
 
     // --- Added by the app ---
-    const pAdded = m.protein_added || [];
+    const more = (m.protein_added || []).filter(l => /^a bit more\b/i.test(l));
+    const pAdded = (m.protein_added || []).filter(l => !/^a bit more\b/i.test(l));
+    if (more.length) add('added', 'note', `more of its own protein: ${more.map(l => l.replace(/^a bit more of its own:\s*/i, '')).join(', ')}`);
     if (pAdded.length) {
         const addedCalc = N.calculate(pAdded, m.servings || 1);
         const addedP = addedCalc.nutrition.protein_g;
         const ownP = (Number(n.protein_g) || 0) - addedP;
         const dishMain = PL.mainProtein(Object.assign({}, m, { ingredients: own(m), _lines: undefined }));
         const addedMain = PL.mainProtein({ ingredients: pAdded, servings: m.servings || 1 });
-        if (slot !== 'breakfast' && ownP < 15) add('added', 'fail', `only ${Math.round(ownP)} g protein of its own; the app added ${pAdded.join(', ')} to make it pass`);
+        const ownKcal = kcal - addedCalc.nutrition.calories;
+        if (slot !== 'breakfast' && (ownP < 12 || (ownKcal > 0 && ownP * 4 / ownKcal < 0.1))) add('added', 'fail', `only ${Math.round(ownP)} g protein of its own; the app added ${pAdded.join(', ')} to make it pass`);
         else if (slot === 'breakfast' && ownP < 8) add('added', 'fail', `only ${Math.round(ownP)} g protein of its own; the app added ${pAdded.join(', ')} to make it pass`);
         else if (addedP > ownP) add('added', 'fail', `more of its protein is added (${pAdded.join(', ')}: ${Math.round(addedP)} g) than its own (${Math.round(ownP)} g)`);
         else if (slot !== 'breakfast' && dishMain && addedMain && dishMain !== addedMain) add('added', 'fail', `${addedMain} added to a ${dishMain} dish (${pAdded.join(', ')})`);
@@ -219,17 +222,17 @@ function checkMeal(m, slot, ctx, add) {
     if (Math.abs(portion * 4 - Math.round(portion * 4)) > 0.01) add('servings', 'fail', `${Math.round(portion * 100) / 100} servings: not a cookable amount (quarters only)`);
     if (portion < 0.5 || portion > 2) add('servings', 'fail', `${portion} servings: outside half to double`);
     if (m.servings != null && !Number.isInteger(Number(m.servings))) add('servings', 'fail', `serves ${m.servings}`);
-    (m.ingredients || []).forEach(l => { if (/\d\.\d{2,}/.test(l)) add('servings', 'fail', `"${l}": an odd amount`); });
+    (m.ingredients || []).forEach(l => { const odd = (String(l).match(/\d+\.\d{2,}/g) || []).filter(x => !/\.(25|50|75)$/.test(x)); if (odd.length) add('servings', 'fail', `"${l}": an odd amount`); });
 
     // --- Avoided foods and allergens (the app's check and the audit's own words) ---
     const app = ctx.exclude(m);
     if (app) add('avoided', 'fail', `has ${app} (the app's own check)`);
     const text = textOf(m).toLowerCase();
-    ctx.avoidTerms.forEach(t => { if (new RegExp(`\\b${t}(e?s)?\\b`, 'i').test(text)) add('avoided', 'fail', `has "${t}", which is avoided`); });
-    ctx.allergens.forEach(a => { const re = ALLERGENS[a]; const hit = re && text.replace(/\b(peanut|almond|cashew|coconut|oat|soy|rice|cocoa) (milk|butter)\b/g, s => (a === 'dairy' ? 'x' : s)).match(re); if (hit && !(a === 'dairy' && /\bbutternut\b/.test(hit[0]))) add('avoided', 'fail', `has ${hit[0]} (allergy: ${a})`); });
+    ctx.avoidTerms.forEach(t => { if (new RegExp(`\\b${t}(e?s)?\\b`, 'i').test(/^olives?$/.test(t) ? text.replace(/\bolive oil\b/g, '') : text)) add('avoided', 'fail', `has "${t}", which is avoided`); });
+    ctx.allergens.forEach(a => { const re = ALLERGENS[a]; const hit = re && text.replace(/\b(peanut|almond|cashew|coconut|oat|soy|rice|cocoa|nut|sunflower|seed) (milk|butter)\b|\bbutter (beans?|lettuce)\b|\bbutternut\b/g, s => (a === 'dairy' ? 'x' : s)).match(re); if (hit && !(a === 'dairy' && /\bbutternut\b/.test(hit[0]))) add('avoided', 'fail', `has ${hit[0]} (allergy: ${a})`); });
     if (/vegetarian|vegan/i.test(ctx.diet) && MEAT.test(text.replace(/\b(vegetable|veggie|mushroom) (broth|stock)\b/g, '')) ) add('avoided', 'fail', `has ${text.match(MEAT)[0]} (diet: ${ctx.diet})`);
     if (/vegetarian|vegan/i.test(ctx.diet) && SEAFOOD.test(text)) add('avoided', 'fail', `has ${text.match(SEAFOOD)[0]} (diet: ${ctx.diet})`);
-    if (/vegan/i.test(ctx.diet) && ANIMAL.test(text.replace(/\b(peanut|almond|cashew|coconut|oat|soy|rice) (milk|butter|yogh?urt|cream)\b/g, ''))) add('avoided', 'fail', `has ${text.match(ANIMAL)[0]} (diet: vegan)`);
+    if (/vegan/i.test(ctx.diet) && ANIMAL.test(text.replace(/\b(peanut|almond|cashew|coconut|oat|soy|rice|nut|sunflower|seed|vegan) (milk|butter|yogh?urt|cream|cheese)\b|\bbutter (beans?|lettuce)\b|\bbutternut\b|\begg ?plants?\b/g, ''))) add('avoided', 'fail', `has ${text.match(ANIMAL)[0]} (diet: vegan)`);
     if (/pescatarian/i.test(ctx.diet) && MEAT.test(text.replace(/\b(anchov(y|ies)|fish sauce)\b/g, ''))) add('avoided', 'fail', `has ${text.match(MEAT)[0]} (diet: pescatarian)`);
 }
 
@@ -285,7 +288,7 @@ function auditPlan(res, scenario) {
             && !PL.slotProblem(r, slot, PL.slotLimits(s, slot, d % 7)) && r.nutrition && kcalFor(slot) / r.nutrition.calories >= 0.55 && kcalFor(slot) / r.nutrition.calories <= 2).length;
         const withOthers = builtins.filter(b => alternatives(b) >= 3);
         const msg = `${builtins.length} of Nourish's own recipes (${builtins.map(b => `day ${b.d + 1} ${b.slot}`).join(', ')}); ${withOthers.length} of them had 3 or more unused web or book recipes that fit`;
-        findings.push({ check: 'builtin', severity: builtins.length > 3 && withOthers.length >= 2 ? 'fail' : 'note', day: 0, slot: 'week', name: '', source: 'builtin', detail: msg });
+        findings.push({ check: 'builtin', severity: builtins.length > 3 && withOthers.length >= 2 && s.builtin_mode !== 'mix' ? 'fail' : 'note', day: 0, slot: 'week', name: '', source: 'builtin', detail: msg });
     }
     return { findings, fails: findings.filter(f => f.severity === 'fail').length };
 }

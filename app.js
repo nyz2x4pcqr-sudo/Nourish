@@ -4423,7 +4423,7 @@ async function fillMissingMeals(plan) {
     const closestFew = (list, slot, skip) => {
         const used = inPlan();
         // Only recipes a realistic portion (half to double) can bring to the slot's calories.
-        return list.filter(r => r && r.nutrition && r.nutrition.calories > 0 && slot.kcal / r.nutrition.calories >= 0.55 && slot.kcal / r.nutrition.calories <= 2 && !used.has(r.name) && !(skip && skip.has(r.name)) && !exclude(r) && !slotCheck(r, slot.meal, slot.day))
+        return list.filter(r => r && r.nutrition && r.nutrition.calories > 0 && slot.kcal / r.nutrition.calories >= 0.55 && slot.kcal / r.nutrition.calories <= 2 && !used.has(r.name) && !(skip && skip.has(r.name)) && !exclude(r) && !slotCheck(r, slot.meal, slot.day) && !NourishPlanner.overCap(r, NourishPlanner.sourceCounts(plan.days), plannerSettings()))
             .sort((a, b) => Math.abs(Math.log(slot.kcal / a.nutrition.calories)) - Math.abs(Math.log(slot.kcal / b.nutrition.calories))).slice(0, 4);
     };
     const run = canWrite ? (onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled: () => localPlanCancelled }) : aiRunner()) : null;
