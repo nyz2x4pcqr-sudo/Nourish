@@ -197,12 +197,20 @@ The server only accepts browser requests from `localhost`, private home-network 
 
 Go to the **Actions** tab, choose **Release**, click **Run workflow**, and enter a tag such as `v0.3.0-beta`. Write `release-notes/<tag>.md` first; it becomes the release text. The workflow builds `Nourish.exe`, `Nourish.apk` and `Nourish-unsigned.ipa`, tests them, and publishes them on the release. Also bump `VERSION` in `backend/main.py`; that's what the self-updater compares against.
 
+**Before every release, run the plan audit** and put its result in the release notes (the Release workflow also runs it and shows the result on the run's page):
+
+```bash
+node tools/audit/plan-audit.js --grow-web   # first time, or to refresh the web recipes (needs: npm i --no-save linkedom@0.18)
+node tools/audit/plan-audit.js              # 25 full 7-day plans, every meal checked; report in tools/audit/.cache/report.md
+```
+
 ---
 
 ## 🧪 Tests
 
 ```bash
-node --test                                   # JSON parser (from repo root)
+node --test                                   # app logic (from repo root)
+node tools/audit/plan-audit.js                # the plan audit (see Making a release)
 cd backend && python -m unittest -v main_test # API (no network or keys needed)
 ```
 
