@@ -34,6 +34,16 @@
         dinner: ['chicken', 'salmon', 'shrimp', 'turkey', 'beef', 'tofu', 'pork', 'pasta', 'curry', 'stir fry', 'tacos', 'sheet pan dinner', 'chili', 'fish', 'skillet',
             'meatballs', 'fajitas', 'enchiladas', 'noodles', 'stew', 'lentils', 'risotto', 'casserole'],
     };
+    // Searched first when the protein target is a big share of the calories (more than about 28%):
+    // recipes that already have the protein, so nothing ever needs adding to them.
+    const HIGH_PROTEIN = {
+        breakfast: ['high protein breakfast', 'egg white', 'cottage cheese', 'greek yogurt', 'protein pancakes', 'egg scramble', 'protein oats', 'breakfast burrito'],
+        lunch: ['high protein lunch', 'chicken salad', 'tuna salad', 'turkey wrap', 'chicken bowl', 'shrimp salad', 'lentil salad', 'egg salad'],
+        dinner: ['high protein dinner', 'chicken breast', 'lean beef', 'cod', 'shrimp', 'turkey', 'tofu', 'tempeh', 'salmon'],
+    };
+    function wantsProtein(o) {
+        try { const T = PL.targetsOf(Object.assign({ goal: o.goal }, o.settings || {})); return T.kcal > 0 && T.protein * 4 / T.kcal >= 0.28; } catch (e) { return false; }
+    }
     const CORE = { breakfast: ['eggs', 'oatmeal', 'yogurt', 'smoothie', 'toast'], lunch: ['salad', 'soup', 'wrap', 'bowl', 'sandwich'], dinner: ['chicken', 'salmon', 'beef', 'tofu', 'shrimp', 'pasta'] };
     const MEAT = /\b(chicken|salmon|shrimp|turkey|beef|pork|fish|meatballs|tuna|steak|lamb|bacon|sausage)\b/i;
     const ROUNDUP = /(\/(category|tag|collections?|recipes?)\/?$|best-|-ideas|ideas-|meal-plan|what-to-(cook|make|eat)|roundup|-challenge|-guide|-101|\d+-(easy|best|healthy|quick)|-recipes\/?$)/i;
@@ -523,8 +533,15 @@
         for (let i = 0; i < Math.max(core.length, turned.length); i++) { if (core[i]) rotated.push(core[i]); if (turned[i]) rotated.push(turned[i]); }
         const liked = likes.map(t => (meal === 'breakfast' && !PL.mealFit({ name: t, ingredients: [] }).breakfast ? `${t} breakfast` : t));
         const extra = meal === 'breakfast' ? [] : cuisines.map(c => `${c} ${meal === 'lunch' ? 'salad' : ''}`.trim());
+        // A high protein target: protein-rich searches take every other turn from the start.
+        let order = rotated;
+        if (wantsProtein(o)) {
+            const hp = HIGH_PROTEIN[meal].slice(seed ? seed % HIGH_PROTEIN[meal].length : 0).concat(HIGH_PROTEIN[meal].slice(0, seed ? seed % HIGH_PROTEIN[meal].length : 0));
+            order = [];
+            for (let i = 0; i < Math.max(hp.length, rotated.length); i++) { if (hp[i]) order.push(hp[i]); if (rotated[i]) order.push(rotated[i]); }
+        }
         const seen = new Set();
-        return liked.concat(extra, rotated).filter(q => {
+        return liked.concat(extra, order).filter(q => {
             if (seen.has(q) || ex({ name: q, ingredients: [q] })) return false;
             seen.add(q);
             return true;

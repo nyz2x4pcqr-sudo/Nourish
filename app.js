@@ -1017,7 +1017,7 @@ function profileText({ forRecipe = false } = {}) {
     if (s.max_cook_time) lines.push(`Every meal must be ready in ${s.max_cook_time} minutes or less.`);
     if (Number(s.servings) > 1) lines.push(`Cooking for ${s.servings} people: ingredient quantities for ${s.servings} servings; nutrition per person.`);
     lines.push(`Cooking skill: ${s.skill}.`);
-    if (s.budget !== 'Any') lines.push(`Budget: ${s.budget}.`);
+    if (s.budget !== 'Any') lines.push(`Budget: ${BUDGET_LABELS[s.budget] || s.budget}.`);
     lines.push(`Use ${unitSystem() === 'metric' ? 'metric units (g, ml, °C)' : 'US units (cups, oz, lb, °F)'}.`);
     return lines.join('\n');
 }
@@ -1205,6 +1205,12 @@ function weekCard() {
 function proteinTarget() { return NourishPlanner.targetsOf(plannerSettings()).protein; }
 // The profile's Budget setting as the planner reads it: 'budget', 'normal' or 'any' (no limit).
 function budgetLevel() { return { 'Budget-friendly': 'budget', 'No limit': 'any' }[settings.budget] || 'normal'; }
+// The budget setting as shown (the stored value "Any" has always meant Normal: no luxury ingredients).
+const BUDGET_LABELS = { Any: 'Normal', 'Budget-friendly': 'Budget', Moderate: 'Moderate', 'No limit': 'No limit' };
+function budgetWords() {
+    const level = budgetLevel();
+    return `${BUDGET_LABELS[settings.budget] || 'Normal'}: ${level === 'any' ? 'nothing left out' : level === 'budget' ? 'no luxury or pricier ingredients' : 'no luxury ingredients like wagyu, caviar or truffle'}`;
+}
 
 // Imperial (US) or metric. The phone's measurement system decides until it's changed in Settings.
 // Before 0.4.8 the profile had its own Units setting ('US' by default, or 'Metric'); it is read the same way.
@@ -1854,7 +1860,7 @@ const SETTINGS_RENDERERS = {
                 settingsRow('Max cook time', settingsSelect('max_cook_time', { '': 'Any', 15: '15 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour' })),
                 settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6']), { hint: 'Recipes are written for this many people' }),
                 settingsRow('Skill', settingsSelect('skill', ['Beginner', 'Intermediate', 'Advanced'])),
-                settingsRow('Budget', settingsSelect('budget', { Any: 'Normal', 'Budget-friendly': 'Budget', Moderate: 'Moderate', 'No limit': 'No limit' }), { hint: 'Normal and Moderate leave out luxury ingredients (wagyu, caviar, truffle); Budget also pricier ones' }),
+                settingsRow('Budget', settingsSelect('budget', BUDGET_LABELS), { hint: 'Normal and Moderate leave out luxury ingredients (wagyu, caviar, truffle); Budget also pricier ones; No limit leaves nothing out' }),
             ], 'Your profile is used for every AI meal plan and chat.'),
         ];
     },
@@ -4405,7 +4411,10 @@ async function runSmartPlan(likes, hates) {
         const pm = st.perMeal || {};
         nlog('plan', `Found ${st.recipes} usable recipes in ${st.seconds} s (${st.searches} searches, ${st.pages} pages, ${st.fromCache} from your recipe library of ${st.library || 0}); ` +
             `good new ones per meal: breakfast ${(pm.breakfast || {}).web || 0}, lunch ${(pm.lunch || {}).web || 0}, dinner ${(pm.dinner || {}).web || 0} (plus Nourish's own); ${plan.missing.length} meals still to fill`,
-            { perSource: st.perSource, perMeal: pm, turnedAway: st.why, failed: st.failed, leftAlone: st.blocked, switchedOff: st.switchedOff, notUsed: st.notUsed, unreadIngredients: st.unread, excluded: st.excluded, bland: st.bland });
+            { perMeal: pm, turnedAway: st.why, excluded: st.excluded, bland: st.bland });
+        // Each site's status on a line of its own (one long entry used to be cut off before Allrecipes).
+        nlog('plan', 'Recipe sites this plan', siteStatusLines(st));
+        if ((st.unread || []).length) nlog('plan', `Ingredient lines the calculator couldn't read: ${st.unread.length}`, st.unread);
         if (localPlanCancelled) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         if (plan.missing.length) await fillMissingMeals(plan);
         const planSettings = plannerSettings();
@@ -4446,7 +4455,8 @@ async function runSmartPlan(likes, hates) {
         // Book recipes: how many were candidates and how many made it into the plan.
         const inPool = new Set(MEAL_TYPES.flatMap(m => (plan.pools[m] || []).filter(r => r.from_book).map(r => r.book_recipe_id || r.name))).size;
         const chosen = daysData.flatMap(d => MEAL_TYPES.map(t => d[t]).filter(x => x && x.from_book));
-        nlog('plan', `Book recipes: ${inPool} in the pool (of ${recipeDBReady ? recipeDB.forPlanning().length : 0} ready in your books), ${chosen.length} chosen${chosen.length ? `: ${chosen.map(m => `${m.name} (${m.book})`).join(', ')}` : ''}`);
+        nlog('plan', `Book recipes: ${inPool} in the pool (of ${recipeDBReady ? recipeDB.forPlanning().length : 0} ready in your books), ${chosen.length} chosen${chosen.length ? `: ${chosen.map(m => `${m.name} (${m.book})`).join(', ')}` : ''}`,
+            inPool > chosen.length ? bookReasons(plan, chosen) : null);
         // Why Nourish's own recipes were used (they're a backup): what turned the others away.
         const builtinUsed = daysData.map((d, i) => MEAL_TYPES.filter(t => d && d[t] && (d[t].builtin || d[t].source_id === 'builtin')).map(t => `${dayName(i, true)} ${t}`)).flat();
         if (builtinUsed.length && plan.rejected) {
@@ -4463,7 +4473,7 @@ async function runSmartPlan(likes, hates) {
         }
         const split = planSourceSplit(daysData);
         nlog('plan', `Where the meals came from: ${split.web} from recipe websites, ${split.books} from your books and files, ${split.builtin} Nourish recipes${split.ai ? `, ${split.ai} written by the AI` : ''}`, split.perSource);
-        if (st.budget) nlog('plan', `Left out for the budget (${settings.budget || 'normal'}): ${st.budget.length} recipe${st.budget.length === 1 ? '' : 's'}`, st.budget);
+        if (st.budget) nlog('plan', `Left out for your budget setting (${budgetWords()}): ${st.budget.length} recipe${st.budget.length === 1 ? '' : 's'}`, st.budget);
         nlog('plan', `Plan ready in ${Math.round((Date.now() - started) / 100) / 10} s`, days.map((d, i) => `Day ${i + 1}: ${Math.round(NourishPlanner.dayTotals(d).kcal)} kcal`));
         showJobBar(null);
     } catch (err) {
@@ -4475,6 +4485,46 @@ async function runSmartPlan(likes, hates) {
         btn.disabled = false;
         btn.textContent = 'Generate Plan';
     }
+}
+
+// Every recipe site and database, one line each: used (how many recipes), switched off, failed, or
+// left alone because its terms forbid apps (Allrecipes, HelloFresh…).
+function siteStatusLines(st) {
+    const lines = [];
+    const per = st.perSource || {};
+    Object.keys(per).sort().forEach(id => { const x = per[id] || {}; lines.push(`${id}: used, ${x.recipes || 0} recipes${x.links ? `, ${x.links} new links` : ''}`); });
+    (st.switchedOff || []).forEach(x => lines.push(`${x}: switched off in Settings`));
+    (st.failed || []).forEach(x => lines.push(`${typeof x === 'string' ? x : `${x.site || x.id || '?'}: ${x.why || x.error || 'failed'}`}`));
+    (st.blocked || []).forEach(x => lines.push(`${typeof x === 'string' ? x : `${x.site || x.id || '?'}: ${x.why || 'left alone'}`}`));
+    NourishSources.SITES.filter(x => x.status === 'dropped').forEach(x => lines.push(`${x.name}: not used, ${x.why}`));
+    return lines;
+}
+
+// Why book recipes in the pool weren't chosen, in plain words, counted (for the log): the slot's
+// rules (time, effort, kind of dish), the weekly limit per book, or a better fit for the day's
+// calories and protein from another recipe.
+function bookReasons(plan, chosen) {
+    const taken = new Set(chosen.map(m => m.name));
+    const why = {};
+    const add = k => { why[k] = (why[k] || 0) + 1; };
+    const T = NourishPlanner.targetsOf(plannerSettings());
+    const want = T.kcal > 0 ? T.protein * 4 / T.kcal : 0.25;
+    const seen = new Set();
+    MEAL_TYPES.forEach(m => (plan.pools[m] || []).filter(r => r.from_book && !taken.has(r.name)).forEach(r => {
+        if (seen.has(r.name)) return;
+        seen.add(r.name);
+        const rejected = Object.entries(plan.rejected || {}).filter(([k]) => k.endsWith(`: ${r.name}`)).map(([, v]) => v);
+        const n = r.nutrition || {};
+        const share = n.calories > 0 ? (n.protein_g || 0) * 4 / n.calories : 0;
+        if (rejected.some(v => /meals from/.test(v))) add('already 3 meals from that book this week');
+        else if (rejected.some(v => /takes about/.test(v))) add('takes longer than the time that meal has');
+        else if (rejected.some(v => /involved|brining|marinating/.test(v))) add('too much work for breakfast or lunch');
+        else if (rejected.some(v => /expensive/.test(v))) add('an expensive ingredient (kept for dinner)');
+        else if (rejected.length) add(`not that kind of meal (${rejected[0].replace(/^"[^"]*" /, '')})`);
+        else if (share < want - 0.08) add(`less protein than your target needs (${Math.round(share * 100)}% of its calories from protein; your target is ${Math.round(want * 100)}%)`);
+        else add('fitted, but other recipes were closer to the day\'s calories and protein');
+    }));
+    return Object.entries(why).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} recipe${n === 1 ? '' : 's'}: ${k}`);
 }
 
 // The meals no source matched. Never a repeat: first any recipe found that isn't in the plan yet

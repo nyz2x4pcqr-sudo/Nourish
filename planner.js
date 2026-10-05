@@ -54,8 +54,37 @@
         ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'].forEach(f => { if (n[f] != null) out[f] = Number(n[f]) / k; });
         return out;
     }
+    // Drinks, whatever they're called: "Chocomil (Mexican Chocolate Milk)", horchata, a latte. Judged
+    // on the whole name, words in brackets included. Smoothies and shakes have their own rule.
+    const DRINK = /\b(milk|chocolate milk|hot chocolate|hot cocoa|cocoa|horchata|agua fresca|lassi|milkshake|atole|champurrado|chai|latte|cappuccino|mocha|tea|coffee|lemonade|limeade|juice|punch|eggnog|kombucha|cider|spritzer|soda|tonic|golden milk|frappuccino|mocktail|cocktail|sangria|drink|beverage)\s*$/i;
+    const DRINK_WORD = /\b(drink|beverage|chocolate milk|hot chocolate|horchata|agua fresca|lassi|milkshake|atole|champurrado|eggnog|latte)\b/i;
+    const LIQUID = /^(milk|whole milk|skim milk|low fat milk|2% milk|almond milk|soy milk|oat milk|rice milk|cashew milk|water|ice|ice cubes|orange juice|apple juice|juice|coffee|brewed coffee|espresso|tea|black tea|green tea|coconut water|evaporated milk|half and half|cream|chocolate syrup)$/;
+    const SOUPY = /\b(soups?|stews?|chili|curry|broth|congee|porridge|oats|oatmeal|dal|dhal|chowder|bisque|pho|ramen|gumbo|jook|risotto)\b/i;
+    // Sides by name: a single vegetable, potato or grain, however it's cooked ("Easy Baked Sweet
+    // Potato"), unless it's stuffed or loaded with something that makes it a meal.
+    const SIDE_NAME = /^(?:(?:the |my )?(?:best|easy|easiest|simple|perfect|classic|crispy|crispiest|quick|healthy|homemade|garlic|garlicky|herb|herbed|lemon|lemony|honey|maple|glazed|roasted|oven[- ]roasted|baked|oven[- ]baked|mashed|smashed|steamed|sauteed|sautéed|grilled|charred|twice[- ]baked|air[- ]fryer|air[- ]fried|instant pot|buttery|creamy|cheesy|spicy|seasoned|perfectly|fluffy|ultimate|\d+[- ]minute|salt and vinegar|parmesan)\s+)*(?:sweet potato(?:es)?|potato(?:es)?|fries|french fries|wedges|hash browns?|rice|white rice|brown rice|jasmine rice|cilantro lime rice|cauliflower rice|vegetables|veggies|green beans|asparagus|broccoli|broccolini|brussels sprouts|carrots|corn|corn on the cob|zucchini|squash|butternut squash|mushrooms|spinach|kale|cabbage|beets|parsnips|garlic bread|cornbread|coleslaw|slaw|polenta|quinoa|couscous|mac and cheese|macaroni and cheese|baked beans|refried beans|cauliflower|eggplant|okra|plantains?|tostones|yuca|biscuits|dinner rolls)$/i;
+    const MEAL_MAKER = /\b(stuffed|loaded|with|topped|bowls?|and (chicken|beef|turkey|tofu|eggs?|shrimp|beans|chickpeas|lentils)|chicken|beef|turkey|pork|tofu|tempeh|shrimp|salmon|tuna|eggs?|lentils?|chickpeas?|black beans)\b/i;
+    // Egg dishes are eaten at breakfast (a scramble, an omelette, huevos rancheros): never dinner.
+    const EGG_BREAKFAST = /\b(scrambled? eggs?|scramble|omelet+e?s?|huevos|eggs? benedict|breakfast burritos?|breakfast tacos?|egg (muffins?|cups?|bites?|bake)|egg white|migas|chilaquiles|egg sandwich|egg mcmuffin|breakfast hash|hash and eggs|steak and eggs|bacon and eggs|eggs? (on|and) toast|soft[- ]boiled|poached eggs?|fried eggs?|sunny side)\b/i;
+    const EGG_BRUNCH = /\b(shakshuka|frittatas?|quiche|strata|eggs in (purgatory|hell)|baked eggs|turkish eggs|cilbir|tortilla espa[nñ]ola|spanish tortilla)\b/i;
+    const NOT_EGG_DISH = /\b(egg (fried rice|drop|noodles?|rolls?|foo young)|eggplant|egg salad)\b/i;
+    function liquidShare(r) {
+        try {
+            const c = N.calculate(r.ingredients || [], Math.max(1, Number(r.servings) || 1), r.steps);
+            const total = c.lines.reduce((t, x) => t + (x.grams || 0), 0);
+            if (!(total > 0)) return 0;
+            return c.lines.filter(x => LIQUID.test(String(x.key || '').toLowerCase())).reduce((t, x) => t + x.grams, 0) / total;
+        } catch (e) { return 0; }
+    }
     function mealFit(r) {
-        const name = String(r.name || '').replace(/\([^)]*\)/g, ' ').replace(/[!?.]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const fullName = String(r.name || '');
+        const name = fullName.replace(/\([^)]*\)/g, ' ').replace(/[!?.]+/g, ' ').replace(/\s+/g, ' ').trim();
+        // A drink is never a meal, however filling ("Chocomil (Mexican Chocolate Milk)").
+        const bracket = (fullName.match(/\(([^)]*)\)/) || [])[1] || '';
+        if (!SMOOTHIE.test(fullName) && (DRINK.test(name) || DRINK.test(bracket.trim()) || DRINK_WORD.test(fullName)
+            || (!SOUPY.test(name) && (r.ingredients || []).length && liquidShare(r) >= 0.7))) return { breakfast: false, lunch: false, dinner: false, why: 'a drink, not a meal' };
+        const plain = name.replace(/\brecipe\b/ig, ' ').replace(/\s+/g, ' ').trim();
+        if (SIDE_NAME.test(plain) && !MEAL_MAKER.test(plain)) return { breakfast: false, lunch: false, dinner: false, why: 'a side dish, not a meal' };
         const cat = String(Array.isArray(r.category) ? r.category.join(' ') : r.category || '').toLowerCase();
         const ings = (r.ingredients || []).join(' ').toLowerCase();
         if (ARTICLE.test(name)) return { breakfast: false, lunch: false, dinner: false, why: 'an article or guide, not a recipe' };
@@ -78,7 +107,8 @@
         // spread or sauce (bone marrow is 85% fat), never a meal to pad with chicken.
         const nf = perServing(r);
         // Too light to be a meal even at a double portion: a side (green beans, a small salad).
-        if (nf && Number(nf.calories) > 0 && Number(nf.calories) < 150 && Number(nf.protein_g || 0) < 6) return { breakfast: false, lunch: false, dinner: false, why: 'a side: too light to be a meal' };
+        // A meal stands on its own: enough calories and protein of its own at a normal serving.
+        if (nf && Number(nf.calories) > 0 && Number(nf.calories) < 220 && Number(nf.protein_g || 0) < 10) return { breakfast: false, lunch: false, dinner: false, why: 'a side: too light to be a meal on its own' };
         if (nf && Number(nf.calories) > 0 && Number(nf.fat_g) * 9 / Number(nf.calories) > 0.7 && Number(nf.protein_g || 0) * 4 / Number(nf.calories) < 0.12) return { breakfast: false, lunch: false, dinner: false, why: 'mostly fat with little protein: a starter, spread or sauce, not a meal' };
         // "Salmon Tacos with Mango Salsa" is tacos and "Eggs in Spicy Tomato Sauce" is eggs: only the
         // dish itself counts, not what it comes with or in.
@@ -91,6 +121,12 @@
         // A complete egg dish ("Eggs in Spicy Tomato Sauce", "Baked Eggs with Spinach") is a breakfast too.
         const eggDish = /\beggs?\b/i.test(dish) && !COMPONENT.test(name);
         const brk = eggBreakfast || (!savoryPorridge && (BREAKFAST.test(name) || eggDish || /breakfast|brunch/.test(cat)));
+        // Where people eat egg dishes: a scramble, omelette or huevos rancheros at breakfast only;
+        // shakshuka, a frittata or other egg dishes at breakfast or lunch, not dinner.
+        if (!NOT_EGG_DISH.test(name) && !DINNER_ONLY.test(name)) {
+            if (EGG_BREAKFAST.test(name)) return { breakfast: true, lunch: false, dinner: false, why: '' };
+            if (EGG_BRUNCH.test(name) || (eggDish && !MEAT_WORD.test(dish.replace(/\beggs?\b/gi, '')))) return { breakfast: true, lunch: true, dinner: false, why: '' };
+        }
         // A recipe the site files under breakfast only stays at breakfast.
         // But a roast or a pasta bake on a brunch list is still a main dish: judged by what it is.
         const heavy = DINNER_ONLY.test(name) && !eggBreakfast;
@@ -666,6 +702,8 @@
         // Highly rated on its own site (with enough ratings to mean something) comes first.
         if (r.rating && r.rating.count >= 5) cost -= Math.max(-0.4, Math.min(0.4, (r.rating.value - 4.2) * 0.5));
         if (r.reseasoned || r.bland) cost += 0.4;
+        // The person's own books come first when they fit about as well (still at most 3 a week from one book).
+        if (r.from_book) cost -= 0.3;
         // Nutrition checked by more than one source comes first; figures that disagree never reach here.
         if (r.nutrition_check && r.nutrition_check.level === 'high') cost -= 0.25;
         else if (r.nutrition_check && r.nutrition_check.level === 'medium') cost -= 0.1;
