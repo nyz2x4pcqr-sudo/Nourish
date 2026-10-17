@@ -1,6 +1,6 @@
 # Everything the app needs. This is all the Windows .exe includes.
 fastapi==0.142.2
-starlette==1.7.0
+starlette==1.8.0
 anyio==4.15.1
 uvicorn[standard]==0.54.0
 httpx==0.28.1
