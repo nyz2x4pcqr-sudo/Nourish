@@ -96,3 +96,13 @@ test('the AI is told to write familiar, full-flavored dishes, and a bland one is
     assert.ok(p, problems.join('; '));
     assert.deepEqual(O.hardProblems([p]), [p]);
 });
+
+test('a recipe keeps its own photo (https only), and a description never starts with stray punctuation', () => {
+    const F = require('../finder.js');
+    const I = require('../importer.js');
+    const base = { name: 'Chicken Fajitas', servings: 2, ingredients: ['2 chicken breasts', '1 onion', '1 red bell pepper', '2 tsp fajita seasoning', '1 tbsp olive oil', '4 small tortillas'], steps: ['Slice the chicken, onion and pepper.', 'Fry with the seasoning for 10 minutes.', 'Serve in warm tortillas.'], source_url: 'https://example.com/fajitas' };
+    assert.equal(F.tidy(Object.assign({ image: 'https://example.com/fajitas.jpg' }, base), { id: 'x', name: 'X' }).image, 'https://example.com/fajitas.jpg');
+    assert.equal(F.tidy(Object.assign({ image: 'http://example.com/fajitas.jpg' }, base), { id: 'x', name: 'X' }).image, undefined);
+    assert.equal(F.tidy(Object.assign({ image: 'javascript:alert(1)' }, base), { id: 'x', name: 'X' }).image, undefined);
+    assert.equal(I.wholeSentences('). I use bottled sauce. It works.'), 'I use bottled sauce. It works.');
+});
