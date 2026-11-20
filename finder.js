@@ -104,6 +104,8 @@
             // written by the AI.
             description: r.description && !/\.\.\.$|…$/.test(String(r.description).trim()) ? String(r.description).slice(0, 240) : undefined,
             rating: r.rating && Number(r.rating.value) > 0 ? { value: Number(r.rating.value), count: Number(r.rating.count) || 0 } : undefined,
+            // The recipe's own photo, as its site publishes it (https only).
+            image: typeof r.image === 'string' && /^https:\/\/[^\s"'<>]+$/i.test(r.image) ? r.image.slice(0, 400) : undefined,
             source_url: r.source_url || r.url || undefined,
             source_name: r.source_name || (source && source.name) || undefined,
             source_id: (source && source.id) || r.source_id || undefined,

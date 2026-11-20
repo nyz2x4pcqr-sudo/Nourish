@@ -144,6 +144,7 @@ SETTINGS_DEFAULTS.density = 'comfortable';      // Settings → Appearance → S
 SETTINGS_DEFAULTS.corners = 'round';
 SETTINGS_DEFAULTS.high_contrast = 'off';
 SETTINGS_DEFAULTS.colour_amounts = 'off';
+SETTINGS_DEFAULTS.show_photos = 'on';      // recipe photos, loaded from the recipe's own site
 SETTINGS_DEFAULTS.lmstudio_thinking = 'off';   // LM Studio: let a "thinking" model think before answering (slower)
 SETTINGS_DEFAULTS.pantry_on = 'on';   // staples you always have stay off the shopping list
 SETTINGS_DEFAULTS.pantry = '';        // your own pantry list; empty = the starter list
@@ -1448,7 +1449,7 @@ function mealSlotToggle(meal) {
 }
 
 // === APPEARANCE ===
-const APPEARANCE_KEYS = ['theme', 'bg', 'custom_bg', 'accent', 'custom_accent', 'font_pair', 'text_size', 'bold_text', 'icon_style', 'reduce_motion', 'density', 'corners', 'high_contrast', 'colour_amounts'];
+const APPEARANCE_KEYS = ['theme', 'bg', 'custom_bg', 'accent', 'custom_accent', 'font_pair', 'text_size', 'bold_text', 'icon_style', 'reduce_motion', 'density', 'corners', 'high_contrast', 'colour_amounts', 'show_photos'];
 let lookSnapshot = null;   // the look when Appearance was opened, for "Undo"
 
 // A small live picture of the app in the current look, at the top of Appearance.
@@ -1873,6 +1874,7 @@ const SETTINGS_RENDERERS = {
                 settingsToggle('bold_text', 'Bold text', { hint: 'Heavier text, easier to read', onchange: () => renderSettings() }),
                 settingsToggle('high_contrast', 'Increase contrast', { hint: 'Darker grey text and firmer edges', onchange: () => renderSettings() }),
                 settingsToggle('colour_amounts', 'Coloured amounts', { hint: 'Ingredient amounts in your accent colour, easy to spot while cooking', onchange: () => renderSettings() }),
+                settingsToggle('show_photos', 'Recipe photos', { hint: "Each recipe's own photo, loaded from its website. Off: no pictures are downloaded", onchange: () => { renderSettings(); renderAll(); } }),
             ]),
             ...settingsGroup('Spacing and shape', [
                 settingsChoice('Spacing', T.DENSITIES[settings.density] ? settings.density : 'comfortable', T.DENSITIES, v => pick('density', v)),
@@ -2502,9 +2504,10 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
     const where = dayIndex != null ? `${slotLabel(mealType, meal)} · ${isToday(dayIndex) ? 'Today' : dayName(dayIndex)}` : MEAL_LABELS[mealType] || '';
 
     setChildren(content,
-        h('div', { class: `recipe-hero art-${mealType}` },
+        h('div', { class: `recipe-hero art-${mealType}${photoOf(meal) ? ' has-photo' : ''}` },
+            photoOf(meal) ? photoImg(meal, 'recipe-hero-photo') : null,
             h('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
-            icon(MEAL_ICONS[mealType] || 'i-utensils'),
+            photoOf(meal) ? null : icon(MEAL_ICONS[mealType] || 'i-utensils'),
             h('div', { class: 'recipe-top' },
                 h('button', {
                     type: 'button', class: `icon-btn heart-btn${saved ? ' saved' : ''}`, 'aria-pressed': String(!!saved),
@@ -2889,7 +2892,7 @@ function rateRow(dayIndex, mealType, meal, { compact = false } = {}) {
         updateTodayScreen();
     } }, icon('i-close')) : null;
     return h('div', { class: 'rate-row' + (compact ? ' compact' : '') },
-        h('div', { class: 'rate-head' }, h('span', { class: 'rate-q', text: r && (r.rating || tags.length) ? 'Thanks, noted.' : 'How was it?' }), thumb('up', 'Liked it', '👍'), thumb('down', "Didn't like it", '👎'), dismiss),
+        h('div', { class: 'rate-head' }, h('span', { class: 'rate-q', text: r && (r.rating || tags.length) ? 'Thanks, noted.' : 'How was it?' }), thumb('up', 'Liked it', icon('i-thumb-up')), thumb('down', "Didn't like it", icon('i-thumb-down')), dismiss),
         (!compact || r) ? h('div', { class: 'rate-tags' }, ['loved', 'too_bland', 'too_much_work', 'too_small'].map(tag)) : null);
 }
 // "Make it tastier": near-zero-calorie seasoning for a plain recipe (planner.js flavorBoosts). Each
@@ -2942,7 +2945,7 @@ function dishRateRow(meal) {
     const thumb = (v, label, glyph) => h('button', { type: 'button', class: 'rate-btn' + (r && r.rating === v ? ' on' : ''), 'aria-pressed': String(!!(r && r.rating === v)), 'aria-label': label, title: label, onclick: () => set(v) }, glyph);
     return h('div', { class: 'rate-row' },
         h('div', { class: 'rate-head' }, h('span', { class: 'rate-q', text: r && r.rating ? (r.rating === 'up' ? 'You like this one. It comes back more often.' : 'Noted: it stays out of your plans.') : 'Like this recipe?' }),
-            thumb('up', 'More like this', '👍'), thumb('down', 'Not for me', '👎')));
+            thumb('up', 'More like this', icon('i-thumb-up')), thumb('down', 'Not for me', icon('i-thumb-down'))));
 }
 // On Today: the latest meal marked eaten that hasn't been rated (or waved away) gets the quick row.
 function rateTargetToday(dayIndex, day, entry) {
@@ -3191,17 +3194,24 @@ function updateTodayScreen() {
 
     const title = isToday(selectedDay) ? "Today's meals" : `${dayName(selectedDay)}'s meals`;
     const rateTarget = rateTargetToday(selectedDay, day, entry);
+    const nextUp = isToday(selectedDay) ? (daySlots(day).find(([t, m]) => m && !m.eating_out && !(entry.meals || {})[t]) || [])[0] : null;
+    // Two columns on a wide screen: the day's numbers beside its meals (one column on a phone).
     setChildren(body,
         cookingPanel('today'),
         strip,
-        summary,
-        on('show_nutrition') ? dayStatus(selectedDay, day, dayTotals) : null,
-        h('h2', { class: 'section-title' }, title, h('small', { text: `Day ${selectedDay + 1}` })),
-        h('div', { class: 'meal-cards', id: 'mealCards' }, daySlots(day).map(([t, meal]) => {
-            const card = mealCard(t, meal, selectedDay, entry.meals[t]);
-            return t === rateTarget ? h('div', { class: 'meal-with-rate' }, card, rateRow(selectedDay, t, meal, { compact: true })) : card;
-        })),
-        extrasSection(selectedDay, entry));
+        h('div', { class: 'today-grid' },
+            h('div', { class: 'today-side' },
+                summary,
+                on('show_nutrition') ? dayStatus(selectedDay, day, dayTotals) : null),
+            h('div', { class: 'today-main' },
+                h('h2', { class: 'section-title' }, title, h('small', { text: `Day ${selectedDay + 1}` })),
+                h('div', { class: 'meal-cards', id: 'mealCards' }, daySlots(day).map(([t, meal]) => {
+                    const card = mealCard(t, meal, selectedDay, entry.meals[t]);
+                    // The next meal still to eat today, shown big (with its photo when it has one).
+                    if (t === nextUp) { card.classList.add('up-next'); const c = card.querySelector('.meal-card'); if (c) { c.classList.add('feature'); const mc = c.querySelector('.meal-content'); if (mc) mc.prepend(h('span', { class: 'up-next-tag', 'aria-hidden': 'true', text: 'Up next' })); } }
+                    return t === rateTarget ? h('div', { class: 'meal-with-rate' }, card, rateRow(selectedDay, t, meal, { compact: true })) : card;
+                })),
+                extrasSection(selectedDay, entry))));
     const active = strip.querySelector('.day-pill.active');
     if (active && active.scrollIntoView) requestAnimationFrame(() => {
         strip.scrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
@@ -3237,6 +3247,25 @@ function cookInstead(dayIndex, type) {
 function outMealText(meal) {
     return on('show_nutrition') && meal.nutrition && meal.nutrition.calories > 0 ? `About ${formatCalories(meal.nutrition.calories)} kcal kept for it` : 'Nothing to cook or buy';
 }
+// A recipe's own photo, when it has one and photos are on (Settings → Appearance → Recipe photos).
+// Loaded straight from the recipe's site, with no referrer; a photo that fails to load is replaced
+// by the meal's illustrated tile.
+function photoOf(meal) {
+    return meal && on('show_photos') && typeof meal.image === 'string' && /^https:\/\/[^\s"'<>]+$/i.test(meal.image) ? meal.image : '';
+}
+function photoImg(meal, cls) {
+    const img = h('img', { class: cls, src: photoOf(meal), alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer', draggable: 'false' });
+    img.addEventListener('error', () => { const box = img.parentElement; img.remove(); if (box) box.classList.remove('has-photo'); });
+    img.addEventListener('load', () => img.classList.add('loaded'));
+    return img;
+}
+// The picture for a meal: its photo, or a tile in the meal's colours with its icon.
+function foodArt(type, meal, cls = 'meal-art') {
+    const kind = MEAL_ICONS[type] ? type : String(type || '').startsWith('snack') ? 'snack' : 'dinner';
+    const photo = photoOf(meal);
+    return h('span', { class: `${cls} art-${kind}${photo ? ' has-photo' : ''}` }, icon(MEAL_ICONS[type] || 'i-utensils'), photo ? photoImg(meal, 'art-photo') : null);
+}
+
 function mealCard(type, meal, dayIndex, status) {
     if (meal && meal.eating_out) {
         return h('div', { class: 'meal-row' },
@@ -3250,8 +3279,8 @@ function mealCard(type, meal, dayIndex, status) {
             h('button', { type: 'button', class: `eat-btn${status ? ' ' + status : ''}`, 'aria-label': `${MEAL_LABELS[type]}: ${status === 'eaten' ? 'Eaten. Tap to clear' : 'Mark as eaten'}`,
                 onclick: () => setMealStatus(dayIndex, type, status === 'eaten' ? null : 'eaten') }, icon('i-check')));
     }
-    const card = h('button', { type: 'button', class: 'meal-card' + (status ? ` ${status}` : ''), onclick: () => openRecipeSheet(type, meal, dayIndex) },
-        h('div', { class: `meal-art art-${type}` }, icon(MEAL_ICONS[type])),
+    const card = h('button', { type: 'button', class: 'meal-card' + (status ? ` ${status}` : '') + (photoOf(meal) ? ' has-photo' : ''), onclick: () => openRecipeSheet(type, meal, dayIndex) },
+        foodArt(type, meal, 'meal-art'),
         h('div', { class: 'meal-content' },
             h('div', { class: 'meal-type', text: slotLabel(type, meal) }),
             h('div', { class: 'meal-name', text: meal.name }),
@@ -3580,7 +3609,7 @@ function updatePlanScreen() {
                 h('span', { class: 'plan-meal-meta', text: outMealText(day[t]) }))
             : day[t]
             ? h('button', { type: 'button', class: 'plan-meal', 'data-meal-type': t, onclick: () => openRecipeSheet(t, day[t], idx) },
-                h('span', { class: `dot art-${t}` }, icon(MEAL_ICONS[t])),
+                foodArt(t, day[t], 'dot'),
                 h('span', { class: 'plan-meal-body' },
                     h('span', { class: 'plan-meal-type', text: MEAL_LABELS[t] }),
                     h('span', { class: 'plan-meal-name', text: day[t].name }),
@@ -3592,7 +3621,7 @@ function updatePlanScreen() {
                     h('span', { class: 'plan-meal-type', text: MEAL_LABELS[t] }),
                     h('span', { class: 'plan-meal-name', text: 'Add a recipe from a link' }))))
             .concat((day.snacks || []).map((m, i) => h('button', { type: 'button', class: 'plan-meal', 'data-meal-type': 'snack', onclick: () => openRecipeSheet(`snack-${i + 1}`, m, idx) },
-                h('span', { class: 'dot art-snack' }, icon('i-leaf')),
+                foodArt(`snack-${i + 1}`, m, 'dot'),
                 h('span', { class: 'plan-meal-body' },
                     h('span', { class: 'plan-meal-type', text: slotLabel(`snack-${i + 1}`, m) }),
                     h('span', { class: 'plan-meal-name', text: m.name })),
@@ -6091,7 +6120,7 @@ function renderCookbook() {
                 : !shown.length
                     ? h('p', { class: 'cookbook-none', text: 'No saved recipes match.' })
                     : h('div', { class: 'cookbook-list' }, shown.map(e => h('button', { type: 'button', class: 'cookbook-card', onclick: () => openRecipeSheet(e.meal_type, e.recipe, null, { cookbookId: e.id }) },
-                        h('span', { class: `dot art-${e.meal_type}` }, icon(MEAL_ICONS[e.meal_type])),
+                        foodArt(e.meal_type, e.recipe, 'dot'),
                         h('span', { class: 'cookbook-card-body' },
                             h('span', { class: 'plan-meal-type', text: MEAL_LABELS[e.meal_type] }),
                             h('span', { class: 'plan-meal-name', text: e.recipe.name }),

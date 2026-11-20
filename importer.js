@@ -185,6 +185,12 @@
             // The recipe's own cuisine and keywords: help tell a meal from a drink, a dessert or a sauce.
             cuisine: cleanText(list(recipe.recipeCuisine).join(', ')).slice(0, 40) || undefined,
             keywords: cleanText(list(recipe.keywords).join(', ')).slice(0, 200) || undefined,
+            // The recipe's own photo (schema.org image: a link, a list of links or an ImageObject).
+            image: (() => {
+                const first = v => (Array.isArray(v) ? v.map(first).find(Boolean) : v && typeof v === 'object' ? first(v.url || v.contentUrl) : typeof v === 'string' ? v.trim() : '');
+                const u = first(recipe.image);
+                return /^https:\/\/[^\s"'<>]+$/i.test(u || '') ? u.slice(0, 400) : undefined;
+            })(),
             // The site's own star rating, when it gives one.
             rating: (() => {
                 const r = recipe.aggregateRating;

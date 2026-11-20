@@ -180,8 +180,8 @@
         return out;
     }
     const ORIGINAL = {
-        ember: { '--surface': '#161412', '--surface-2': '#1F1C19', '--surface-3': '#2A2622', '--surface-raised': '#1B1916', '--text': '#F6EFE6', '--text-2': '#BEB2A5', '--text-3': '#847A6F' },
-        paper: { '--surface': '#FFFCF7', '--surface-2': '#F3ECE1', '--surface-3': '#E7DECF', '--surface-raised': '#FFFFFF', '--text': '#1F1913', '--text-2': '#5E5348', '--text-3': '#92867A' },
+        ember: { '--surface': '#161412', '--surface-2': '#1F1C19', '--surface-3': '#2A2622', '--surface-raised': '#1B1916', '--text': '#F6EFE6', '--text-2': '#C4B8AB', '--text-3': '#938879' },
+        paper: { '--surface': '#FFFCF7', '--surface-2': '#F3ECE1', '--surface-3': '#E7DECF', '--surface-raised': '#FFFFFF', '--text': '#1F1913', '--text-2': '#54493E', '--text-3': '#736759' },
     };
 
     // === FONTS, SIZES, ICONS ===
