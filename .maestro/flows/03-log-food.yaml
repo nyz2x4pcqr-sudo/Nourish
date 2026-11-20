@@ -22,8 +22,10 @@ appId: io.github.nourish.app
 - tapOn: '(?i)(what did you have\?|e\.g\. 2 slices of pizza and a coffee)'
 - inputText: "1 apple"
 - pressKey: Enter
+# 0.1.17: the bigger type pushes the "Add · …" button below the fold on iPhone, so wait for the
+# found food and scroll to the button next.
 - extendedWaitUntil:
-    visible: "Add ·.*"
+    visible: "Log this by itself"
     timeout: 20000
 - takeScreenshot: 03-apple-found
 - scrollUntilVisible:
