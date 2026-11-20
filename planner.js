@@ -109,7 +109,10 @@
         // Too light to be a meal even at a double portion: a side (green beans, a small salad).
         // A meal stands on its own: enough calories and protein of its own at a normal serving.
         if (nf && Number(nf.calories) > 0 && Number(nf.calories) < 220 && Number(nf.protein_g || 0) < 10) return { breakfast: false, lunch: false, dinner: false, why: 'a side: too light to be a meal on its own' };
-        if (nf && Number(nf.calories) > 0 && Number(nf.fat_g) * 9 / Number(nf.calories) > 0.7 && Number(nf.protein_g || 0) * 4 / Number(nf.calories) < 0.12) return { breakfast: false, lunch: false, dinner: false, why: 'mostly fat with little protein: a starter, spread or sauce, not a meal' };
+        // A little stricter than the plan audit's 70% / 12%: this is judged on the recipe's numbers
+        // before Nourish's own calculation settles them, so a dish right at the line (vegan coconut
+        // waffles, 70% fat and 6% protein in the 0.1.15 audit) is left out rather than let through.
+        if (nf && Number(nf.calories) > 0 && Number(nf.fat_g) * 9 / Number(nf.calories) > 0.66 && Number(nf.protein_g || 0) * 4 / Number(nf.calories) < 0.13) return { breakfast: false, lunch: false, dinner: false, why: 'mostly fat with little protein: a starter, spread or sauce, not a meal' };
         // "Salmon Tacos with Mango Salsa" is tacos and "Eggs in Spicy Tomato Sauce" is eggs: only the
         // dish itself counts, not what it comes with or in.
         const dish = name.replace(/\s+(with|in|on|over|served with|and a side of)\s+.*$/i, '').trim();
@@ -551,16 +554,29 @@
             const v = n.value * eff, metric = /^(g|grams?|kg|ml|l)$/i.test(u);
             return `/ ${metric ? Math.max(5, Math.round(v / 5) * 5) : U.formatQty(Math.max(0.125, Math.round(v * 4) / 4))} ${u}`;
         });
-        // One (or less) of something counted: "1 cucumber", "½ carrot", not "1 cucumbers".
-        if (!unit && q <= 1 && item.qty > 1) text = text.replace(/^([^,(]*?)([a-z]+)(?=\s*(?:[,(]|$))/i, (m0, pre, w) => {
-            if (/(ss|us|is)$/i.test(w) || w.length < 4) return m0;
-            const one = /ies$/i.test(w) ? w.slice(0, -3) + 'y' : /(oes|ches|shes|xes)$/i.test(w) ? w.slice(0, -2) : /s$/i.test(w) ? w.slice(0, -1) : w;
-            return pre + one;
-        });
+        // One (or less) of something counted: "1 cucumber", "½ carrot", not "1 cucumbers". Never in
+        // "snow peas or sugar snap peas" (which word?), and only when it's still the same food to
+        // Nourish: "½ sugar snap pea" was read as sugar, and "bay leave" and "red chilly" weren't
+        // words (the 0.1.15 plan audit caught all three).
+        if (!unit && q <= 1 && item.qty > 1 && !/\bor\b/i.test(text.split(/[,(]/)[0])) {
+            const single = text.replace(/^([^,(]*?)([a-z]+)(?=\s*(?:[,(]|$))/i, (m0, pre, w) => pre + oneOf(w));
+            const foodOf = t => { const m = N.matchFood(t); return m && m.key ? m.key : null; };
+            if (single !== text && foodOf(single) === foodOf(text)) text = single;
+        }
         return item.note !== undefined ? `${text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${text}`.trim();
     }
     const baseCalc = new WeakMap();   // a recipe's own calculation, worked out once
     // The recipe made for `people`, each portion `factor` times one of the recipe's servings.
+    // One of something, from its plural: carrots → carrot, tomatoes → tomato, cherries → cherry,
+    // leaves → leaf. Words whose one isn't sure stay as they are (chillies: chilli or chili?).
+    const ONE_OF = { leaves: 'leaf', loaves: 'loaf', halves: 'half', knives: 'knife' };
+    function oneOf(w) {
+        const lw = String(w).toLowerCase();
+        if (ONE_OF[lw]) return /^[A-Z]/.test(w) ? ONE_OF[lw][0].toUpperCase() + ONE_OF[lw].slice(1) : ONE_OF[lw];
+        if (/(ss|us|is)$/i.test(w) || w.length < 4) return w;
+        if (/ves$/i.test(w) || (/ies$/i.test(w) && !/(berries|cherries|anchovies|pastries|chutneys)$/i.test(w))) return w;
+        return /ies$/i.test(w) ? w.slice(0, -3) + 'y' : /(oes|ches|shes|xes)$/i.test(w) ? w.slice(0, -2) : /s$/i.test(w) ? w.slice(0, -1) : w;
+    }
     function scaleRecipe(r, factor, people) {
         const out = JSON.parse(JSON.stringify(r));
         const from = Math.max(1, Number(r.servings) || 1);
@@ -1254,7 +1270,8 @@
             const m = N.matchFood(text);
             if (m && m.key) { out.add(m.key.replace(/^cooked /, '')); return; }
             const words = text.toLowerCase().replace(/\([^)]*\)?/g, ' ').split(/,| - /)[0].replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
-            if (words) out.add(words.split(' ').slice(-2).join(' '));
+            // "4 cherries" and "1 cherry" are one food (a portion of one reads in the singular).
+            if (words) out.add(words.split(' ').slice(-2).map((w, i, a) => i === a.length - 1 ? oneOf(w) : w).join(' '));
         });
         return [...out].sort();
     }
