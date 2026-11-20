@@ -869,7 +869,18 @@
                     .filter(r => { const why = slotProblem(r, m, limits); if (why) rejected[`${m}: ${r.name}`] = why; return !why; })
                     .map(r => { ctx.meal = m; ctx.wantFish = !ctx.hadFish && d >= Math.min(days - 1, 3) && m !== 'breakfast' && !(ctx.fishTried >= 3); return { r, cost: slotCost(r, kcal, ctx) + slotPenalty(r, m, limits) }; }).filter(x => isFinite(x.cost));
                 // No source past its weekly share, unless nothing else fits this slot at all.
-                const shared = fits.filter(x => !overCap(x.r));
+                let shared = fits.filter(x => !overCap(x.r));
+                // Before a source's 4th meal: a smaller recipe from another source, at 1½ servings
+                // (a snack of its own makes up the rest of the day). The 0.1.15 plan audit's
+                // 3,200 kcal week had no other dinner big enough left and took a 4th from one site.
+                if (!shared.length) {
+                    shared = (pools[m] || []).filter(r => !used.has(r.name) && !overCap(r) && r.nutrition && r.nutrition.calories > 0 && !slotProblem(r, m, limits))
+                        .filter(r => !isFav(r) || favUsed < ((favorites && favorites.cap) || 0))
+                        .map(r => { const f = kcal / r.nutrition.calories; return { r, f }; })
+                        .filter(x => x.f > 2.6 && x.f <= 4.5)
+                        .map(x => ({ r: x.r, cost: 3 + Math.log(x.f) + slotPenalty(x.r, m, limits) })).filter(x => isFinite(x.cost));
+                    if (shared.length) { fits.length = 0; shared.forEach(x => fits.push(x)); }
+                }
                 if (shared.length) { fits.filter(x => overCap(x.r)).forEach(x => { rejected[`${m}: ${x.r.name}`] = `already ${cap} meals from ${x.r.book || x.r.source_name || sourceKey(x.r)} this week`; }); fits.length = 0; shared.forEach(x => fits.push(x)); }
                 else fits.forEach(x => { x.cost += 2; });
                 // Nourish's own recipes are a backup: with any web or book recipe that fits this

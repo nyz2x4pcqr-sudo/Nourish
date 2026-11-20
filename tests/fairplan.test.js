@@ -65,3 +65,23 @@ test('the plan finder leaves luxury dishes out of the pool and says so', async (
     assert.ok(!res.pools.dinner.some(r => /Wagyu/.test(r.name)));
     assert.ok(res.stats.budget.some(l => /A5 Wagyu Ribeye: a luxury/.test(l)));
 });
+
+test('a big week where only one site has dinners big enough: a smaller dinner from another site, not that site\'s 4th', () => {
+    // The 0.1.15 plan audit's 3,200 kcal week took a 4th dinner from one site.
+    const big = ['Chicken Burrito Platter', 'Beef Lasagne', 'Pork Ramen', 'Lamb Pilaf', 'Turkey Chili Bake', 'Salmon Rice Bake', 'Steak Fajita Plate']
+        .map((name, i) => settled({ name, servings: 1, source_id: 'bigsite', time_minutes: 30,
+            ingredients: [`12 oz ${['chicken breast', 'lean beef mince', 'pork loin', 'lamb leg', 'turkey mince', 'salmon fillet', 'sirloin steak'][i]}`, '1.5 cups cooked white rice', '1 tbsp olive oil', '1 onion', '1 cup broccoli', '1/2 tsp salt'],
+            steps: ['Cook the rice.', 'Cook the meat and vegetables in the oil for 12 minutes and serve with the rice.'] }));
+    // Every other site's dinners are light (under 400 kcal): too small for an 1,100 kcal dinner even at 1½.
+    const small = ['Lemon Cod with Greens', 'Tofu Stir Fry', 'Chicken Lettuce Cups', 'Shrimp Zucchini Noodles', 'Turkey Vegetable Soup', 'Egg Fried Cauliflower Rice', 'Bean and Kale Stew', 'Chicken and Pepper Skewers', 'Miso Salmon Greens', 'Prawn Tomato Bowl']
+        .map((name, i) => settled({ name, servings: 1, source_id: `site${i % 5}`, time_minutes: 20,
+            ingredients: [`6 oz ${['cod fillet', 'firm tofu', 'chicken breast', 'shrimp', 'turkey mince', 'eggs', 'canned cannellini beans', 'chicken breast', 'salmon fillet', 'prawns'][i]}`, '2 cups spinach', '1/2 cup cooked white rice', '2 tsp olive oil', '1/2 onion', '1/4 tsp salt'],
+            steps: ['Cook the onion in the oil for 3 minutes.', 'Add the rest and cook for 8 minutes, then serve.'] }));
+    const p = pools();
+    p.dinner = big.concat(small);
+    const plan = PL.planWeek({ pools: p, settings: { calorie_target: 3200, protein_target: 170, goal: 'Gain' }, days: 7 });
+    const per = {};
+    picks(plan).forEach(r => { const k = PL.sourceKey(r); per[k] = (per[k] || 0) + 1; });
+    assert.ok((per.bigsite || 0) <= 3, JSON.stringify(per));
+    assert.equal(plan.days.filter(d => d.dinner).length, 7);
+});
