@@ -249,7 +249,7 @@ function checkMeal(meal, slot, ctx) {
         if (hit) add('avoided food present', 'problem', `${a}: "${hit}"`);
     });
     const dietRe = DIET_WORDS[ctx.settings.diet];
-    if (dietRe) { const hit = (meal.ingredients || []).find(l => dietRe.test(l.replace(/\b(peanut|almond|cashew|nut|seed|sunflower|apple|cocoa|shea|soy|oat|coconut|rice|plant|vegan|dairy-free|non-dairy)[- ](butter|milk|cream|yogh?urt|cheese)\b/gi, '')) && !/\b(vegetable|veggie|vegan|plant|meatless|mushroom|stock|broth|egg-free|eggless)\b/i.test(l) && !/\b(free)\b/i.test(l)); if (hit) add('avoided food present', 'problem', `${ctx.settings.diet}: "${hit}"`); }
+    if (dietRe) { const hit = (meal.ingredients || []).find(l => dietRe.test(l.replace(/\b(stems?|seeds?|veins?|membranes?),?\s+(and\s+)?ribs\b|\bribs,?\s+(and\s+)?(seeds?|membranes?)\b/gi, '').replace(/\b(peanut|almond|cashew|nut|seed|sunflower|apple|cocoa|shea|soy|oat|coconut|rice|plant|vegan|dairy-free|non-dairy)[- ](butter|milk|cream|yogh?urt|cheese)\b/gi, '')) && !/\b(vegetable|veggie|vegan|plant|meatless|mushroom|stock|broth|egg-free|eggless)\b/i.test(l) && !/\b(free)\b/i.test(l)); if (hit) add('avoided food present', 'problem', `${ctx.settings.diet}: "${hit}"`); }
     return out;
 }
 

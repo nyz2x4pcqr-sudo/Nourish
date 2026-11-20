@@ -98,7 +98,10 @@
         const sweetHeavy = /\b(sugar|honey|maple|chocolate|syrup)\b/.test(ings) && !/\b(salt|garlic|onion|soy|pepper)\b/.test(ings);
         // Judged by what the dish is: a site's "Dessert" tag doesn't count when it also files it under a meal.
         const mealCat = /breakfast|brunch|lunch|dinner|main|entr[eé]e|supper/.test(cat);
-        if ((DESSERT.test(name) && !NOT_DESSERT.test(name)) || (/dessert|baking|treat/.test(cat) && !mealCat)) return { breakfast: false, lunch: false, dinner: false, why: 'a dessert' };
+        // A "pie" whose name doesn't say what's in it ("Cowboy pie", "Mississippi pie") could be sweet:
+        // left out rather than risk a dessert for dinner.
+        const vaguePie = /\bpies?\b/i.test(name) && !NOT_DESSERT.test(name) && !/\b(chicken|beef|pork|turkey|lamb|fish|salmon|tuna|mince|steak|meat|veg(etable|gie)?s?|lentils?|beans?|potato|cheese and onion|egg|spinach|mushroom|leek|chorizo|sausage|ham|pizza)\b/i.test(name);
+        if ((DESSERT.test(name) && !NOT_DESSERT.test(name)) || vaguePie || (/dessert|baking|treat/.test(cat) && !mealCat)) return { breakfast: false, lunch: false, dinner: false, why: 'a dessert' };
         if (COMPONENT.test(name)) return { breakfast: false, lunch: false, dinner: false, why: 'a side or component, not a meal' };
         // Starters and spreads: bone marrow on toast, pâté, crostini, hummus. Rich, small and mostly fat.
         const dishName = name.replace(/\s+(with|in|on|over|served with|and a side of)\s+.*$/i, '').trim();
