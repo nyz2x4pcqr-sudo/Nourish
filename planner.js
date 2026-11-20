@@ -852,10 +852,49 @@
         const out = [];
         const missing = [];
         const report = [];
+        // The recipes that could fill each slot at a realistic portion (for planning ahead, below).
+        const viable = {};
+        MEALS.forEach((m, i) => {
+            const kcal = baseTargets.kcal * split[i];
+            const limits = slotLimits(settings, m, null);
+            // The same test a day uses below: no problem for the slot, and a finite cost at its calories.
+            ctx.meal = m;
+            viable[m] = on(m) ? (pools[m] || []).filter(r => r && r.nutrition && r.nutrition.calories > 0 && !slotProblem(r, m, limits) && isFinite(slotCost(r, kcal, ctx))) : [];
+        });
+        // Sources the rest of the week will need. When this day and the ones after it can only fill a slot
+        // with a source's help (say, only one site has dinners big enough for a 3,200 kcal day), that
+        // many of its 3 meals a week are kept for that slot, and today's other slots look elsewhere.
+        // Without this the plan spent a site's meals on breakfasts and lunches that had plenty of
+        // choice, then had to take a 4th from it for a dinner (the 0.1.15 plan audit's 3,200 kcal week).
+        const reserveFor = d => {
+            const keep = {};
+            MEALS.forEach(m => {
+                let need = 0;
+                for (let e = d; e < days; e++) if (on(m) && !outSlot(settings, m, weekday ? weekday(e) : null)) need++;
+                if (!need) return;
+                const per = {};
+                let own = 0;
+                const seen = new Set();
+                viable[m].forEach(r => {
+                    if (used.has(r.name) || seen.has(r.name)) return;
+                    seen.add(r.name);
+                    const k = sourceKey(r);
+                    if (k === 'builtin') own++; else per[k] = (per[k] || 0) + 1;
+                });
+                const room = k => Math.max(0, Math.min(cap - (ctx.sourceCount[k] || 0), per[k]));
+                const total = Object.keys(per).reduce((t, k) => t + room(k), own);
+                Object.keys(per).forEach(k => {
+                    const short = Math.min(room(k), need - (total - room(k)));
+                    if (short > 0) { keep[k] = keep[k] || { n: 0, slots: new Set() }; keep[k].n += short; keep[k].slots.add(m); }
+                });
+            });
+            return keep;
+        };
         for (let d = 0; d < days; d++) {
             targets = targetsFor(d);
             ctx.targets = targets;
             const top = {};
+            const keep = reserveFor(d);
             const outHere = m => on(m) && outSlot(settings, m, weekday ? weekday(d) : null);
             const cooked = MEALS.filter(m => on(m) && !outHere(m));
             MEALS.forEach((m, i) => {
@@ -868,20 +907,25 @@
                     .filter(r => !isFav(r) || favUsed < ((favorites && favorites.cap) || 0))
                     .filter(r => { const why = slotProblem(r, m, limits); if (why) rejected[`${m}: ${r.name}`] = why; return !why; })
                     .map(r => { ctx.meal = m; ctx.wantFish = !ctx.hadFish && d >= Math.min(days - 1, 3) && m !== 'breakfast' && !(ctx.fishTried >= 3); return { r, cost: slotCost(r, kcal, ctx) + slotPenalty(r, m, limits) }; }).filter(x => isFinite(x.cost));
-                // No source past its weekly share, unless nothing else fits this slot at all.
-                let shared = fits.filter(x => !overCap(x.r));
+                // No source past its weekly share, unless nothing else fits this slot at all. A source
+                // whose last meals the coming days need for another slot counts as full here.
+                const kept = r => { const k = keep[sourceKey(r)]; return !!k && !k.slots.has(m) && (ctx.sourceCount[sourceKey(r)] || 0) + k.n >= cap; };
+                let shared = fits.filter(x => !overCap(x.r) && !kept(x.r));
                 // Before a source's 4th meal: a smaller recipe from another source, at 1½ servings
                 // (a snack of its own makes up the rest of the day). The 0.1.15 plan audit's
                 // 3,200 kcal week had no other dinner big enough left and took a 4th from one site.
                 if (!shared.length) {
-                    shared = (pools[m] || []).filter(r => !used.has(r.name) && !overCap(r) && r.nutrition && r.nutrition.calories > 0 && !slotProblem(r, m, limits))
+                    shared = (pools[m] || []).filter(r => !used.has(r.name) && !overCap(r) && !kept(r) && r.nutrition && r.nutrition.calories > 0 && !slotProblem(r, m, limits))
                         .filter(r => !isFav(r) || favUsed < ((favorites && favorites.cap) || 0))
                         .map(r => { const f = kcal / r.nutrition.calories; return { r, f }; })
                         .filter(x => x.f > 2.6 && x.f <= 4.5)
                         .map(x => ({ r: x.r, cost: 3 + Math.log(x.f) + slotPenalty(x.r, m, limits) })).filter(x => isFinite(x.cost));
                     if (shared.length) { fits.length = 0; shared.forEach(x => fits.push(x)); }
                 }
-                if (shared.length) { fits.filter(x => overCap(x.r)).forEach(x => { rejected[`${m}: ${x.r.name}`] = `already ${cap} meals from ${x.r.book || x.r.source_name || sourceKey(x.r)} this week`; }); fits.length = 0; shared.forEach(x => fits.push(x)); }
+                if (shared.length) {
+                    fits.filter(x => overCap(x.r) || kept(x.r)).forEach(x => { rejected[`${m}: ${x.r.name}`] = overCap(x.r) ? `already ${cap} meals from ${x.r.book || x.r.source_name || sourceKey(x.r)} this week` : `${x.r.book || x.r.source_name || sourceKey(x.r)}'s last meals this week are kept for later days that need them`; });
+                    fits.length = 0; shared.forEach(x => fits.push(x));
+                }
                 else fits.forEach(x => { x.cost += 2; });
                 // Nourish's own recipes are a backup: with any web or book recipe that fits this
                 // slot, they're not in the running at all (a weaker fit from the web still comes first).
@@ -925,6 +969,13 @@
                 // Two meals of one day from the same source, or a day that would take it past its share.
                 const keys = rs.map(sourceKey);
                 keys.forEach((k, i) => { if (keys.indexOf(k) !== i && k !== 'builtin') cost += 0.8; if ((ctx.sourceCount[k] || 0) + keys.filter(x => x === k).length > cap && k !== 'builtin') cost += 3; });
+                // A source the coming days need for another slot: using it here leaves them short.
+                pick.forEach((x, i) => {
+                    if (!x) return;
+                    const k = sourceKey(x.r), kept = keep[k];
+                    if (!kept || kept.slots.has(MEALS[i])) return;
+                    if ((ctx.sourceCount[k] || 0) + keys.filter(y => y === k).length + kept.n > cap) cost += 2.5;
+                });
                 // How close the day can really get once portions are realistic: 5% off costs about 0.5.
                 const picks = pick.map((x, i) => (x ? { r: x.r, want: targets.kcal * split[i] } : null)).filter(Boolean);
                 const wanted = picks.reduce((t, x) => t + x.want, 0);

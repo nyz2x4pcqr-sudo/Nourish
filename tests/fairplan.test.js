@@ -85,3 +85,29 @@ test('a big week where only one site has dinners big enough: a smaller dinner fr
     assert.ok((per.bigsite || 0) <= 3, JSON.stringify(per));
     assert.equal(plan.days.filter(d => d.dinner).length, 7);
 });
+
+test('the week plans ahead: a site the later dinners depend on is not spent on breakfasts and lunches', () => {
+    // 0.1.15's plan audit: a 3,200 kcal week took a 4th meal from one site. Only three sites have
+    // dinners big enough; "maven" also has tempting breakfasts and lunches, which used up its 3
+    // meals before the week's last dinners.
+    const dinner = (name, src, meat) => settled({ name, servings: 1, source_id: src, time_minutes: 30,
+        ingredients: [`10 oz ${meat}`, '2 cups cooked white rice', '1.5 tbsp olive oil', '1 onion', '1 cup broccoli', '1/2 tsp salt'],
+        steps: ['Cook the rice.', 'Cook the meat and vegetables in the oil for 12 minutes and serve with the rice.'] });
+    const dinners = [['Maven Chicken Rice Bowl', 'maven', 'chicken breast'], ['Maven Beef Rice Plate', 'maven', 'lean beef mince'], ['Maven Turkey Rice', 'maven', 'turkey mince'],
+        ['Pork Fried Rice Plate', 'sitea', 'pork loin'], ['Salmon Rice Supper', 'sitea', 'salmon fillet'],
+        ['Steak and Rice', 'siteb', 'sirloin steak'], ['Lamb Rice Pilaf', 'siteb', 'lamb leg']].map(x => dinner(...x));
+    const maven = (name, meal, food) => settled({ name, servings: 1, source_id: 'maven', time_minutes: 10,
+        ingredients: food, steps: ['Mix everything together.', 'Serve.'] });
+    const p = pools();
+    p.breakfast = p.breakfast.concat(['Maven Protein Oats', 'Maven Yogurt Bowl', 'Maven Egg Plate'].map((n, i) => maven(n, 'breakfast',
+        [['1.5 cups rolled oats', '2 cups milk', '2 scoops whey protein', '1 banana'], ['2 cups greek yogurt', '1 cup granola', '1 cup berries', '2 tbsp honey'], ['4 eggs', '2 slices whole wheat bread', '1 avocado', '1 cup milk']][i])));
+    p.lunch = p.lunch.filter(r => !r.from_book).concat(['Maven Chicken Wrap', 'Maven Tuna Bowl'].map((n, i) => maven(n, 'lunch',
+        [['8 oz chicken breast', '2 large flour tortillas', '1 cup cooked rice', '1/2 cup cheddar cheese'], ['2 cans tuna', '2 cups cooked brown rice', '1 avocado', '1 tbsp olive oil']][i])));
+    p.dinner = dinners;
+    const plan = PL.planWeek({ pools: p, settings: { calorie_target: 3200, protein_target: 170, goal: 'Gain' }, days: 7 });
+    const per = {};
+    picks(plan).forEach(r => { const k = PL.sourceKey(r); per[k] = (per[k] || 0) + 1; });
+    const week = plan.days.map(d => MEALS.map(m => (d[m] ? `${PL.sourceKey(d[m])}: ${d[m].name}` : '-')).join(' | ')).join('\n');
+    assert.ok(Object.entries(per).every(([k, n]) => n <= 3 || k === 'builtin'), `${JSON.stringify(per)}\n${week}`);
+    assert.equal(plan.days.filter(d => d.dinner).length, 7, `every day has a dinner\n${week}`);
+});
