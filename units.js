@@ -66,7 +66,11 @@
         const word = (rest.match(/^(fl\.?\s*oz|[a-z]+)\.?(?![a-z])/i) || [])[0];
         if (word) {
             const key = word.toLowerCase().replace(/[.\s]/g, '');
-            if (UNITS[key]) { unit = UNITS[key]; rest = rest.slice(word.length).replace(/^\.?\s*(of\s+)?/i, ''); }
+            // "1 T tamari", "1 t. salt": capital T is a tablespoon and small t a teaspoon in many
+            // recipes (the 0.1.15 plan audit counted "2 T olive oil" as 200 g, 1,768 kcal).
+            const tee = /^[Tt]\.?$/.test(word.trim()) && /^\.?\s+[a-z]/i.test(rest.slice(1)) ? (word[0] === 'T' ? 'tbsp' : 'tsp') : '';
+            if (tee) { unit = tee; rest = rest.slice(word.length).replace(/^\.?\s*(of\s+)?/i, ''); }
+            else if (UNITS[key]) { unit = UNITS[key]; rest = rest.slice(word.length).replace(/^\.?\s*(of\s+)?/i, ''); }
         }
         const high = num.high ? { qtyHigh: num.high } : {};
         if (colon > 0) return Object.assign({ qty: num.value, unit, text: name, note: rest }, high);
