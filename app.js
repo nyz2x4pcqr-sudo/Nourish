@@ -1998,7 +1998,7 @@ const SETTINGS_RENDERERS = {
                 settingsRow('Max cook time', settingsSelect('max_cook_time', { '': 'Any', 15: '15 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour' })),
                 settingsRow('Servings', settingsSelect('servings', ['1', '2', '3', '4', '5', '6']), { hint: 'Recipes are written for this many people' }),
                 settingsRow('Skill', settingsSelect('skill', ['Beginner', 'Intermediate', 'Advanced'])),
-                settingsRow('Budget', settingsSelect('budget', BUDGET_LABELS), { hint: 'Normal and Moderate leave out luxury ingredients (wagyu, caviar, truffle); Budget also pricier ones; No limit leaves nothing out' }),
+                settingsRow('Budget', settingsSelect('budget', BUDGET_LABELS), { hint: 'Normal and Moderate leave out luxury ingredients (wagyu, caviar, truffle, saffron); Budget also pricier ones; No limit leaves nothing out' }),
             ], 'Your profile is used for every AI meal plan and chat.'),
         ];
     },

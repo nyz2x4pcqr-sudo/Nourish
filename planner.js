@@ -838,9 +838,9 @@
         return r.ai ? 'ai' : 'other';
     }
     // Luxury or hard-to-find ingredients: left out unless the budget is "No limit".
-    const LUXURY = /\b(wagyu|kobe|a5\b|caviar|truffles?(?! (cake|brownies?|balls?))|truffle oil|foie gras|beluga|osetra|uni\b|sea urchin|abalone|langoustines?|king crab|lobster|iberico|ib[eé]rico|jam[oó]n ib|gold leaf|bluefin|toro|matsutake|morels?|white asparagus|dry[- ]aged)\b/i;
+    const LUXURY = /\b(wagyu|kobe|a5\b|caviar|truffles?(?! (cake|brownies?|balls?))|truffle oil|foie gras|beluga|osetra|uni\b|sea urchin|abalone|langoustines?|king crab|lobster|iberico|ib[eé]rico|jam[oó]n ib|gold leaf|bluefin|toro|matsutake|morels?|white asparagus|dry[- ]aged|saffron)\b/i;
     // Pricier everyday ingredients: fine on "Normal", avoided when the budget is "Budget".
-    const PRICEY = /\b(rib[- ]?eye|filet mignon|beef tenderloin|fillet steak|sirloin|porterhouse|t-bone|tomahawk|rack of lamb|lamb rack|lamb chops?|scallops?|crab(meat)?|halibut|sea bass|swordfish|tuna steaks?|duck breast|veal|venison|pine nuts|saffron|prosciutto|burrata|pancetta|smoked salmon|salmon fillets?|prawns?|shrimp|macadamia|manchego|gruy[eè]re|parmigiano)\b/i;
+    const PRICEY = /\b(rib[- ]?eye|filet mignon|beef tenderloin|fillet steak|sirloin|porterhouse|t-bone|tomahawk|rack of lamb|lamb rack|lamb chops?|scallops?|crab(meat)?|halibut|sea bass|swordfish|tuna steaks?|duck breast|veal|venison|pine nuts|prosciutto|burrata|pancetta|smoked salmon|salmon fillets?|prawns?|shrimp|macadamia|manchego|gruy[eè]re|parmigiano)\b/i;
     function budgetProblem(r, budget) {
         if (budget === 'any') return '';
         const text = `${r.name || ''} ${(r.ingredients || []).join(' ')}`;
