@@ -2,7 +2,9 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn: "Plan"
+- tapOn:
+    text: "Plan"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "(?i)this week"
     timeout: 10000

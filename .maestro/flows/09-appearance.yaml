@@ -3,7 +3,9 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn: "Settings"
+- tapOn:
+    text: "Settings"
+    retryTapIfNoChange: true
 - tapOn: "Appearance.*"
 - extendedWaitUntil:
     visible: "Ember.*"
@@ -13,35 +15,54 @@ appId: io.github.nourish.app
     element: "Increase contrast.*"
     direction: DOWN
 - tapOn: "Increase contrast.*"
+- scrollUntilVisible:
+    element: "Coloured amounts.*"
+    direction: DOWN
 - tapOn: "Coloured amounts.*"
 - scrollUntilVisible:
     element: "Roomy"
     direction: DOWN
 - tapOn: "Roomy"
+- scrollUntilVisible:
+    element: "Square"
+    direction: DOWN
 - tapOn: "Square"
 - takeScreenshot: 09-options-set
 - scrollUntilVisible:
     element: "Paper.*"
     direction: UP
 - tapOn: "Paper.*"
-- waitForAnimationToEnd
 - takeScreenshot: 09-paper-theme
-- tapOn: "Today"
-- waitForAnimationToEnd
+- tapOn:
+    text: "Today"
+    retryTapIfNoChange: true
 - takeScreenshot: 09-today-paper-roomy-square
 # Back to the defaults.
-- tapOn: "Settings"
+- tapOn:
+    text: "Settings"
+    retryTapIfNoChange: true
 - tapOn: "Appearance.*"
+- scrollUntilVisible:
+    element: "Ember.*"
+    direction: DOWN
 - tapOn: "Ember.*"
 - scrollUntilVisible:
     element: "Increase contrast.*"
     direction: DOWN
 - tapOn: "Increase contrast.*"
+- scrollUntilVisible:
+    element: "Coloured amounts.*"
+    direction: DOWN
 - tapOn: "Coloured amounts.*"
 - scrollUntilVisible:
     element: "Comfortable"
     direction: DOWN
 - tapOn: "Comfortable"
+- scrollUntilVisible:
+    element: "Round"
+    direction: DOWN
 - tapOn: "Round"
-- tapOn: "Today"
+- tapOn:
+    text: "Today"
+    retryTapIfNoChange: true
 - takeScreenshot: 09-today-default

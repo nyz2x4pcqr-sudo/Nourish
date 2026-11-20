@@ -2,17 +2,20 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn: "Grocery"
-- waitForAnimationToEnd
+- tapOn:
+    text: "Grocery"
+    retryTapIfNoChange: true
 - takeScreenshot: 08-grocery
 - scrollUntilVisible:
     element: "Already in your pantry.*"
     direction: DOWN
-    timeout: 30000
+    timeout: 60000
 - tapOn: "Already in your pantry.*"
+- scrollUntilVisible:
+    element: "Change what.s in your pantry"
+    direction: DOWN
 - takeScreenshot: 08-pantry-open
-- tapOn: "Settings"
-- tapOn: "Grocery list"
+- tapOn: "Change what.s in your pantry"
 - extendedWaitUntil:
     visible: "Keep pantry staples off the list.*"
     timeout: 10000

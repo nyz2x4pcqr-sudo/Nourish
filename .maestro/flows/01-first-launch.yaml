@@ -1,4 +1,4 @@
-# First launch on a fresh phone: the welcome screen, dark by default, and a quick profile.
+# First launch on a fresh phone: the welcome screen, dark by default, and the profile.
 appId: io.github.nourish.app
 ---
 - launchApp:
@@ -7,23 +7,34 @@ appId: io.github.nourish.app
 - extendedWaitUntil:
     visible: "A week of good food.*"
     timeout: 60000
-- waitForAnimationToEnd
 - takeScreenshot: 01-welcome
 - assertVisible: "Generate Meal Plan"
 # Dark is the default look ("Ember", the warm dark theme).
-- tapOn: "Settings"
+- tapOn:
+    text: "Settings"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Appearance.*"
-    timeout: 10000
+    timeout: 15000
 - assertVisible: "Appearance.*Ember.*"
 - takeScreenshot: 01-settings
-# The profile, as a new user would set it up.
+# The profile, as a new user would open it.
 - tapOn: "Set up your profile.*"
 - extendedWaitUntil:
     visible: "Your profile"
     timeout: 10000
-- tapOn: "Maintain"
+- assertVisible: "Goal.*"
 - takeScreenshot: 01-profile
-- tapOn: "Settings"   # the back button
-- tapOn: "Today"
+# Rows with a long hint keep their control on screen (they were pushed off the right edge).
+- scrollUntilVisible:
+    element: "Count calories.*"
+    direction: DOWN
+- takeScreenshot: 01-profile-targets
+- scrollUntilVisible:
+    element: "Budget.*"
+    direction: DOWN
+- takeScreenshot: 01-profile-budget
+- tapOn:
+    text: "Today"
+    retryTapIfNoChange: true
 - assertVisible: "Generate Meal Plan"

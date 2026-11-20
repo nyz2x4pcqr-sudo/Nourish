@@ -2,18 +2,21 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn: "Today"
+- tapOn:
+    text: "Today"
+    retryTapIfNoChange: true
 - scrollUntilVisible:
     element: "(?i)dinner.*"
     direction: DOWN
 - tapOn: "(?i)dinner.*"
 - extendedWaitUntil:
-    visible: "Ingredients"
+    visible: "Ingredients.*"
     timeout: 10000
 - takeScreenshot: 07-recipe
 - scrollUntilVisible:
     element: "Cook mode"
     direction: DOWN
+    timeout: 30000
 - tapOn: "Cook mode"
 - extendedWaitUntil:
     visible: "(?i)step 1 of.*"

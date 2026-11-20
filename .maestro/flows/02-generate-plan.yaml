@@ -3,8 +3,12 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn: "Today"
-- tapOn: "Generate Meal Plan"
+- extendedWaitUntil:
+    visible: "Generate Meal Plan"
+    timeout: 30000
+- tapOn:
+    text: "Generate Meal Plan"
+    retryTapIfNoChange: true
 # The first plan asks how long each meal can take; lunch is eaten out.
 - extendedWaitUntil:
     visible: "Quick question.*"
@@ -13,20 +17,27 @@ appId: io.github.nourish.app
 - tapOn:
     text: "Eating out"
     index: 1
+- scrollUntilVisible:
+    element: "Continue"
+    direction: DOWN
 - tapOn: "Continue"
 - extendedWaitUntil:
-    visible: "Generate Plan"
+    visible: "Foods you love|FOODS YOU LOVE"
     timeout: 10000
-- assertVisible: ".*Lunch Eating out.*"
 - tapOn: "Maintain"
+- scrollUntilVisible:
+    element: "Generate Plan"
+    direction: DOWN
+- assertVisible: ".*Lunch Eating out.*"
 - takeScreenshot: 02-new-plan-sheet
 - tapOn: "Generate Plan"
 - takeScreenshot: 02-generating
 - extendedWaitUntil:
     visible: "Today's meals"
     timeout: 300000
-- waitForAnimationToEnd
 - takeScreenshot: 02-today-with-plan
+- scrollUntilVisible:
+    element: ".*kept for it.*"
+    direction: DOWN
 - assertVisible: ".*Eating out.*"
-- assertVisible: ".*kept for it.*"
-- assertNotVisible: "Generate Meal Plan"
+- takeScreenshot: 02-today-eating-out

@@ -40,3 +40,7 @@ nourish-secrets*
 # Reverse-engineering notes and app packages never belong in the repo
 rea-analysis/
 *.ipa
+
+# Phone UI test results (tools/phone-ui-test.ps1): screenshots and logs, not for git
+phone-ui-results/
+ui-results/

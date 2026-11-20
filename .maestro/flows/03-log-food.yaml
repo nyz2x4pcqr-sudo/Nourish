@@ -2,7 +2,9 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn: "Today"
+- tapOn:
+    text: "Today"
+    retryTapIfNoChange: true
 - scrollUntilVisible:
     element: "Add food.*"
     direction: DOWN
@@ -19,10 +21,13 @@ appId: io.github.nourish.app
     visible: "Add ·.*"
     timeout: 20000
 - takeScreenshot: 03-apple-found
+- scrollUntilVisible:
+    element: "Add ·.*"
+    direction: DOWN
 - tapOn: "Add ·.*"
-- extendedWaitUntil:
-    visible: ".*Apple.*"
-    timeout: 10000
+- scrollUntilVisible:
+    element: ".*Apple.*"
+    direction: DOWN
 # A food that logs itself every day.
 - scrollUntilVisible:
     element: "Add food.*"
@@ -37,11 +42,12 @@ appId: io.github.nourish.app
 - tapOn: "Off"
 - tapOn: "Every day"
 - takeScreenshot: 03-coffee-every-day
-- tapOn: "Add ·.*"
-- extendedWaitUntil:
-    visible: ".*[Cc]offee.*"
-    timeout: 10000
 - scrollUntilVisible:
-    element: ".*Apple.*"
+    element: "Add ·.*"
     direction: DOWN
+- tapOn: "Add ·.*"
+- scrollUntilVisible:
+    element: ".*[Cc]offee.*"
+    direction: DOWN
+- assertVisible: ".*Apple.*"
 - takeScreenshot: 03-today-with-snacks

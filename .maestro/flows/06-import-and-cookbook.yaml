@@ -1,30 +1,37 @@
 # Import a recipe from a link and save it, then import the same page again (shared with a tracking
-# tag): Nourish warns it's already saved. The page is a test recipe served by the test machine.
+# tag): Nourish warns it's already saved. The page is this repo's test recipe
+# (.maestro/fixtures/test-oat-bowl.html, read from its recipe data: no AI needed).
 appId: io.github.nourish.app
+env:
+  RECIPE_URL: https://raw.githubusercontent.com/nyz2x4pcqr-sudo/Nourish/main/.maestro/fixtures/test-oat-bowl.html
 ---
 - launchApp
-- tapOn: "Plan"
+- tapOn:
+    text: "Plan"
+    retryTapIfNoChange: true
 - tapOn: "Add a recipe from a link"
 - extendedWaitUntil:
     visible: "A recipe site, YouTube, TikTok, Instagram…"
     timeout: 10000
 - tapOn: "A recipe site, YouTube, TikTok, Instagram…"
 - inputText: ${RECIPE_URL}
+- hideKeyboard
 - tapOn: "Find the recipe"
 - extendedWaitUntil:
     visible: "Check the recipe"
     timeout: 60000
+- assertVisible: ".*Maestro Test Oat Bowl.*"
 - takeScreenshot: 06-imported
 - scrollUntilVisible:
     element: "Save to Cookbook"
     direction: DOWN
 - tapOn: "Save to Cookbook"
-- waitForAnimationToEnd
 # The same page again, the way a share sheet might add a tracking tag.
 - tapOn: "Add a recipe from a link"
-- tapOn: "A recipe site, YouTube, TikTok, Instagram…"
+- tapOn: ".*test-oat-bowl.*"
 - eraseText: 200
 - inputText: ${RECIPE_URL + '?utm_source=share'}
+- hideKeyboard
 - tapOn: "Find the recipe"
 - extendedWaitUntil:
     visible: "You already saved this recipe.*"
@@ -32,7 +39,7 @@ appId: io.github.nourish.app
 - takeScreenshot: 06-duplicate-warning
 - assertVisible: "Open the saved one"
 - tapOn: "Close"
-# The Cookbook has it once.
+# The Cookbook has it, once.
 - tapOn: "Cookbook"
 - extendedWaitUntil:
     visible: ".*Maestro Test Oat Bowl.*"
