@@ -36,3 +36,7 @@ nourish-secrets*
 
 # The PC key that encrypts service keys (backend/secretbox.py)
 .nourish-key
+
+# Reverse-engineering notes and app packages never belong in the repo
+rea-analysis/
+*.ipa

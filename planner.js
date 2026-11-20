@@ -233,6 +233,41 @@
         if (weekday != null && weekday >= 5 && s.sched_weekend === 'on' && s[`sched_we_${meal}`]) return String(s[`sched_we_${meal}`]);
         return String(s[`sched_${meal}`] || '');
     }
+    // === EATING OUT ===
+    // My schedule → "Eating out" for a meal (every day, at the weekend, or one day): no recipe is
+    // planned there. That meal's share of the day's calories, protein, carbs, fat and fiber is set
+    // aside instead, so the rest of the day is sized as usual, the day still adds up to its target,
+    // and the grocery list has nothing for it. It's a plain marker, never a recipe.
+    function outSlot(settings, meal, weekday) { return scheduleChoice(settings, meal, weekday) === 'out'; }
+    function isOut(meal) { return !!(meal && meal.eating_out); }
+    function outMeal(meal, targets, share) {
+        const k = Math.max(0, Number(share) || 0);
+        return {
+            name: 'Eating out', eating_out: true, servings: 1, ingredients: [], steps: [], source_id: 'eating_out',
+            description: `No cooking: about ${Math.round(targets.kcal * k)} kcal of the day is kept for this meal.`,
+            nutrition: { calories: Math.round(targets.kcal * k), protein_g: Math.round(targets.protein * k), carbs_g: Math.round((targets.carbs || 0) * k), fat_g: Math.round((targets.fat || 0) * k), fiber_g: Math.round((targets.fiber || 0) * k) },
+        };
+    }
+    // Puts the markers in a finished plan, however it was made (the AI's plans too): an "Eating out"
+    // slot gets the marker, and a marker in a slot that's no longer "Eating out" is taken out (left
+    // empty, to be filled like any empty meal). weekday(d): the weekday (Monday = 0) of plan day d.
+    function applyEatingOut(days, settings, weekday) {
+        const s = settings || {};
+        const base = targetsOf(s);
+        const split = splitOf(s);
+        return (days || []).map((day, d) => {
+            if (!day) return day;
+            const out = Object.assign({}, day);
+            const targets = Array.isArray(s.day_kcal) && s.day_kcal[d] > 0 ? Object.assign({}, base, { kcal: s.day_kcal[d] }) : base;
+            MEALS.forEach((m, i) => {
+                if (split[i] > 0 && outSlot(s, m, weekday ? weekday(d) : null)) out[m] = outMeal(m, targets, split[i]);
+                else if (isOut(out[m])) out[m] = null;
+            });
+            return out;
+        });
+    }
+    // The calories set aside for eating out in a day.
+    function outKcal(day) { return MEALS.reduce((t, m) => t + (isOut(day && day[m]) ? Number(day[m].nutrition.calories) || 0 : 0), 0); }
     function slotLimits(settings, meal, weekday) {
         const base = Object.assign({}, SLOT_DEFAULTS[meal] || SLOT_DEFAULTS.dinner, { noCook: false, choice: '' });
         const c = scheduleChoice(settings, meal, weekday);
@@ -779,9 +814,11 @@
             targets = targetsFor(d);
             ctx.targets = targets;
             const top = {};
+            const outHere = m => on(m) && outSlot(settings, m, weekday ? weekday(d) : null);
+            const cooked = MEALS.filter(m => on(m) && !outHere(m));
             MEALS.forEach((m, i) => {
                 const kcal = targets.kcal * split[i];
-                if (!on(m)) { top[m] = []; return; }
+                if (!on(m) || outHere(m)) { top[m] = []; return; }
                 // Breakfast is breakfast: anything too slow, too much work or the wrong kind of dish
                 // for this slot (with this day's schedule) is out before it can be picked.
                 const limits = slotLimits(settings, m, weekday ? weekday(d) : null);
@@ -822,7 +859,7 @@
                 const vegs = rs.map(mainVeg).filter(Boolean);
                 if (new Set(vegs).size < vegs.length) return;
                 const cuis = rs.map(cuisineOf).filter(c => c !== 'other');
-                let cost = pick.reduce((s, x, i) => s + (x ? x.cost : on(MEALS[i]) ? 50 : 0), 0);
+                let cost = pick.reduce((s, x, i) => s + (x ? x.cost : on(MEALS[i]) && !outHere(MEALS[i]) ? 50 : 0), 0);
                 // The whole day's protein and fat once each meal is sized to its share of calories.
                 let p = 0, f = 0, share = 0;
                 pick.forEach((x, i) => { if (!x) return; const k = targets.kcal * split[i] / x.r.nutrition.calories; p += x.r.nutrition.protein_g * k; f += x.r.nutrition.fat_g * k; share += split[i]; });
@@ -846,6 +883,7 @@
             MEALS.forEach((m, i) => {
                 const chosen = best && best.pick[i];
                 if (!on(m)) return;
+                if (outHere(m)) { day[m] = outMeal(m, targets, split[i]); return; }
                 if (!chosen) { missing.push({ day: d, meal: m, kcal: Math.round(targets.kcal * split[i]) }); return; }
                 const r = JSON.parse(JSON.stringify(chosen.r));
                 const kcal = targets.kcal * split[i];
@@ -860,11 +898,12 @@
             addSnacks(day, Object.assign({}, settings, { calorie_target: targets.kcal }), d, people, exclude, snackExtras);
             const snackKcal = (day.snacks || []).reduce((t, x) => t + x.nutrition.calories, 0);
             // A day with a gap is sized to its own meals' shares only (the AI fills the gap later).
-            const target = items.length === MEALS.filter(on).length ? targets.kcal - snackKcal : items.reduce((t, it) => t + it.want, 0);
+            // Eating out keeps its own share: the cooked meals are sized around it.
+            const target = items.length === cooked.length ? targets.kcal - snackKcal - outKcal(day) : items.reduce((t, it) => t + it.want, 0);
             Object.assign(day, sizeMeals(items, Math.max(1, target), people));
             // Still short of protein with the right recipes: up to two simple protein extras of their
             // own (Greek yogurt, a protein shake…), the meals sized again around them.
-            if (items.length === MEALS.filter(on).length) {
+            if (items.length && items.length === cooked.length) {
                 const extras = proteinExtras(day, Object.assign({}, settings, { calorie_target: targets.kcal }), people, exclude, d, items);
                 Object.keys(day).forEach(k => delete day[k]);
                 Object.assign(day, extras.day);
@@ -938,7 +977,7 @@
                 const off = total / targets.kcal - 1;
                 if (Math.abs(off) <= tolerance) break;
                 // The meal whose calories are furthest from its share, in the direction that's off.
-                const meals = MEALS.filter((m, i) => cur[m] && cur[m].nutrition && split[i] > 0 && !cur[m].leftover);
+                const meals = MEALS.filter((m, i) => cur[m] && cur[m].nutrition && split[i] > 0 && !cur[m].leftover && !isOut(cur[m]));
                 if (!meals.length) break;
                 const worst = meals.map(m => ({ m, ratio: cur[m].nutrition.calories / (targets.kcal * split[MEALS.indexOf(m)]) }))
                     .sort((a, b) => (off > 0 ? b.ratio - a.ratio : a.ratio - b.ratio))[0];
@@ -1033,7 +1072,9 @@
     function weekMicros(days) {
         const sum = { vitd: 0, ca: 0, k: 0, mg: 0 };
         let n = 0;
-        (days || []).forEach(d => { if (!d) return; n++; const t = dayTotals(d); Object.keys(sum).forEach(k => { sum[k] += t.micros[k]; }); });
+        // A meal out has no known vitamins and minerals: the day's cooked meals stand in for it, so
+        // eating out never makes the week look low on its own.
+        (days || []).forEach(d => { if (!d) return; n++; const t = dayTotals(d); const cooked = t.kcal > 0 ? Math.max(0.25, 1 - outKcal(d) / t.kcal) : 1; Object.keys(sum).forEach(k => { sum[k] += t.micros[k] / cooked; }); });
         const avg = {};
         Object.keys(sum).forEach(k => { avg[k] = n ? Math.round(sum[k] / n * 10) / 10 : 0; });
         const low = Object.keys(MICRO_TARGETS).filter(k => n && avg[k] < MICRO_TARGETS[k] * 0.7);
@@ -1059,7 +1100,7 @@
             if (best && best.gain >= MICRO_TARGETS[k] * 0.1) break;
             out.forEach((d, i) => MEALS.forEach(m => {
                 const cur = d && d[m];
-                if (!cur || !cur.nutrition || cur.leftover) return;
+                if (!cur || !cur.nutrition || cur.leftover || isOut(cur)) return;
                 const limits = slotLimits(settings, m, weekday ? weekday(i) : null);
                 (pools[m] || []).filter(r => pass === 'all' || !own(r)).forEach(r => {
                     if (!r || !r.nutrition || used.has(r.name) || (exclude && exclude(r)) || slotProblem(r, m, limits)) return;
@@ -1136,7 +1177,7 @@
     function proteinExtras(day, settings, people = 1, exclude, d = 0, items = null) {
         const T = targetsOf(settings || {});
         const notes = [];
-        const fixedOf = c => (c.snacks || []).reduce((t, x) => t + ((x.nutrition && x.nutrition.calories) || 0), 0);
+        const fixedOf = c => (c.snacks || []).reduce((t, x) => t + ((x.nutrition && x.nutrition.calories) || 0), 0) + outKcal(c);
         const resize = c => (items ? Object.assign({}, c, sizeMeals(items, Math.max(1, T.kcal - fixedOf(c)), people)) : fitDay(c, settings, people));
         let cur = Object.assign({}, day);
         const had = (day.snacks || []).some(x => x.protein_extra || x.filler);
@@ -1370,7 +1411,7 @@
         }).join('');
     }
 
-    const api = { ingredientFoods, balanceDay, applyDayRules: balanceDay, proteinExtras, extrasFor, PROTEIN_EXTRAS, MAX_EXTRAS, proteinNote, PORTION_MIN, PORTION_MAX, weeklyTargets, WEEKDAYS, fatTip, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { ingredientFoods, balanceDay, applyDayRules: balanceDay, proteinExtras, extrasFor, PROTEIN_EXTRAS, MAX_EXTRAS, proteinNote, PORTION_MIN, PORTION_MAX, weeklyTargets, WEEKDAYS, fatTip, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, outSlot, isOut, outMeal, outKcal, applyEatingOut, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

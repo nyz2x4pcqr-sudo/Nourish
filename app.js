@@ -1581,12 +1581,12 @@ function renderSettings() {
 // === MY SCHEDULE ===
 const SCHEDULE_DEFAULT = { breakfast: '20', lunch: '30', dinner: 'norush' };   // the same as the built-in slot limits
 const SCHEDULE_CHOICES = {
-    breakfast: ['5', '10', '20', '30', '45', 'norush', 'nocook'],
-    lunch: ['10', '20', '30', '45', '60', 'norush', 'nocook'],
-    dinner: ['20', '30', '45', '60', '90', 'norush', 'nocook'],
+    breakfast: ['5', '10', '20', '30', '45', 'norush', 'nocook', 'out'],
+    lunch: ['10', '20', '30', '45', '60', 'norush', 'nocook', 'out'],
+    dinner: ['20', '30', '45', '60', '90', 'norush', 'nocook', 'out'],
 };
-const SCHEDULE_SHORT = { 5: '5 min', 10: '10 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour', 90: '1½ hours', norush: 'No rush', nocook: "Don't cook" };
-const SCHEDULE_LONG = Object.assign({}, SCHEDULE_SHORT, { nocook: "I don't cook this meal" });
+const SCHEDULE_SHORT = { 5: '5 min', 10: '10 min', 20: '20 min', 30: '30 min', 45: '45 min', 60: '1 hour', 90: '1½ hours', norush: 'No rush', nocook: "Don't cook", out: 'Eating out' };
+const SCHEDULE_LONG = Object.assign({}, SCHEDULE_SHORT, { nocook: "I don't cook this meal", out: "I'm eating out (don't plan it)" });
 function scheduleValue(meal, prefix = 'sched_') { return settings[`${prefix}${meal}`] || (prefix === 'sched_' ? SCHEDULE_DEFAULT[meal] : ''); }
 function scheduleOptions(meal, inherit) {
     const o = inherit ? { '': inherit } : {};
@@ -1596,6 +1596,7 @@ function scheduleOptions(meal, inherit) {
 // What a choice means for the recipes, in plain words.
 function scheduleMeaning(meal, value) {
     if (value === 'nocook') return 'Grab-and-go or no-cook ideas only';
+    if (value === 'out') return "No recipe and nothing to buy: that meal's share of the day's calories is kept for it";
     if (value === 'norush') return meal === 'dinner' ? 'Any recipe, however long' : 'Longer recipes are fine';
     const L = NourishPlanner.slotLimits({ [`sched_${meal}`]: value }, meal);
     return L.noCook ? 'No-cook ideas (there is no time to cook)' : `Recipes ready in ${L.minutes} min or less`;
@@ -2376,6 +2377,7 @@ function closeGenerateSheet() {
 let openRecipe = null;
 // dayIndex: the plan's day it's on; cookbookId: opened from the Cookbook.
 function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } = {}) {
+    if (meal && meal.eating_out) { if (dayIndex != null) cookInstead(dayIndex, mealType); return; }
     openRecipe = { mealType, meal, dayIndex, cookbookId };
     const saved = cookbookId ? cookbook.recipes.find(e => e.id === cookbookId) : cookbookEntry(meal);
     const content = $('recipeSheetContent');
@@ -2442,6 +2444,8 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
                 onclick: () => { closeRecipeSheet(); swapMeal(dayIndex, mealType); },
             }, icon('i-swap'), 'Swap meal') : null,
             h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => askAboutMeal(meal) }, icon('i-chat'), 'Ask the chef')),
+        cookbookId ? null : h('div', { class: 'ask-chips', role: 'group', 'aria-label': 'Quick questions for the chef' },
+            ASK_CHIPS.map(([label, ask]) => h('button', { type: 'button', class: 'time-chip', onclick: () => askAboutMeal(meal, ask) }, label))),
         ingredients.length ? h('div', { class: 'recipe-section' },
             h('div', { class: 'recipe-section-title' }, 'Ingredients', h('small', { text: meal.servings ? `${ingredients.length} · for ${meal.servings}` : String(ingredients.length) })),
             h('div', { class: 'recipe-ingredients' }, ingredients.map((line, idx) => ingredientRow(line, idx)))) : null,
@@ -2697,11 +2701,21 @@ function closeRecipeSheet() {
     $('recipeSheet').classList.remove('active');
 }
 
-function askAboutMeal(meal) {
+// One-tap questions about a recipe (asked as questions, so they never change the plan by themselves).
+// A function gives the question to send; a string is typed in for the person to finish.
+const ASK_CHIPS = [
+    ['Lighter', n => `How could I make "${n}" lighter, with fewer calories but just as much flavour?`],
+    ['More flavour', n => `How could I give "${n}" more flavour without adding many calories?`],
+    ['Easier', n => `How could I make "${n}" easier or quicker to cook?`],
+    ['Swap an ingredient', n => `In "${n}", what could I use instead of `],
+];
+function askAboutMeal(meal, ask) {
     closeRecipeSheet();
     switchTab('chat');
     const input = $('chatInput');
-    input.value = `About "${meal.name}": `;
+    const text = typeof ask === 'function' ? ask(meal.name) : '';
+    if (text && /\?$/.test(text)) { sendChat(text); return; }
+    input.value = text || `About "${meal.name}": `;
     autoGrow(input);
     input.focus();
 }
@@ -2941,7 +2955,29 @@ function dayBreakdown(day, entry, total, target) {
         h('p', { class: 'recipe-note', text: `${verdict} Every number is worked out from the ingredients as written; open a recipe to see its breakdown.` }));
 }
 
+// Eating out (My schedule): no recipe to open. Tapping offers a recipe for that meal after all.
+function cookInstead(dayIndex, type) {
+    if (!confirm(`Cook ${MEAL_LABELS[type].toLowerCase()} here after all? Nourish will find a recipe for it.
+
+(To stop planning this meal out, change Settings → My schedule.)`)) return;
+    swapMeal(dayIndex, type);
+}
+function outMealText(meal) {
+    return on('show_nutrition') && meal.nutrition && meal.nutrition.calories > 0 ? `About ${formatCalories(meal.nutrition.calories)} kcal kept for it` : 'Nothing to cook or buy';
+}
 function mealCard(type, meal, dayIndex, status) {
+    if (meal && meal.eating_out) {
+        return h('div', { class: 'meal-row' },
+            h('button', { type: 'button', class: 'meal-card eating-out' + (status ? ` ${status}` : ''), onclick: () => cookInstead(dayIndex, type) },
+                h('div', { class: `meal-art art-${type}` }, icon('i-utensils')),
+                h('div', { class: 'meal-content' },
+                    h('div', { class: 'meal-type', text: MEAL_LABELS[type] }),
+                    h('div', { class: 'meal-name', text: 'Eating out' }),
+                    h('div', { class: 'meal-badges' }, h('span', { class: 'chip', text: outMealText(meal) }),
+                        status === 'eaten' ? h('span', { class: 'chip ok' }, icon('i-check'), 'Eaten') : null))),
+            h('button', { type: 'button', class: `eat-btn${status ? ' ' + status : ''}`, 'aria-label': `${MEAL_LABELS[type]}: ${status === 'eaten' ? 'Eaten. Tap to clear' : 'Mark as eaten'}`,
+                onclick: () => setMealStatus(dayIndex, type, status === 'eaten' ? null : 'eaten') }, icon('i-check')));
+    }
     const card = h('button', { type: 'button', class: 'meal-card' + (status ? ` ${status}` : ''), onclick: () => openRecipeSheet(type, meal, dayIndex) },
         h('div', { class: `meal-art art-${type}` }, icon(MEAL_ICONS[type])),
         h('div', { class: 'meal-content' },
@@ -3247,7 +3283,14 @@ function updatePlanScreen() {
                 h('div', { class: 'eyebrow', text: `Day ${idx + 1}${isToday(idx) ? ' · Today' : ''}` }),
                 h('h2', { class: 'title', text: dayName(idx) })),
             on('show_nutrition') && hasNutrition(day) ? h('span', { class: 'chip accent' }, icon('i-flame'), `${formatCalories(sumNutrient(day, 'calories'))} kcal`) : null),
-        MEAL_TYPES.map(t => day[t]
+        MEAL_TYPES.map(t => day[t] && day[t].eating_out
+            ? h('button', { type: 'button', class: 'plan-meal eating-out', 'data-meal-type': t, onclick: () => cookInstead(idx, t) },
+                h('span', { class: `dot art-${t}` }, icon('i-utensils')),
+                h('span', { class: 'plan-meal-body' },
+                    h('span', { class: 'plan-meal-type', text: MEAL_LABELS[t] }),
+                    h('span', { class: 'plan-meal-name', text: 'Eating out' })),
+                h('span', { class: 'plan-meal-meta', text: outMealText(day[t]) }))
+            : day[t]
             ? h('button', { type: 'button', class: 'plan-meal', 'data-meal-type': t, onclick: () => openRecipeSheet(t, day[t], idx) },
                 h('span', { class: `dot art-${t}` }, icon(MEAL_ICONS[t])),
                 h('span', { class: 'plan-meal-body' },
@@ -3482,7 +3525,7 @@ function normalizeMeal(m) {
     const all = toStringList(m.ingredients);
     const ingredients = cleanIngredients(all.filter(l => !addedFood.has(l)), m.name).concat(all.filter(l => addedFood.has(l)));
     // Only a name the AI wrote is spell-checked: never a web, book or Nourish recipe's own name.
-    const written = !m.source_url && !m.library_path && !m.builtin && !m.from_book && !m.quick;
+    const written = !m.source_url && !m.library_path && !m.builtin && !m.from_book && !m.quick && !m.eating_out;
     const out = Object.assign({
         name: written && typeof NourishPlanner !== 'undefined' ? NourishPlanner.fixName(String(m.name).trim()) : String(m.name).trim(),
         servings: toNumber(m.servings) >= 1 ? Math.round(toNumber(m.servings)) : undefined,
@@ -3515,6 +3558,8 @@ function normalizeMeal(m) {
         wait_minutes: toNumber(m.wait_minutes) > 0 ? toNumber(m.wait_minutes) : undefined,
         time_estimated: m.time_estimated ? true : undefined,
         leftover: m.leftover ? true : undefined,
+        // My schedule → "Eating out": a marker with the calories kept for that meal, never a recipe.
+        eating_out: m.eating_out ? true : undefined,
         builtin: m.builtin ? true : undefined,
         snack: m.snack ? true : undefined,
         // A protein extra (Greek yogurt, a shake…): an item of its own, added to reach the day's protein.
@@ -3599,14 +3644,17 @@ function normalizePlan(data, strict = true) {
 function applyPlan(raw, { navigate = true } = {}) {
     reportCaps = true;
     try { daysData = normalizePlan(raw); } finally { reportCaps = false; }
-    const planNames = () => daysData.flatMap(d => MEAL_TYPES.map(x => d && d[x] && d[x].name).filter(Boolean));
+    // Eating out (My schedule), whoever made the plan: those meals become markers, never recipes.
+    daysData = NourishPlanner.applyEatingOut(daysData, plannerSettings(), d => (dayBase() + d) % 7)
+        .map(d => Object.assign(d, Object.fromEntries(MEAL_TYPES.filter(t => d[t] && d[t].eating_out).map(t => [t, normalizeMeal(d[t])]))));
+    const planNames = () => daysData.flatMap(d => MEAL_TYPES.map(x => d && d[x] && !d[x].eating_out && d[x].name).filter(Boolean));
     // Breakfast is breakfast, for plans the AI wrote in one go too: a meal that breaks its slot's
     // rules (or the person's schedule) is replaced by a simple built-in one that fits.
     // Never the same meal twice in a plan (a leftover lunch, when allowed, is the exception).
     const seen = NourishPlanner.dishList();
     daysData.forEach((d, i) => MEAL_TYPES.forEach(t => {
         const meal = d && d[t];
-        if (!meal || meal.leftover) return;
+        if (!meal || meal.leftover || meal.eating_out) return;
         if (seen.has(meal.name)) {
             const other = builtinFor(t, i, planNames());
             nlog('plan', `${dayName(i)} ${t}: "${meal.name}" is already in the plan${other ? `; replaced by "${other.name}"` : ''}`, null, 'warn');
@@ -3615,7 +3663,7 @@ function applyPlan(raw, { navigate = true } = {}) {
         seen.add(d[t].name);
     }));
     daysData.forEach((d, i) => MEAL_TYPES.forEach(t => {
-        const misfit = d && d[t] ? slotCheck(d[t], t, i) : '';
+        const misfit = d && d[t] && !d[t].eating_out ? slotCheck(d[t], t, i) : '';
         if (!misfit) return;
         const quick = builtinFor(t, i, planNames());
         nlog('plan', `${dayName(i)} ${t}: "${d[t].name}" ${misfit}${quick ? `; replaced by "${quick.name}"` : ''}`, null, 'warn');
@@ -3747,7 +3795,7 @@ function tasteProfile() {
     return tasteCache;
 }
 function learn(type, recipe, extra) {
-    if (!taste.on) return;
+    if (!taste.on || (recipe && recipe.eating_out)) return;
     try {
         if (NourishTaste.record(taste, type, recipe, extra || {})) { tasteCache = null; changed('taste'); }
     } catch (e) { nlog('taste', `Couldn't note that: ${e.message}`, null, 'warn'); }
@@ -4611,7 +4659,7 @@ function crossCheckQueue() {
     const lib = Object.values(cache).map(c => c && c.r).filter(Boolean)
         .concat(recipeDBReady ? recipeDB.forPlanning().filter(r => r && r.from_book) : []);   // the person's books too
     lib.concat(...Object.values(lastPlanPools || {})).forEach(r => { if (r && r.name && !base.has(r.name)) base.set(r.name, r); });
-    daysData.forEach(d => MEAL_TYPES.forEach(t => { const m = d && d[t]; if (m) push(base.get(m.name) || m, 'in your plan'); }));
+    daysData.forEach(d => MEAL_TYPES.forEach(t => { const m = d && d[t]; if (m && !m.eating_out) push(base.get(m.name) || m, 'in your plan'); }));
     const settled = lib.map(r => { const x = JSON.parse(JSON.stringify(r)); NourishNutrition.settle(x); return [r, NourishCrossCheck.localCheck(x)]; });
     settled.filter(([, c]) => c.level === 'low').forEach(([r]) => push(r, 'sources disagree'));
     settled.filter(([, c]) => c.level === 'estimate').forEach(([r]) => push(r, 'one source only'));
@@ -4768,7 +4816,7 @@ async function runSmartPlan(likes, hates) {
         const swapOut = [];
         days.forEach((d, i) => MEAL_TYPES.forEach(t => {
             const m = d && d[t];
-            const hit = m && avoided(m);
+            const hit = m && !m.eating_out && avoided(m);
             if (!hit) return;
             nlog('plan', `${dayName(i)} ${t} "${m.name}" has ${hit}, which is avoided; swapped`, null, 'warn');
             swapOut.push({ day: i, meal: t, kcal: Math.round((m.nutrition && m.nutrition.calories) || 500) });
@@ -5477,6 +5525,13 @@ function openRecipeEditor(recipe, { mode = 'import', notes = [], mealType = 'din
         h('div', { class: 'sheet-body' },
             mode === 'import' ? h('p', { class: 'sheet-hint', text: 'Fix anything that looks wrong, then save it to your Cookbook or add it to your plan.' }) : null,
             source,
+            (() => {
+                const saved = mode === 'import' ? savedCopyOf(recipe) : null;
+                if (!saved) return null;
+                return h('div', { class: 'edit-duplicate', role: 'status' },
+                    h('p', { text: `You already saved this recipe${saved.saved_at ? ` ${ago(saved.saved_at)}` : ''}${saved.recipe.name && saved.recipe.name !== recipe.name ? ` as "${saved.recipe.name}"` : ''}. Saving again updates that copy; it won't be added twice.` }),
+                    h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => { closeRecipeEditor(); openRecipeSheet(saved.meal_type || mealType, saved.recipe, null, { cookbookId: saved.id }); } }, 'Open the saved one'));
+            })(),
             notes.length ? h('p', { class: 'edit-notes', text: notes.join(' · ') }) : null,
             h('div', { class: 'input-group' }, h('label', { class: 'label', for: 'editName', text: 'Name' }), h('input', { id: 'editName', type: 'text', value: recipe.name || '' })),
             h('div', { class: 'edit-row' },
@@ -5617,12 +5672,20 @@ function cookbookId() { return 'r' + Date.now().toString(36) + Math.random().toS
 function sameRecipe(a, b) {
     return String(a.name || '').trim().toLowerCase() === String(b.name || '').trim().toLowerCase() && (a.source_url || '') === (b.source_url || '');
 }
+// A recipe that's already in the Cookbook: the same page (however the link was shared), or the same
+// name with no link on either side. Shown before saving an import, so nothing is saved twice by accident.
+function savedCopyOf(recipe) {
+    if (!recipe) return null;
+    const name = String(recipe.name || '').trim().toLowerCase();
+    return cookbook.recipes.find(e => e.recipe && (recipe.source_url ? NourishImport.sameLink(e.recipe.source_url, recipe.source_url)
+        : !e.recipe.source_url && name && String(e.recipe.name || '').trim().toLowerCase() === name)) || null;
+}
 function cookbookEntry(meal) {
     return meal ? cookbook.recipes.find(e => sameRecipe(e.recipe, meal)) : null;
 }
 
 function addToCookbook(meal, mealType, source) {
-    const existing = cookbookEntry(meal);
+    const existing = cookbookEntry(meal) || (source === 'imported' ? savedCopyOf(meal) : null);
     const copy = normalizeMeal(JSON.parse(JSON.stringify(meal)));
     delete copy.incomplete;   // a saved recipe is a copy; the plan's "may be incomplete" note isn't carried over
     if (existing) {

@@ -48,6 +48,21 @@
         return u.href;
     }
 
+    // The same recipe page, however the link was shared: http or https, www./m., a trailing slash,
+    // #anchors and tracking tags (utm_…, fbclid, igsh, si…) don't make it a different page. A query
+    // that picks the page (YouTube's ?v=, a site's ?p=123) still counts. '' for nonsense.
+    const TRACKING = /^(utm_\w+|fbclid|gclid|dclid|mc_[ce]id|igsh|igshid|si|ref|ref_src|share|shared|s|t|feature|_ga|yclid|msclkid|cmpid|campaign)$/i;
+    function linkKey(url) {
+        if (!url) return '';
+        let u;
+        try { u = new URL(normalizeUrl(url)); } catch (e) { return ''; }
+        const host = u.hostname.toLowerCase().replace(/^(www|m|mobile)\./, '');
+        const params = [...u.searchParams.entries()].filter(([k]) => !TRACKING.test(k)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+        const path = decodeURIComponent(u.pathname).replace(/\/+$/, '').toLowerCase();
+        return `${host}${path}${params.length ? '?' + params.map(([k, v]) => `${k}=${v}`).join('&') : ''}`;
+    }
+    function sameLink(a, b) { const x = linkKey(a); return !!x && x === linkKey(b); }
+
     // === TEXT HELPERS ===
     function parseHTML(html) { return new DOMParser().parseFromString(String(html || ''), 'text/html'); }
     function cleanText(text) {
@@ -487,7 +502,7 @@
         return finish(recipe, 'ai', doc);
     }
 
-    const api = { wholeSentences, ingredientLines, importUrl, platformOf, hostOf, normalizeUrl, structuredRecipe, readableText, looksBlocked, jsonAfter, cleanText, isoMinutes, firstNumber, recipeSteps, PLATFORM_NAMES };
+    const api = { wholeSentences, ingredientLines, importUrl, platformOf, hostOf, normalizeUrl, linkKey, sameLink, structuredRecipe, readableText, looksBlocked, jsonAfter, cleanText, isoMinutes, firstNumber, recipeSteps, PLATFORM_NAMES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.NourishImport = api;
 })(typeof window !== 'undefined' ? window : this);

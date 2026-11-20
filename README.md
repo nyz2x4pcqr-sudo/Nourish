@@ -34,6 +34,9 @@ Nourish makes a 7-day meal plan (breakfast, lunch, dinner) with recipes, calorie
 - **Updates itself**: the Windows app checks GitHub for new releases. One tap downloads, verifies, installs and restarts.
 - **Phone apps** for Android (`.apk`) and iPhone (`.ipa`, sideloaded). They find your PC on the Wi-Fi and open Nourish from it.
 - **Today screen**: calories and protein/carbs/fat for each day against your targets, with meal cards you can tap for the full recipe.
+- **Eating out**: in **Settings → My schedule**, set any meal (every day, at the weekend, or one day, like Friday dinner) to *I'm eating out*. No recipe is planned there and nothing goes on the grocery list. That meal's share of the day's calories is kept for it, so the rest of the day is sized as usual. Tap it to cook there after all.
+- **No double saves**: importing a recipe that's already in your Cookbook says so before you save, even when the link was shared differently (tracking tags, `www.`, `#` anchors). Saving updates the copy you have.
+- **Quick questions on any recipe**: *Lighter*, *More flavour*, *Easier* and *Swap an ingredient* ask the chef in one tap. They're asked as questions, so they never change your plan by themselves.
 - **Grocery list**: built from every ingredient in the plan, grouped by aisle, with a progress bar. Add your own items, hide ticked ones, and share or copy the list.
 - **The same everywhere**: your settings, plan, grocery list, chat and Cookbook are kept on the PC (in `nourish-data.json`, next to Nourish) and synced to every browser and phone app connected to it, within a few seconds. Each device also keeps a copy, so a saved plan still shows while the PC is off. API keys are stored on the PC and never sent back to phones.
 
