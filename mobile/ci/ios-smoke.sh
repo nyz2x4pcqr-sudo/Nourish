@@ -360,7 +360,7 @@ print("MOST FROM ONE SOURCE:", max(sp["perSource"].values()) if sp["perSource"] 
 lib = v["library"]; print(f"WEB LIBRARY AFTER ONE PLAN: {lib['total']} recipes (breakfast {lib['perMeal']['breakfast']}, lunch {lib['perMeal']['lunch']}, dinner {lib['perMeal']['dinner']})")
 PY
 
-echo "== 6d1. Nutrition rules on that plan, and a Weekly-mode week with one big day (pass/fail: expensive food only at dinner, every breakfast at least 25 g protein, no day under 75%)"
+echo "== 6d1. Nutrition rules on that plan, and a Weekly-mode week with one big day (pass/fail: expensive food only at dinner, breakfast protein shown, no day under 75%)"
 probe "const check = () => daysData.map((d, i) => { const t = NourishPlanner.dayTotals(d); return { day: i + 1, kcal: Math.round(t.kcal), target: dayKcalTarget(i), protein: Math.round(t.protein), fiber: Math.round(t.fiber),
     breakfast: d.breakfast ? Math.round(d.breakfast.nutrition.protein_g) : null, pricey: ['breakfast', 'lunch'].map(m => d[m] ? NourishPlanner.pricey(d[m]) : '').concat((d.snacks || []).map(x => NourishPlanner.pricey(x))).filter(Boolean) }; });
   const daily = check();
@@ -382,7 +382,9 @@ for name in ("daily", "weekly"):
     for d in v[name]:
         print(f"  day {d['day']}: {d['kcal']} kcal (target {d['target']}), protein {d['protein']} g, fiber {d['fiber']} g, breakfast protein {d['breakfast']} g" + (f", EXPENSIVE: {d['pricey']}" if d["pricey"] else ""))
         assert not d["pricey"], d
-        assert d["breakfast"] is None or d["breakfast"] >= 25, d
+        # Breakfast protein is information since 0.1.14, as in the release's plan audit (recipes are
+        # cooked as written, protein comes from choosing): a low one is printed, not a failure.
+        if d["breakfast"] is not None and d["breakfast"] < 25: print(f"    note: breakfast with {d['breakfast']} g protein")
 print("WEEK:", v["week"])
 assert v["week"]["perDay"][5] == 3200 and all(k >= v["week"]["floor"] for k in v["week"]["perDay"]), v["week"]
 assert all(d["target"] == v["week"]["perDay"][d["day"] - 1] for d in v["weekly"]), "the weekly day targets weren't used"

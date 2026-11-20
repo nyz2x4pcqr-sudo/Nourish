@@ -13,6 +13,7 @@ services:
     environment:
       FRONTEND_DIR: /frontend
       # Inside Docker, "localhost" is the container itself; reach LM Studio / Ollama on the PC.
+      NOURISH_IN_DOCKER: "1"
       LMSTUDIO_URL: http://host.docker.internal:1234
       OLLAMA_URL: http://host.docker.internal:11434
     env_file:

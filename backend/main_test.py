@@ -24,6 +24,8 @@ class FakeUpstream:
     def __init__(self):
         self.requests = []
         self.fail = None  # "unreachable" | int status
+        self.models = [{"id": "local-model"}]
+        self.v0 = None  # LM Studio's /api/v0/models (with "state"), when a test sets it
 
     def __call__(self, request: httpx.Request):
         self.requests.append(request)
@@ -40,7 +42,9 @@ class FakeUpstream:
         if path.endswith("/v1/messages"):
             return httpx.Response(200, json={"content": [{"type": "text", "text": "{}"}]})
         if path.endswith("/v1/models"):
-            return httpx.Response(200, json={"data": [{"id": "local-model"}]})
+            return httpx.Response(200, json={"data": self.models})
+        if path.endswith("/api/v0/models"):
+            return httpx.Response(200, json={"data": self.v0}) if self.v0 is not None else httpx.Response(404, json={})
         if path.endswith("/api/tags"):
             return httpx.Response(200, json={"models": [{"name": "llama3.2:latest"}, {"name": "qwen2.5:7b"}]})
         return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
@@ -176,11 +180,55 @@ class ApiTest(unittest.TestCase):
         self.client.post("/api/generate", json={"provider": "lmstudio", "model": "m", "messages": []})
         self.assertEqual(json.loads(self.up.requests[-1].content)["temperature"], 0.7)
 
+    def test_docker_only_address_falls_back_outside_docker(self):
+        old = main.os.environ.get("LMSTUDIO_URL")
+        try:
+            main.os.environ["LMSTUDIO_URL"] = "http://host.docker.internal:1234/"
+            main.os.environ.pop("NOURISH_IN_DOCKER", None)
+            if not main.in_docker():
+                self.assertEqual(main.local_ai_url("LMSTUDIO_URL", "x"), "http://localhost:1234")
+            main.os.environ["NOURISH_IN_DOCKER"] = "1"
+            self.assertEqual(main.local_ai_url("LMSTUDIO_URL", "x"), "http://host.docker.internal:1234")
+        finally:
+            main.os.environ.pop("NOURISH_IN_DOCKER", None)
+            if old is None:
+                main.os.environ.pop("LMSTUDIO_URL", None)
+            else:
+                main.os.environ["LMSTUDIO_URL"] = old
+
+    def test_lmstudio_gets_schema_and_thinking_switch_only(self):
+        fmt = {"type": "json_schema", "json_schema": {"name": "meal", "schema": {"type": "object"}}}
+        self.client.post("/api/generate", json={"provider": "lmstudio", "model": "m", "messages": [], "response_format": fmt, "reasoning_effort": "none"})
+        sent = json.loads(self.up.requests[-1].content)
+        self.assertEqual(sent["response_format"], fmt)
+        self.assertEqual(sent["reasoning_effort"], "none")
+        # Unknown values are dropped, and other providers never get them.
+        self.client.post("/api/generate", json={"provider": "lmstudio", "model": "m", "messages": [], "response_format": {"type": "evil"}, "reasoning_effort": "max"})
+        sent = json.loads(self.up.requests[-1].content)
+        self.assertNotIn("response_format", sent)
+        self.assertNotIn("reasoning_effort", sent)
+        self.client.post("/api/generate", json={"provider": "ollama", "model": "m", "messages": [], "response_format": fmt, "reasoning_effort": "none"})
+        sent = json.loads(self.up.requests[-1].content)
+        self.assertNotIn("response_format", sent)
+        self.assertNotIn("reasoning_effort", sent)
+
     def test_model_lists(self):
         self.assertEqual(self.client.get("/api/models").json()["data"][0]["id"], "local-model")
         ids = [m["id"] for m in self.client.get("/api/models?provider=ollama").json()["data"]]
         self.assertEqual(ids, ["llama3.2:latest", "qwen2.5:7b"])
         self.assertEqual(self.client.get("/api/models?provider=claude").status_code, 400)
+
+    def test_lmstudio_loaded_model_comes_first(self):
+        # With "load on demand", /v1/models lists every downloaded model: the loaded one is marked
+        # and comes first, so "auto" picks the model that's ready.
+        self.up.models = [{"id": "google/gemma-4-e4b"}, {"id": "qwen/qwen3.5-9b"}, {"id": "text-embedding-nomic"}]
+        self.up.v0 = [{"id": "google/gemma-4-e4b", "state": "not-loaded"}, {"id": "qwen/qwen3.5-9b", "state": "loaded"}]
+        data = self.client.get("/api/models").json()["data"]
+        self.assertEqual([(m["id"], m["loaded"]) for m in data], [("qwen/qwen3.5-9b", True), ("google/gemma-4-e4b", False), ("text-embedding-nomic", False)])
+        # An older LM Studio without /api/v0: the list is unchanged.
+        self.up.v0 = None
+        data = self.client.get("/api/models").json()["data"]
+        self.assertEqual([m["id"] for m in data], ["google/gemma-4-e4b", "qwen/qwen3.5-9b", "text-embedding-nomic"])
 
     def test_info(self):
         data = self.client.get("/api/info").json()

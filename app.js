@@ -144,6 +144,7 @@ SETTINGS_DEFAULTS.density = 'comfortable';      // Settings → Appearance → S
 SETTINGS_DEFAULTS.corners = 'round';
 SETTINGS_DEFAULTS.high_contrast = 'off';
 SETTINGS_DEFAULTS.colour_amounts = 'off';
+SETTINGS_DEFAULTS.lmstudio_thinking = 'off';   // LM Studio: let a "thinking" model think before answering (slower)
 SETTINGS_DEFAULTS.pantry_on = 'on';   // staples you always have stay off the shopping list
 SETTINGS_DEFAULTS.pantry = '';        // your own pantry list; empty = the starter list
 SETTINGS_DEFAULTS.sched_asked = '';   // 'yes' once the quick questions were answered or skipped
@@ -1024,22 +1025,33 @@ async function waitForJob(id) {
 async function fetchModels(provider) {
     try {
         const data = await api(`/api/models?provider=${provider}`, { timeoutMs: 8000 });
-        const models = ((data && data.data) || []).map(m => m && m.id).filter(id => id && !/embed/i.test(id));
-        modelLists[provider] = { models, error: '' };
+        const rows = ((data && data.data) || []).filter(m => m && m.id && !/embed/i.test(m.id));
+        modelLists[provider] = { models: rows.map(m => m.id), loaded: rows.filter(m => m.loaded).map(m => m.id), error: '' };
     } catch (e) {
         modelLists[provider] = { models: [], error: e.message };
     }
     return modelLists[provider];
 }
 
-async function buildAIRequest(messages, { maxTokens } = {}) {
+// Model "auto" (no model typed in Settings): one already loaded in LM Studio first, then the model
+// tested best for Nourish on an 8 GB graphics card (Qwen3.5 9B: every recipe valid, calories closest),
+// then the first one listed.
+const LMSTUDIO_RECOMMENDED = 'qwen/qwen3.5-9b';
+function autoModel(p, list) {
+    const loaded = list.loaded || [];
+    if (loaded.length) return loaded.includes(LMSTUDIO_RECOMMENDED) ? LMSTUDIO_RECOMMENDED : loaded[0];
+    if (p === 'lmstudio' && list.models.includes(LMSTUDIO_RECOMMENDED)) return LMSTUDIO_RECOMMENDED;
+    return list.models[0];
+}
+
+async function buildAIRequest(messages, { maxTokens, schema } = {}) {
     const p = settings.active_provider;
     let model = settings[`${p}_model`];
     if (p === 'local' && !model) throw new Error('Download a model first: Settings → AI model.');
     if (!model && (p === 'lmstudio' || p === 'ollama')) {
         const list = await fetchModels(p);
         if (list.error) throw new Error(list.error);
-        model = list.models[0];
+        model = autoModel(p, list);
         if (!model) throw new Error(p === 'lmstudio'
             ? 'No model loaded in LM Studio. Open LM Studio, load a model and start the server.'
             : 'Ollama has no models. Run "ollama pull llama3.2" on your PC.');
@@ -1056,6 +1068,11 @@ async function buildAIRequest(messages, { maxTokens } = {}) {
         messages,
         max_tokens: maxTokens != null ? maxTokens : (Number(settings.max_tokens) || 8000),
         temperature: Number(settings.temperature),
+        // LM Studio: a recipe is held to its JSON shape, and "thinking" models (Qwen3.5 and others)
+        // answer straight away unless Settings → AI model → "Think before answering" is on. Thinking
+        // first took 20+ seconds and hundreds of hidden words even for a one-line answer.
+        response_format: p === 'lmstudio' && schema ? schema : undefined,
+        reasoning_effort: p === 'lmstudio' ? (on('lmstudio_thinking') ? undefined : 'none') : undefined,
     };
 }
 
@@ -2273,11 +2290,12 @@ function renderModelControl(refresh = false) {
         return;
     }
     const key = `${p}_model`;
-    const options = [['', p === 'lmstudio' ? 'Automatic (first loaded)' : 'Automatic (first installed)']].concat(cached.models.map(m => [m, m]));
+    const options = [['', p === 'lmstudio' ? 'Automatic (the loaded model)' : 'Automatic (first installed)']].concat(cached.models.map(m => [m, (cached.loaded || []).includes(m) ? `${m} (loaded)` : m]));
     if (settings[key] && !cached.models.includes(settings[key])) options.push([settings[key], `${settings[key]} (not found)`]);
     setChildren(box,
         settingsRow('Model', settingsSelect(key, Object.fromEntries(options))),
         cached.error ? h('div', { class: 'settings-row settings-result error', text: cached.error }) : null,
+        p === 'lmstudio' ? settingsToggle('lmstudio_thinking', 'Think before answering', { hint: 'For "thinking" models like Qwen3.5. Much slower: in tests a recipe took over 3 minutes and often ran out of room.' }) : null,
         settingsButton('Refresh model list', () => renderModelControl(true)));
 }
 
@@ -5504,9 +5522,11 @@ const PLAN_PROGRESS_KEY = 'nourish_plan_progress';
 // One model call for a plan with a PC or cloud AI (the phone's own model uses phoneRunner in ondevice.js).
 // Returns the text, or null when cancelled.
 function aiRunner() {
-    return async msgs => {
+    return async (msgs, opts) => {
         if (localPlanCancelled) return null;
-        const req = await buildAIRequest(msgs);
+        // A meal held to a JSON shape gets the meal's own token limit (room for a whole recipe);
+        // everything else keeps the length from Settings.
+        const req = await buildAIRequest(msgs, opts && opts.schema ? { maxTokens: opts.maxTokens, schema: opts.schema } : {});
         const id = await startJob(req);
         if (planJob) planJob.currentJob = id;
         try {

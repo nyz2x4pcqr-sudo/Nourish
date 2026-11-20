@@ -39,10 +39,28 @@ logger = logging.getLogger("nourish")
 # httpx logs full request URLs at INFO, which can include query-string API keys.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-VERSION = "0.1.14-pre-alpha"
+VERSION = "0.1.15-pre-alpha"
 PORT = int(os.getenv("NOURISH_PORT", "8000"))
-LMSTUDIO_URL = os.getenv("LMSTUDIO_URL", "http://localhost:1234").rstrip("/")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+
+
+def in_docker() -> bool:
+    return os.path.exists("/.dockerenv") or os.getenv("NOURISH_IN_DOCKER") == "1"
+
+
+def local_ai_url(name: str, default: str) -> str:
+    """The address of LM Studio or Ollama. "host.docker.internal" only exists inside Docker: an old
+    .env copied from a Docker setup would otherwise make every plan fail on a normal PC, so outside
+    Docker it falls back to this PC (and says so in the log)."""
+    url = os.getenv(name, default).rstrip("/")
+    if "host.docker.internal" in url and not in_docker():
+        fixed = url.replace("host.docker.internal", "localhost")
+        logger.warning(f"{name}={url} only works inside Docker; using {fixed} instead")
+        return fixed
+    return url
+
+
+LMSTUDIO_URL = local_ai_url("LMSTUDIO_URL", "http://localhost:1234")
+OLLAMA_URL = local_ai_url("OLLAMA_URL", "http://localhost:11434")
 THEMEALDB_URL = os.getenv("THEMEALDB_URL", "https://www.themealdb.com/api/json/v1/1").rstrip("/")
 SPOONACULAR_URL = os.getenv("SPOONACULAR_URL", "https://api.spoonacular.com").rstrip("/")
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", Path(__file__).resolve().parent.parent))
@@ -85,6 +103,10 @@ class GenerateRequest(BaseModel):
     api_key: Optional[str] = None
     max_tokens: Optional[int] = 8000
     temperature: Optional[float] = None
+    # LM Studio only: a JSON schema the answer must follow (so a recipe always parses), and how much
+    # the model "thinks" first ("none" for recipes: faster, and the reply can't be eaten by thinking).
+    response_format: Optional[dict] = None
+    reasoning_effort: Optional[str] = None
 
 
 class WebRecipeRequest(BaseModel):
@@ -217,7 +239,24 @@ async def get_models(provider: str = "lmstudio"):
     data = res.json()
     if provider == "ollama":
         data = {"data": [{"id": m.get("name")} for m in data.get("models") or [] if m.get("name")]}
+    else:
+        data = await mark_loaded_models(data)
     return data
+
+
+async def mark_loaded_models(data: dict) -> dict:
+    """LM Studio with "load models on demand" lists every downloaded model in /v1/models. Its own
+    /api/v0/models says which are loaded: those are marked and come first, so "auto" picks the model
+    that's ready instead of whichever is listed first."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            res = await client.get(f"{LMSTUDIO_URL}/api/v0/models")
+        loaded = {m.get("id") for m in (res.json().get("data") or []) if m.get("state") == "loaded"} if res.status_code < 400 else set()
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return data
+    models = [dict(m, loaded=m.get("id") in loaded) for m in data.get("data") or [] if isinstance(m, dict)]
+    models.sort(key=lambda m: not m["loaded"])  # stable: loaded first, otherwise LM Studio's order
+    return dict(data, data=models)
 
 
 @app.post("/api/generate")
@@ -233,6 +272,11 @@ async def call_provider(req: GenerateRequest) -> dict:
         url = f"{base}/v1/chat/completions"
         headers = {"Content-Type": "application/json"}
         body = {"model": req.model, "messages": req.messages, "max_tokens": req.max_tokens}
+        if req.provider == "lmstudio":
+            if isinstance(req.response_format, dict) and req.response_format.get("type") in ("json_schema", "json_object", "text"):
+                body["response_format"] = req.response_format
+            if req.reasoning_effort in ("none", "low", "medium", "high"):
+                body["reasoning_effort"] = req.reasoning_effort
     elif req.provider == "openai":
         key = req.api_key or store.secret("openai_api_key") or os.getenv("OPENAI_API_KEY")
         if not key:

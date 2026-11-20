@@ -265,6 +265,32 @@ step ::= "\"" [^"\\\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F] [^"\\\x7F\x00-\x1F]{10,
 int ::= "0" | [1-9] [0-9]{0,3}
 ws ::= [ \n]{0,2}`;
 function mealGrammar(servings) { return 'root ::= meal\n' + mealRule(servings) + GBNF_COMMON; }
+// The same recipe shape for a model on the PC (LM Studio), as a JSON schema: the answer always parses,
+// has 3+ ingredients and steps, and whole-number nutrition in sane ranges (a loose number field lets a
+// model ramble digits: "calories": 28504329.18). Roomier than the phone's limits; a text that reaches
+// its limit is flagged (allProblems) and the meal made again.
+const PC_LIMITS = { nameChars: 80, itemChars: 90, minItems: 3, maxItems: 16, stepChars: 320, minSteps: 3, maxSteps: 10 };
+const PC_MEAL_TOKENS = 3500;
+function mealSchema(servings) {
+    const n = Math.max(1, Math.min(12, Math.round(Number(servings) || 1)));
+    const P = PC_LIMITS;
+    const text = (min, max) => ({ type: 'string', minLength: min, maxLength: max });
+    const int = (min, max) => ({ type: 'integer', minimum: min, maximum: max });
+    return { type: 'json_schema', json_schema: { name: 'meal', strict: true, schema: {
+        type: 'object',
+        properties: {
+            name: text(3, P.nameChars),
+            servings: int(n, n),
+            ingredients: { type: 'array', items: text(3, P.itemChars), minItems: P.minItems, maxItems: P.maxItems },
+            steps: { type: 'array', items: text(12, P.stepChars), minItems: P.minSteps, maxItems: P.maxSteps },
+            time_minutes: int(1, 600),
+            nutrition: { type: 'object', properties: { calories: int(0, 3000), protein_g: int(0, 300), carbs_g: int(0, 500), fat_g: int(0, 300) },
+                required: ['calories', 'protein_g', 'carbs_g', 'fat_g'], additionalProperties: false },
+        },
+        required: ['name', 'servings', 'ingredients', 'steps', 'time_minutes', 'nutrition'],
+        additionalProperties: false,
+    } } };
+}
 // Chat changes on the phone: one meal per answer, so it fits the phone's memory (4096 tokens) with the plan in the prompt.
 const EDIT_TOKENS = MEAL_TOKENS + 100;
 function editGrammar(servings) {
@@ -364,8 +390,9 @@ function allProblems(meal, type, earlier, limited, limits) {
     const slot = Planner && Planner.slotProblem && PLAN_MEALS.indexOf(type) >= 0 ? Planner.slotProblem(meal, type, limits || slotLimitsFor(type, null)) : '';
     if (slot) out.push(slot);
     if (limited) {
-        (meal.steps || []).forEach((s, i) => { if (String(s).length >= L.stepChars) out.push(`step ${i + 1} hit the length limit (cut off?)`); });
-        meal.ingredients.forEach(s => { if (String(s).length >= L.itemChars) out.push(`"${s}" hit the length limit (cut off?)`); });
+        const lim = limited === true ? L : limited;
+        (meal.steps || []).forEach((s, i) => { if (String(s).length >= lim.stepChars) out.push(`step ${i + 1} hit the length limit (cut off?)`); });
+        meal.ingredients.forEach(s => { if (String(s).length >= lim.itemChars) out.push(`"${s}" hit the length limit (cut off?)`); });
     }
     const repeat = (earlier || []).find(n => sameDish(n, meal.name));
     if (repeat) out.push(`same dish as "${repeat}"`);
@@ -425,7 +452,7 @@ async function makeMeal(job, run, h) {
         attempts++;
         const ask = job.ask + feedback;
         const text = await run([{ role: 'system', content: job.system }, { role: 'user', content: ask }],
-            { grammar: job.grammar, maxTokens: MEAL_TOKENS, id: `${job.id || 'meal'}-${attempt}` });
+            { grammar: job.grammar, schema: job.schema, maxTokens: job.schema ? PC_MEAL_TOKENS : MEAL_TOKENS, id: `${job.id || 'meal'}-${attempt}` });
         if (text == null) return null;
         let meal = null;
         try { meal = (typeof parseLLMJSON === 'function' ? parseLLMJSON : require('./json-repair.js').parseLLMJSON)(text); } catch (e) { meal = null; }
@@ -437,7 +464,7 @@ async function makeMeal(job, run, h) {
             repairs = repairMeal(meal, job.type, job);
             if (repairs.length) logPlan(`${job.label || job.type}: fixed in code`, repairs);
         }
-        const problems = allProblems(meal, job.type, job.earlier, !!job.grammar, job.limits);
+        const problems = allProblems(meal, job.type, job.earlier, job.grammar ? L : job.schema ? PC_LIMITS : null, job.limits);
         const hard = hardProblems(problems);
         if (firstProblems == null) firstProblems = problems;
         const score = mealScore(meal, hard) + (problems.length - hard.length) * 0.01;
@@ -813,6 +840,7 @@ async function generatePlanOnDevice(messages, hooks, state, run) {
     const servings = servingsWanted();
     const system = mealSystem(servings);
     const grammar = onPhone ? mealGrammar(servings) : null;
+    const schema = onPhone ? null : mealSchema(servings);
     const usedNames = extra => st.days.reduce((all, day) => all.concat(PLAN_MEALS.map(t => day && day[t] && day[t].name).filter(Boolean)), []).concat(extra || []);
 
     for (let d = st.days.length; d < h.totalDays; d++) {
@@ -829,7 +857,7 @@ async function generatePlanOnDevice(messages, hooks, state, run) {
             const todays = PLAN_MEALS.map(t => day[t] && day[t].name).filter(Boolean);
             const ask = mealAsk({ type, d, cuisine, recent: usedNames(todays).slice(-4), conversation });
             stat.promptChars = Math.max(stat.promptChars, system.length + ask.length);
-            const r = await makeMeal({ type, system, ask, grammar, earlier: usedNames(todays), id: `${d}-${type}`, label: `Day ${d + 1} ${type}`, limits: slotLimitsFor(type, d) }, run,
+            const r = await makeMeal({ type, system, ask, grammar, schema, earlier: usedNames(todays), id: `${d}-${type}`, label: `Day ${d + 1} ${type}`, limits: slotLimitsFor(type, d) }, run,
                 { onAttempt: a => h.onMeal(d, type, a), isCancelled: h.isCancelled });
             if (!r) break;   // cancelled
             if (!r.meal) throw new Error(`The AI couldn't write Day ${d + 1} ${type} (${r.problems.slice(0, 2).join('; ')}). Try again, or try another model.`);
@@ -1720,5 +1748,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { DESCRIBE_GRAMMAR, describeFromRecipe, descriptionProblem, recipeFacts, repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
+    module.exports = { mealSchema, PC_LIMITS, PC_MEAL_TOKENS, DESCRIBE_GRAMMAR, describeFromRecipe, descriptionProblem, recipeFacts, repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }
