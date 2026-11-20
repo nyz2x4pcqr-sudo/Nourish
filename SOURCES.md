@@ -13,27 +13,33 @@ At plan time Nourish reads only the few pages a plan needs, at most 4 at a time 
 
 ## Used (no key needed)
 
-| Site | Kind | Lighter cooking | Lists nutrition | Found by |
-|---|---|---|---|---|
-| [Skinnytaste](https://skinnytaste.com) | Healthy | yes | yes | site search |
-| [Minimalist Baker](https://minimalistbaker.com) | Healthy | yes | yes | site search |
-| [Love and Lemons](https://loveandlemons.com) | Healthy | yes | yes | site search |
-| [Well Plated](https://wellplated.com) | Healthy | yes | yes | site search |
-| [RecipeTin Eats](https://recipetineats.com) | General |  | yes | site search |
-| [The Healthy Maven](https://thehealthymaven.com) | Healthy | yes | yes | site search |
-| [Cafe Delites](https://cafedelites.com) | General |  | yes | site search |
-| [Seonkyoung Longest](https://seonkyounglongest.com) | World cuisines |  | yes | site search |
-| [Swasthi's Indian Healthy Recipes](https://indianhealthyrecipes.com) | World cuisines | yes | yes | category pages |
-| [BBC Good Food](https://bbcgoodfood.com) | General | yes | yes | category pages, feed |
-| [olive magazine](https://olivemagazine.com) | General |  |  | category pages, feed |
-| [Jamie Oliver](https://jamieoliver.com) | General |  |  | category pages |
-| [SBS Food](https://sbs.com.au) | World cuisines |  |  | category pages |
-| [British Heart Foundation](https://bhf.org.uk) | Public health | yes | yes | recipe sitemap |
-| [Diabetes UK](https://diabetes.org.uk) | Public health | yes | yes | category pages |
-| [Diabetes Food Hub](https://diabetesfoodhub.org) | Public health | yes | yes | category pages |
-| [BBC Food](https://bbc.co.uk) | General |  |  | recipe sitemap |
-| [TheMealDB](https://www.themealdb.com) | Recipe API | | | API |
-| Your recipe library | Your own files and books | | | folder |
+Since 0.1.17 each site has a **tier**. Trusted sites are popular, free, well-tested and flavour-focused: they are searched first, get twice the pages, and their recipes count for more in plans. Plain sites (public-health sites cook without salt and have no ratings; SBS Food and TheMealDB are a random mix) are searched last. Within any site, recipes with many high star ratings, real seasoning and familiar dishes come first (planner.js `quality`).
+
+| Site | Kind | Tier | Lighter cooking | Lists nutrition | Found by |
+|---|---|---|---|---|---|
+| [Minimalist Baker](https://minimalistbaker.com) | Healthy | **Trusted** (searched first) | yes | yes | site search |
+| [Love and Lemons](https://loveandlemons.com) | Healthy | **Trusted** (searched first) | yes | yes | site search |
+| [RecipeTin Eats](https://recipetineats.com) | General | **Trusted** (searched first) |  | yes | site search |
+| [Cafe Delites](https://cafedelites.com) | General | **Trusted** (searched first) |  | yes | site search |
+| [Seonkyoung Longest](https://seonkyounglongest.com) | World cuisines | **Trusted** (searched first) |  | yes | site search |
+| [Swasthi's Indian Healthy Recipes](https://indianhealthyrecipes.com) | World cuisines | **Trusted** (searched first) | yes | yes | category pages |
+| [BBC Good Food](https://bbcgoodfood.com) | General | **Trusted** (searched first) | yes | yes | category pages, feed |
+| [Jamie Oliver](https://jamieoliver.com) | General | **Trusted** (searched first) |  |  | category pages |
+| [Kalyn's Kitchen](https://kalynskitchen.com) | Healthy | **Trusted** (searched first) | yes | yes | site search |
+| [iFoodReal](https://ifoodreal.com) | Healthy | **Trusted** (searched first) | yes | yes | recipe sitemap |
+| [Chef Savvy](https://chefsavvy.com) | General | **Trusted** (searched first) |  | yes | recipe sitemap |
+| [olive magazine](https://olivemagazine.com) | General | Standard |  |  | category pages, feed |
+| [BBC Food](https://bbc.co.uk) | General | Standard |  |  | recipe sitemap |
+| [The Girl on Bloor](https://thegirlonbloor.com) | Healthy | Standard | yes | yes | site search |
+| [Running on Real Food](https://runningonrealfood.com) | Healthy | Standard | yes | yes | site search |
+| [Gimme Delicious](https://gimmedelicious.com) | General | Standard |  | yes | site search |
+| [Pickled Plum](https://pickledplum.com) | World cuisines | Standard |  |  | recipe sitemap |
+| [SBS Food](https://sbs.com.au) | World cuisines | Plain (searched last) |  |  | category pages |
+| [British Heart Foundation](https://bhf.org.uk) | Public health | Plain (searched last) | yes | yes | recipe sitemap |
+| [Diabetes UK](https://diabetes.org.uk) | Public health | Plain (searched last) | yes | yes | category pages |
+| [Diabetes Food Hub](https://diabetesfoodhub.org) | Public health | Plain (searched last) | yes | yes | category pages |
+| [TheMealDB](https://www.themealdb.com) | Recipe API | Plain (searched last) | | | API |
+| Your recipe library | Your own files and books | | | | folder |
 
 ## Optional (needs a free key)
 
@@ -47,19 +53,33 @@ The app lists these too, in Settings → Recipe sites → "Sites Nourish doesn't
 
 | Site | Kind | Why not |
 |---|---|---|
+| Skinnytaste (skinnytaste.com) | Healthy | its legal page (checked November 2026) says its content may not be used for automated aggregation without permission |
 | Budget Bytes (budgetbytes.com) | Healthy | refuses the app's searches and recipe pages (403), on phones and servers |
 | Cookie and Kate (cookieandkate.com) | Healthy | refuses the app's searches and recipe pages (403), on phones and servers |
+| Well Plated (wellplated.com) | Healthy | its terms (checked November 2026) forbid using its recipes with AI, and the chef in Nourish can read a planned recipe |
 | Ambitious Kitchen (ambitiouskitchen.com) | Healthy | refuses the app's recipe pages (403) |
 | Pinch of Yum (pinchofyum.com) | Healthy | refuses the app's recipe pages (405, a bot check) |
 | Hot Thai Kitchen (hot-thai-kitchen.com) | World cuisines | refuses the app's searches and recipe pages (403) |
 | Mexico in My Kitchen (mexicoinmykitchen.com) | World cuisines | refuses the app's recipe pages (403) |
 | The Mediterranean Dish (themediterraneandish.com) | World cuisines | refuses the app's recipe pages (403) |
 | FeelGoodFoodie (feelgoodfoodie.net) | Healthy | refuses the app's recipe pages (403); its 1.7 MB sitemap was downloaded on every plan for nothing |
+| The Healthy Maven (thehealthymaven.com) | Healthy | its policy (checked November 2026) says robots and data-gathering tools are expressly prohibited |
 | Spend With Pennies (spendwithpennies.com) | General | its robots.txt now asks robots not to read its pages (checked October 2026) |
 | Isabel Eats (isabeleats.com) | World cuisines | refuses the app's recipe pages (403) |
 | Gousto (gousto.co.uk) | Meal kits | its recipe lists are drawn by scripts in the browser: the pages have no recipe links to follow |
 | Heart & Stroke Foundation (heartandstroke.ca) | Public health | recipe category pages are missing (404) or have no recipe links |
 | Canada's Food Guide (food-guide.canada.ca) | Public health | its sitemap lists no recipe pages, and its recipe lists are drawn by scripts |
+| Once Upon a Chef (onceuponachef.com) | General | its policy forbids scraping and data extraction |
+| Primavera Kitchen (primaverakitchen.com) | Healthy | its terms forbid scraping and data harvesting |
+| Kimchimari (kimchimari.com) | World cuisines | its terms forbid automated systems using its content |
+| Eatwell101 (eatwell101.com) | General | its terms restrict automated access and scraping |
+| Natasha's Kitchen (natashaskitchen.com) | General | refuses automated requests (403) |
+| Damn Delicious (damndelicious.net) | General | refuses automated requests (403) |
+| Sweet Peas and Saffron (sweetpeasandsaffron.com) | Healthy | refuses automated requests (403) |
+| Rasa Malaysia (rasamalaysia.com) | World cuisines | refuses automated requests (403) |
+| Feasting at Home (feastingathome.com) | Healthy | refuses automated requests (403) |
+| Two Peas & Their Pod (twopeasandtheirpod.com) | General | refuses the app's recipe pages (403) |
+| Nora Cooks (noracooks.com) | Healthy | refuses the app's recipe pages (403) |
 | HelloFresh (hellofresh.com) | Meal kits | terms forbid robots and scrapers (section 16.7) |
 | EveryPlate (everyplate.com) | Meal kits | terms forbid robots and scrapers (same terms as HelloFresh) |
 | Green Chef (greenchef.com) | Meal kits | terms forbid robots and scrapers (same terms as HelloFresh) |

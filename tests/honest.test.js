@@ -31,8 +31,10 @@ test("days aren't forced to the target: real totals, close to it, and not all th
             const t = PL.dayTotals(d).kcal;
             totals.push([t, kcal]);
             assert.ok(Math.abs(t - kcal) / kcal <= 0.1, `${t} is more than 10% from ${kcal}`);
-            // The day's number is the sum of its meals, each worked out from its own amounts.
-            assert.equal(t, PL.MEALS.reduce((s, m) => s + d[m].nutrition.calories, 0));
+            // The day's number is the sum of what's eaten (its meals and any protein extra), each worked
+            // out from its own amounts.
+            assert.equal(t, PL.MEALS.reduce((s, m) => s + d[m].nutrition.calories, 0) + (d.snacks || []).reduce((s, x) => s + x.nutrition.calories, 0));
+            assert.ok((d.snacks || []).every(x => x.protein_extra), 'no snacks were asked for');
         });
     }
     assert.ok(totals.length >= 4);

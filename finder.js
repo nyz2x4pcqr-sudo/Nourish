@@ -108,6 +108,8 @@
             source_name: r.source_name || (source && source.name) || undefined,
             source_id: (source && source.id) || r.source_id || undefined,
             healthy: !!(source && source.healthy) || undefined,
+            // How the source ranks (sources.js tier: trusted, flavor-focused sites count for a recipe).
+            source_tier: (source && source.tier) || r.source_tier || undefined,
             library_path: r.library_path || undefined,
             // A recipe from the person's books (recipedb.js) keeps where it came from.
             from_book: r.from_book || undefined,
@@ -488,7 +490,8 @@
         if (!st.at || st.at < ctx.now() - 30 * DAY || !Array.isArray(st.maps)) {
             const res = await getPage(ctx, site.sitemap, false);
             const found = locs(res.body);
-            const maps = found.filter(u => /\.xml/i.test(u));
+            // Only the parts that list recipes (sources.js `parts`, e.g. the posts, not pages or categories).
+            const maps = found.filter(u => /\.xml/i.test(u) && (!site.parts || new RegExp(site.parts, 'i').test(u)));
             // Recipe parts first, newest-looking last parts first (they're the recently added recipes).
             maps.sort((a, b) => (/recipe/i.test(b) ? 1 : 0) - (/recipe/i.test(a) ? 1 : 0));
             st = { at: ctx.now(), maps: maps.slice(0, 60), next: 0, origin: new URL(res.url || site.sitemap).origin, paths: [...new Set((st.paths || []).concat(paths(found)))] };
@@ -803,7 +806,9 @@
         ctx.seed = seed;
         sites = shuffle(sites, seed);
         // Healthier sites first when losing weight; sites with their own nutrition next; your own sites first of all.
-        sites.sort((a, b) => (b.custom ? 2 : 0) - (a.custom ? 2 : 0) + (goal === 'Cut' ? (b.healthy ? 1 : 0) - (a.healthy ? 1 : 0) : 0) + ((b.nutrition ? 0.5 : 0) - (a.nutrition ? 0.5 : 0)));
+        // Trusted, flavor-focused sites first (0.1.17), plain or random ones last.
+        const tierRank = t => (t === 'trusted' ? 3 : t === 'low' ? -3 : 0);
+        sites.sort((a, b) => (b.custom ? 2 : 0) - (a.custom ? 2 : 0) + tierRank(b.tier) - tierRank(a.tier) + (goal === 'Cut' ? (b.healthy ? 1 : 0) - (a.healthy ? 1 : 0) : 0) + ((b.nutrition ? 0.5 : 0) - (a.nutrition ? 0.5 : 0)));
         const searchCache = ctx.cache.get(CACHE.searches) || {};
         // How deep each search has been read (page 1, 2, 3…), so the library keeps finding new
         // recipes instead of the same first page of results every time.
@@ -815,6 +820,8 @@
         const turn = { breakfast: 0, lunch: 0, dinner: 0 };
         const sitePages = {};
         const fairPages = Math.max(4, Math.ceil(limits.pages / Math.max(1, sites.length)) * 2);
+        // A trusted site may give twice its share of pages, a plain one half.
+        const pagesFor = s => (s.tier === 'trusted' ? fairPages * 2 : s.tier === 'low' ? Math.max(2, Math.ceil(fairPages / 2)) : fairPages);
         let searches = 0;
         let pages = 0;
         const usableSite = s => siteOk(ctx, s.id) && !ctx.skip.has(s.id);
@@ -831,7 +838,7 @@
             let fresh = false;
             if (!meals.length && searches < freshSearches) { meals = MEALS.filter(m => want(m)).sort((x, y) => spent[x] - spent[y]); fresh = true; }
             for (const meal of meals) {
-                const suited = sites.filter(s => usableSite(s) && siteSuits(s, meal, '') && (sitePages[s.id] || 0) < fairPages);
+                const suited = sites.filter(s => usableSite(s) && siteSuits(s, meal, '') && (sitePages[s.id] || 0) < pagesFor(s));
                 for (let k = 0; k < suited.length; k++) {
                     const site = suited[(turn[meal]++) % suited.length];
                     // Each site starts at a different word, so the sites together cover more dishes.
@@ -897,7 +904,7 @@
                     const good = list.filter(l => goodLink(l, t.site, t.meal, ctx)).map(l => Object.assign({}, l, { url: String(l.url).split('#')[0] })).filter(l => !seenLinks.has(l.url));
                     count(ctx, t.site.id, 'links');
                     for (const l of good.slice(0, o.grow ? 6 : 4)) {
-                        if (ctx.timeUp() || pages >= limits.pages || (short(t.meal) <= 0 && !t.fresh) || !usableSite(t.site) || (sitePages[t.site.id] || 0) >= fairPages) break;
+                        if (ctx.timeUp() || pages >= limits.pages || (short(t.meal) <= 0 && !t.fresh) || !usableSite(t.site) || (sitePages[t.site.id] || 0) >= pagesFor(t.site)) break;
                         seenLinks.add(l.url);
                         await readPage(l, t.site, t.meal);
                     }

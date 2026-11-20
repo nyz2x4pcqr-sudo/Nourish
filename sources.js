@@ -11,6 +11,8 @@
 // nutrition: the site publishes nutrition per serving (cross-checked against our own numbers).
 // meals: the meals a site has enough of (searched only for those); veg: a vegetarian site (no meat
 // searches); terms: the site's own search words per meal. Checked with tools/sites-diagnose.js.
+// tier: 'trusted' = a popular, well-tested, flavor-focused site (searched first, counts for a recipe);
+// 'low' = fine but plain or random (public-health sites cook without salt, few ratings): searched last.
 // status: 'ok' = checked (robots.txt, terms, recipe data) and used by default; 'dropped' = kept here
 // with the reason, so it isn't added again by mistake. See SOURCES.md for the checks.
 (function (root) {
@@ -18,7 +20,7 @@
 
     const SOURCES = [
         // --- APIs ---
-        { id: 'themealdb', name: 'TheMealDB', kind: 'api', group: 'api', status: 'ok', note: 'Free recipe database, no key needed.' },
+        { id: 'themealdb', tier: 'low', name: 'TheMealDB', kind: 'api', group: 'api', status: 'ok', note: 'Free recipe database, no key needed.' },
         { id: 'spoonacular', name: 'Spoonacular', kind: 'api', group: 'api', status: 'ok', needsKey: 'spoonacular_api_key', nutrition: true, note: 'Finds recipes by protein and calories. Needs a free key (50 points a day).' },
         { id: 'fatsecret', name: 'FatSecret recipes', kind: 'api', group: 'api', status: 'ok', needsKey: 'fatsecret_key', nutrition: true, note: 'Recipes with their own nutrition, searched by protein. Needs a free key.' },
 
@@ -32,48 +34,48 @@
     // Sites, filled in from the checks (see SOURCES.md). Kept as a separate list so the checks can
     // read it too (tools/sources-check.js).
     const SITES = [
-        { id: 'skinnytaste', name: 'Skinnytaste', domain: 'skinnytaste.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
+        { id: 'skinnytaste', name: 'Skinnytaste', domain: 'skinnytaste.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'its legal page (checked November 2026) says its content may not be used for automated aggregation without permission' },
         { id: 'budgetbytes', name: 'Budget Bytes', domain: 'budgetbytes.com', group: 'healthy', search: 'wp', nutrition: true, status: 'dropped', why: 'refuses the app\'s searches and recipe pages (403), on phones and servers' },
         { id: 'cookieandkate', name: 'Cookie and Kate', domain: 'cookieandkate.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'refuses the app\'s searches and recipe pages (403), on phones and servers' },
-        { id: 'minimalistbaker', name: 'Minimalist Baker', domain: 'minimalistbaker.com', group: 'healthy', search: 'wp', veg: true, healthy: true, nutrition: true, status: 'ok' },
-        { id: 'loveandlemons', name: 'Love and Lemons', domain: 'loveandlemons.com', group: 'healthy', search: 'wp', veg: true, healthy: true, nutrition: true, status: 'ok' },
-        { id: 'wellplated', name: 'Well Plated', domain: 'wellplated.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
+        { id: 'minimalistbaker', tier: 'trusted', name: 'Minimalist Baker', domain: 'minimalistbaker.com', group: 'healthy', search: 'wp', veg: true, healthy: true, nutrition: true, status: 'ok' },
+        { id: 'loveandlemons', tier: 'trusted', name: 'Love and Lemons', domain: 'loveandlemons.com', group: 'healthy', search: 'wp', veg: true, healthy: true, nutrition: true, status: 'ok' },
+        { id: 'wellplated', name: 'Well Plated', domain: 'wellplated.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'its terms (checked November 2026) forbid using its recipes with AI, and the chef in Nourish can read a planned recipe' },
         { id: 'ambitiouskitchen', name: 'Ambitious Kitchen', domain: 'ambitiouskitchen.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
         { id: 'pinchofyum', name: 'Pinch of Yum', domain: 'pinchofyum.com', group: 'healthy', search: 'wp', status: 'dropped', why: 'refuses the app\'s recipe pages (405, a bot check)' },
-        { id: 'recipetineats', name: 'RecipeTin Eats', domain: 'recipetineats.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
+        { id: 'recipetineats', tier: 'trusted', name: 'RecipeTin Eats', domain: 'recipetineats.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
         { id: 'hotthaikitchen', name: 'Hot Thai Kitchen', domain: 'hot-thai-kitchen.com', group: 'world', search: 'wp', status: 'dropped', why: 'refuses the app\'s searches and recipe pages (403)' },
         { id: 'mexicoinmykitchen', name: 'Mexico in My Kitchen', domain: 'mexicoinmykitchen.com', group: 'world', search: 'wp', nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
         { id: 'mediterraneandish', name: 'The Mediterranean Dish', domain: 'themediterraneandish.com', group: 'world', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
         { id: 'feelgoodfoodie', name: 'FeelGoodFoodie', domain: 'feelgoodfoodie.net', group: 'healthy', search: 'sitemap', sitemap: 'https://feelgoodfoodie.net/recipe-sitemap.xml', healthy: true, nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403); its 1.7 MB sitemap was downloaded on every plan for nothing' },
-        { id: 'thehealthymaven', name: 'The Healthy Maven', domain: 'thehealthymaven.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
-        { id: 'cafedelites', name: 'Cafe Delites', domain: 'cafedelites.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
+        { id: 'thehealthymaven', name: 'The Healthy Maven', domain: 'thehealthymaven.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'dropped', why: 'its policy (checked November 2026) says robots and data-gathering tools are expressly prohibited' },
+        { id: 'cafedelites', tier: 'trusted', name: 'Cafe Delites', domain: 'cafedelites.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
         { id: 'spendwithpennies', name: 'Spend With Pennies', domain: 'spendwithpennies.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'dropped', why: 'its robots.txt now asks robots not to read its pages (checked October 2026)' },
-        { id: 'seonkyoung', name: 'Seonkyoung Longest', domain: 'seonkyounglongest.com', group: 'world', search: 'wp', terms: { breakfast: ['egg', 'porridge', 'toast'], lunch: ['rice bowl', 'noodles', 'kimbap', 'salad', 'soup'], dinner: ['chicken', 'beef', 'pork', 'tofu', 'stir fry', 'noodles'] }, nutrition: true, status: 'ok' },
+        { id: 'seonkyoung', tier: 'trusted', name: 'Seonkyoung Longest', domain: 'seonkyounglongest.com', group: 'world', search: 'wp', terms: { breakfast: ['egg', 'porridge', 'toast'], lunch: ['rice bowl', 'noodles', 'kimbap', 'salad', 'soup'], dinner: ['chicken', 'beef', 'pork', 'tofu', 'stir fry', 'noodles'] }, nutrition: true, status: 'ok' },
         { id: 'isabeleats', name: 'Isabel Eats', domain: 'isabeleats.com', group: 'world', search: 'wp', nutrition: true, status: 'dropped', why: 'refuses the app\'s recipe pages (403)' },
         // --- Checked for 0.2 with the new ways of finding recipes (search pages, category pages, sitemaps, feeds) ---
-        { id: 'swasthi', name: 'Swasthi\'s Indian Healthy Recipes', domain: 'indianhealthyrecipes.com', group: 'world', find: ['category'], healthy: true, nutrition: true, status: 'ok', meals: ['breakfast'],   // its lunch and dinner list pages have moved (404)
+        { id: 'swasthi', tier: 'trusted', name: 'Swasthi\'s Indian Healthy Recipes', domain: 'indianhealthyrecipes.com', group: 'world', find: ['category'], healthy: true, nutrition: true, status: 'ok', meals: ['breakfast'],   // its lunch and dinner list pages have moved (404)
             categories: { breakfast: ['/recipes/indian-breakfast/', '/recipes/indian-breakfast/page/{page}/'], lunch: ['/recipes/rice/', '/recipes/dal/'], dinner: ['/recipes/curry/', '/recipes/chicken/', '/recipes/paneer/'] },
             recipePath: '^/(?!recipes/|category/|tag/|page/|about|contact)[a-z0-9-]{8,}/$' },
-        { id: 'bbcgoodfood', name: 'BBC Good Food', domain: 'bbcgoodfood.com', group: 'general', find: ['category', 'rss'], healthy: true, nutrition: true, status: 'ok',
+        { id: 'bbcgoodfood', tier: 'trusted', name: 'BBC Good Food', domain: 'bbcgoodfood.com', group: 'general', find: ['category', 'rss'], healthy: true, nutrition: true, status: 'ok',
             categories: { breakfast: ['/recipes/collection/healthy-breakfast-recipes', '/recipes/collection/breakfast-recipes'], lunch: ['/recipes/collection/healthy-lunch-recipes', '/recipes/collection/lunch-recipes'],
                 dinner: ['/recipes/collection/healthy-dinner-recipes', '/recipes/collection/quick-healthy-dinner-recipes', '/recipes/collection/family-meal-recipes'] },
             feed: 'https://www.bbcgoodfood.com/feed', recipePath: '^/recipes/(?!collection|category)[a-z0-9-]+/?$' },
         { id: 'olivemagazine', name: 'olive magazine', domain: 'olivemagazine.com', group: 'general', find: ['category', 'rss'], status: 'ok',
             categories: { breakfast: ['/recipes/breakfast/', '/recipes/collection/best-ever-brunch-recipes/'], lunch: ['/recipes/collection/healthy-lunch-ideas/', '/recipes/collection/best-ever-salad-recipes/'], dinner: ['/recipes/collection/easy-30-minute-meals/', '/recipes/healthy/'] },
             feed: 'https://www.olivemagazine.com/feed', recipePath: '^/recipes/(?!collection/)[a-z-]+/[a-z0-9-]+/?$' },
-        { id: 'jamieoliver', name: 'Jamie Oliver', domain: 'jamieoliver.com', group: 'general', find: ['category'], status: 'ok',
+        { id: 'jamieoliver', tier: 'trusted', name: 'Jamie Oliver', domain: 'jamieoliver.com', group: 'general', find: ['category'], status: 'ok',
             categories: { breakfast: ['/recipes/course/breakfast-brunch/'], lunch: ['/recipes/course/quick-and-easy/', '/recipes/vegetables/salad/'], dinner: ['/recipes/course/mains/', '/recipes/chicken/'] },
             recipePath: '^/recipes/(?!course/|special-diets/|category/|family-favourites/|books/|tv/|collections?/)[a-z0-9-]+/[a-z0-9-]+/?$' },
-        { id: 'sbsfood', name: 'SBS Food', domain: 'sbs.com.au', group: 'world', find: ['category'], status: 'ok',
+        { id: 'sbsfood', tier: 'low', name: 'SBS Food', domain: 'sbs.com.au', group: 'world', find: ['category'], status: 'ok',
             categories: { any: ['https://www.sbs.com.au/food', 'https://www.sbs.com.au/food/recipes'] }, recipePath: '^/food/recipe/' },
         { id: 'gousto', name: 'Gousto', domain: 'gousto.co.uk', group: 'mealkit', find: ['category'], meals: ['lunch', 'dinner'], status: 'dropped', why: 'its recipe lists are drawn by scripts in the browser: the pages have no recipe links to follow',
             categories: { lunch: ['/cookbook/quick-and-easy-recipes', '/cookbook/healthy-recipes'], dinner: ['/cookbook/chicken-recipes', '/cookbook/vegetarian-recipes', '/cookbook/fish-recipes', '/cookbook/beef-recipes'] },
             recipePath: '^/cookbook/(recipes|[a-z-]+-recipes)/[a-z0-9-]+/?$' },
-        { id: 'bhf', name: 'British Heart Foundation', domain: 'bhf.org.uk', group: 'public-health', find: ['sitemap'], healthy: true, nutrition: true, status: 'ok',
+        { id: 'bhf', tier: 'low', name: 'British Heart Foundation', domain: 'bhf.org.uk', group: 'public-health', find: ['sitemap'], healthy: true, nutrition: true, status: 'ok',
             sitemap: 'https://www.bhf.org.uk/sitemap.xml', recipePath: '/recipe-finder/[a-z0-9-]+$' },
-        { id: 'diabetesuk', name: 'Diabetes UK', domain: 'diabetes.org.uk', group: 'public-health', find: ['category'], healthy: true, nutrition: true, status: 'ok',
+        { id: 'diabetesuk', tier: 'low', name: 'Diabetes UK', domain: 'diabetes.org.uk', group: 'public-health', find: ['category'], healthy: true, nutrition: true, status: 'ok',
             categories: { any: ['/living-with-diabetes/eating/recipes', '/living-with-diabetes/eating/recipes?page={page}'] }, recipePath: '/recipes/[a-z0-9-]+$' },
-        { id: 'diabetesfoodhub', name: 'Diabetes Food Hub', domain: 'diabetesfoodhub.org', group: 'public-health', find: ['category'], healthy: true, nutrition: true, status: 'ok',
+        { id: 'diabetesfoodhub', tier: 'low', name: 'Diabetes Food Hub', domain: 'diabetesfoodhub.org', group: 'public-health', find: ['category'], healthy: true, nutrition: true, status: 'ok',
             categories: { breakfast: ['/recipes/breakfast-and-brunch'], lunch: ['/recipes/salads', '/recipes/soups-stews'], dinner: ['/recipes/main-dishes', '/recipes/veggie-rich'] },
             recipePath: '^/recipes/(?!breakfast-and-brunch|breakfast$|lunch$|dinner$|quick-easy|kid-friendly|kidney-friendly|vegan-vegetarian|lower-carb|veggie-rich|budget-friendly|main-dishes|salads|soups-stews|snacks|desserts|side-dishes|beverages)[a-z0-9-]+$' },
         { id: 'heartandstroke', name: 'Heart & Stroke Foundation', domain: 'heartandstroke.ca', group: 'public-health', find: ['category'], healthy: true, status: 'dropped', why: 'recipe category pages are missing (404) or have no recipe links',
@@ -83,6 +85,26 @@
             sitemap: 'https://food-guide.canada.ca/sitemap.xml', recipePath: '^/en/recipes/[a-z0-9-]+/?$' },
         { id: 'bbcfood', name: 'BBC Food', domain: 'bbc.co.uk', group: 'general', find: ['sitemap'], status: 'ok',
             sitemap: 'https://www.bbc.co.uk/food/sitemap.xml', recipePath: '^/food/recipes/[a-z0-9_]+$' },
+        // --- Added for 0.1.17: popular, free, flavor-focused sites, checked November 2026 (robots.txt, terms, recipe data, ratings) ---
+        { id: 'kalynskitchen', tier: 'trusted', name: "Kalyn's Kitchen", domain: 'kalynskitchen.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
+        { id: 'ifoodreal', tier: 'trusted', name: 'iFoodReal', domain: 'ifoodreal.com', group: 'healthy', find: ['sitemap'], sitemap: 'https://ifoodreal.com/sitemap_index.xml', parts: 'post-sitemap', recipePath: '^/[a-z0-9-]{6,}/?$', healthy: true, nutrition: true, status: 'ok' },   // robots.txt asks robots to leave /wp-json/ and search alone: its sitemap is used instead
+        { id: 'chefsavvy', tier: 'trusted', name: 'Chef Savvy', domain: 'chefsavvy.com', group: 'general', find: ['sitemap'], sitemap: 'https://chefsavvy.com/sitemap_index.xml', parts: 'post-sitemap', recipePath: '^/[a-z0-9-]{6,}/?$', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
+        { id: 'thegirlonbloor', name: 'The Girl on Bloor', domain: 'thegirlonbloor.com', group: 'healthy', search: 'wp', healthy: true, nutrition: true, status: 'ok' },
+        { id: 'runningonrealfood', name: 'Running on Real Food', domain: 'runningonrealfood.com', group: 'healthy', search: 'wp', veg: true, healthy: true, nutrition: true, status: 'ok' },
+        { id: 'gimmedelicious', name: 'Gimme Delicious', domain: 'gimmedelicious.com', group: 'general', search: 'wp', meals: ['lunch', 'dinner'], nutrition: true, status: 'ok' },
+        { id: 'pickledplum', name: 'Pickled Plum', domain: 'pickledplum.com', group: 'world', find: ['sitemap'], sitemap: 'https://pickledplum.com/sitemap_index.xml', parts: 'post-sitemap', recipePath: '^/[a-z0-9-]{6,}/?$', meals: ['lunch', 'dinner'], status: 'ok' },
+        // Checked for 0.1.17 and left out:
+        { id: 'onceuponachef', name: 'Once Upon a Chef', domain: 'onceuponachef.com', group: 'general', status: 'dropped', why: 'its policy forbids scraping and data extraction' },
+        { id: 'primaverakitchen', name: 'Primavera Kitchen', domain: 'primaverakitchen.com', group: 'healthy', status: 'dropped', why: 'its terms forbid scraping and data harvesting' },
+        { id: 'kimchimari', name: 'Kimchimari', domain: 'kimchimari.com', group: 'world', status: 'dropped', why: 'its terms forbid automated systems using its content' },
+        { id: 'eatwell101', name: 'Eatwell101', domain: 'eatwell101.com', group: 'general', status: 'dropped', why: 'its terms restrict automated access and scraping' },
+        { id: 'natashaskitchen', name: "Natasha's Kitchen", domain: 'natashaskitchen.com', group: 'general', status: 'dropped', why: 'refuses automated requests (403)' },
+        { id: 'damndelicious', name: 'Damn Delicious', domain: 'damndelicious.net', group: 'general', status: 'dropped', why: 'refuses automated requests (403)' },
+        { id: 'sweetpeasandsaffron', name: 'Sweet Peas and Saffron', domain: 'sweetpeasandsaffron.com', group: 'healthy', status: 'dropped', why: 'refuses automated requests (403)' },
+        { id: 'rasamalaysia', name: 'Rasa Malaysia', domain: 'rasamalaysia.com', group: 'world', status: 'dropped', why: 'refuses automated requests (403)' },
+        { id: 'feastingathome', name: 'Feasting at Home', domain: 'feastingathome.com', group: 'healthy', status: 'dropped', why: 'refuses automated requests (403)' },
+        { id: 'twopeasandtheirpod', name: 'Two Peas & Their Pod', domain: 'twopeasandtheirpod.com', group: 'general', status: 'dropped', why: "refuses the app's recipe pages (403)" },
+        { id: 'noracooks', name: 'Nora Cooks', domain: 'noracooks.com', group: 'healthy', status: 'dropped', why: "refuses the app's recipe pages (403)" },
         { id: 'hellofresh', name: 'HelloFresh', domain: 'hellofresh.com', group: 'mealkit', status: 'dropped', why: 'terms forbid robots and scrapers (section 16.7)' },
         { id: 'everyplate', name: 'EveryPlate', domain: 'everyplate.com', group: 'mealkit', status: 'dropped', why: 'terms forbid robots and scrapers (same terms as HelloFresh)' },
         { id: 'greenchef', name: 'Green Chef', domain: 'greenchef.com', group: 'mealkit', status: 'dropped', why: 'terms forbid robots and scrapers (same terms as HelloFresh)' },

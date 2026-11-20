@@ -2536,7 +2536,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
             h('button', { type: 'button', class: 'btn btn-secondary danger', onclick: () => { removeFromCookbook(cookbookId); closeRecipeSheet(); } }, icon('i-trash'), 'Remove')) : null,
         bookRecipeActions(meal, mealType, dayIndex, cookbookId),
         dayIndex != null && !cookbookId ? eatenControl(dayIndex, mealType) : null,
-        dayIndex != null && !cookbookId ? rateRow(dayIndex, mealType, meal) : null,
+        dayIndex != null && !cookbookId ? rateRow(dayIndex, mealType, meal) : dishRateRow(meal),
         cookbookId ? null : h('div', { class: 'recipe-actions' },
             dayIndex != null && !isSnackSlot(mealType) ? h('button', {
                 type: 'button', class: 'btn btn-secondary', disabled: !!planJob,
@@ -2548,6 +2548,7 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
         ingredients.length ? h('div', { class: 'recipe-section' },
             h('div', { class: 'recipe-section-title' }, 'Ingredients', h('small', { text: meal.servings ? `${ingredients.length} · for ${meal.servings}` : String(ingredients.length) })),
             h('div', { class: 'recipe-ingredients' }, ingredients.map((line, idx) => ingredientRow(line, idx)))) : null,
+        flavorBoostPanel(meal, mealType, dayIndex, cookbookId),
         meal.steps.length ? h('div', { class: 'recipe-section' },
             h('div', { class: 'recipe-section-title' }, 'Method', h('small', { text: `${meal.steps.length} steps` })),
             h('div', { class: 'recipe-steps-head' },
@@ -2890,6 +2891,58 @@ function rateRow(dayIndex, mealType, meal, { compact = false } = {}) {
     return h('div', { class: 'rate-row' + (compact ? ' compact' : '') },
         h('div', { class: 'rate-head' }, h('span', { class: 'rate-q', text: r && (r.rating || tags.length) ? 'Thanks, noted.' : 'How was it?' }), thumb('up', 'Liked it', '👍'), thumb('down', "Didn't like it", '👎'), dismiss),
         (!compact || r) ? h('div', { class: 'rate-tags' }, ['loved', 'too_bland', 'too_much_work', 'too_small'].map(tag)) : null);
+}
+// "Make it tastier": near-zero-calorie seasoning for a plain recipe (planner.js flavorBoosts). Each
+// suggestion shows its calories; "Add" puts it in the recipe (a line and a step) and counts them.
+function boostNutrition(line, servings) {
+    try { return NourishNutrition.calculate([line], Math.max(1, Number(servings) || 1)).nutrition; } catch (e) { return { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }; }
+}
+function addBoost(meal, line, mealType, dayIndex, cookbookId) {
+    const targets = [meal];
+    if (cookbookId) { const e = cookbook.recipes.find(x => x.id === cookbookId); if (e && e.recipe && e.recipe !== meal) targets.push(e.recipe); }
+    targets.forEach(m => {
+        if ((m.ingredients || []).indexOf(line) >= 0) return;
+        const add = boostNutrition(line, m.servings);
+        m.ingredients = (m.ingredients || []).concat([line]);
+        m.flavor_boosts = (m.flavor_boosts || []).concat([line]);
+        if (m.nutrition) ['calories', 'protein_g', 'carbs_g', 'fat_g'].forEach(k => { if (m.nutrition[k] != null) m.nutrition[k] = Math.round((Number(m.nutrition[k]) || 0) + (Number(add[k]) || 0)); });
+        const steps = (m.steps || []).slice();
+        const tip = `Stir in or sprinkle over the ${line.replace(/^[\d/ .]+(tsp|tbsp|cups?|cloves?)?\s*/, '').replace(/,.*$/, '')} just before serving.`;
+        if (!steps.some(x => x === tip)) steps.splice(Math.max(0, steps.length - 1), 0, tip);
+        m.steps = steps;
+    });
+    if (dayIndex != null) changed('plan');
+    if (cookbookId) changed('cookbook');
+    showToast(`Added ${line}`, false);
+    openRecipeSheet(mealType, meal, dayIndex, { cookbookId });
+}
+function flavorBoostPanel(meal, mealType, dayIndex, cookbookId) {
+    if (typeof NourishPlanner === 'undefined' || !NourishPlanner.flavorBoosts || !(meal.ingredients || []).length || meal.eating_out) return null;
+    const boosts = NourishPlanner.flavorBoosts(meal, 3);
+    const added = meal.flavor_boosts || [];
+    if (!boosts.length && !added.length) return null;
+    return h('div', { class: 'recipe-section boost-panel' },
+        h('div', { class: 'recipe-section-title' }, 'Make it tastier', h('small', { text: 'almost no calories' })),
+        h('p', { class: 'recipe-steps-hint', text: added.length ? `Added: ${added.join(', ')}. Its calories are counted above.` : 'This one is lightly seasoned. These add flavour for almost no calories:' }),
+        boosts.length ? h('div', { class: 'boost-list' }, boosts.map(b => {
+            const kcal = Math.round(boostNutrition(b.line, meal.servings).calories || 0);
+            return h('div', { class: 'boost-row' },
+                h('span', { class: 'boost-line', text: b.line }),
+                h('span', { class: 'boost-kcal', text: kcal <= 0 ? '0 kcal' : `+${kcal} kcal` }),
+                h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => addBoost(meal, b.line, mealType, dayIndex, cookbookId) }, 'Add'));
+        })) : null);
+}
+// Thumbs up or down on any recipe (the Cookbook, the library, a recipe not in the plan): kept on
+// this device in the taste profile, and used when plans are made (a thumbs down keeps it out).
+function dishRateRow(meal) {
+    if (!taste.on || !meal || !meal.name) return null;
+    const key = `dish|${NourishTaste.dishName(meal.name)}`;
+    const r = NourishTaste.ratingOf(taste, key);
+    const set = v => { learn('rate', meal, { key, rating: r && r.rating === v ? '' : v, tags: [] }); if (openRecipe) openRecipeSheet(openRecipe.mealType, openRecipe.meal, openRecipe.dayIndex, { cookbookId: openRecipe.cookbookId }); };
+    const thumb = (v, label, glyph) => h('button', { type: 'button', class: 'rate-btn' + (r && r.rating === v ? ' on' : ''), 'aria-pressed': String(!!(r && r.rating === v)), 'aria-label': label, title: label, onclick: () => set(v) }, glyph);
+    return h('div', { class: 'rate-row' },
+        h('div', { class: 'rate-head' }, h('span', { class: 'rate-q', text: r && r.rating ? (r.rating === 'up' ? 'You like this one. It comes back more often.' : 'Noted: it stays out of your plans.') : 'Like this recipe?' }),
+            thumb('up', 'More like this', '👍'), thumb('down', 'Not for me', '👎')));
 }
 // On Today: the latest meal marked eaten that hasn't been rated (or waved away) gets the quick row.
 function rateTargetToday(dayIndex, day, entry) {
@@ -4063,7 +4116,9 @@ function tasteScorer() {
     const prof = tasteProfile();
     if (!prof.on || !prof.learnedAnything) return null;
     const seed = Math.floor(Date.now() / (7 * 86400000));
-    return r => NourishTaste.score(prof, r, { explore: true, seed });
+    const fn = r => NourishTaste.score(prof, r, { explore: true, seed });
+    fn.verdict = r => NourishTaste.verdictOf(prof, r);
+    return fn;
 }
 // Recipes they loved or saved, offered again as often as they like favourites back.
 // A built-in recipe for a slot that fits its rules and isn't one of `taken` (the plan's dishes),

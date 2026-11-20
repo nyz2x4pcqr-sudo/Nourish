@@ -400,6 +400,12 @@ function allProblems(meal, type, earlier, limited, limits) {
     if (avoided) out.push(`has ${avoided}, which they avoid`);
     const badName = nameProblem(meal.name);
     if (badName) out.push(`the name is ${badName}`);
+    // The same flavor score as every planned recipe (planner.js): a bland or odd AI recipe is made again.
+    if (Planner && Planner.flavorScore) {
+        const fl = Planner.flavorScore(meal);
+        if (fl.score < (fl.savory ? AI_FLAVOR_MIN : 3)) out.push(`it would taste bland (flavor ${fl.score} of 10): add ${fl.missing.slice(0, 3).map(g => FLAVOR_WORDS[g] || g).join(', ')}`);
+        if (Planner.familiarity(meal) < 0.3) out.push('an unusual combination: make a well-known dish people really cook');
+    }
     return out.filter((p, i) => out.indexOf(p) === i);
 }
 
@@ -425,9 +431,11 @@ function recipeRules(servings) {
     const units = typeof unitSystem === 'function' && unitSystem() === 'metric' ? 'metric units (g, ml, °C), with tsp and tbsp for small amounts' : 'US kitchen units (cups, tbsp, tsp, oz, lb, °F)';
     return `Write ONE complete recipe that someone can cook from start to finish:\n` +
         `- servings: ${servings}. Ingredient amounts are for all ${servings} serving${servings > 1 ? 's' : ''}. nutrition (calories, protein_g, carbs_g, fat_g) is for ONE serving, and calories must equal protein_g×4 + carbs_g×4 + fat_g×9.\n` +
-        `- ingredients: every item specific, with its amount: "8 oz boneless lamb shoulder", "1 medium zucchini", "1 tsp ground cumin", "1/2 tsp salt", "1 cup low-sodium chicken broth". ` +
-        `Name the exact cut of meat, which vegetables, each spice, the salt, the oil and any liquid. Never "vegetables", "meat" or "spices". Each ingredient once.\n` +
-        `- flavor: a savory dish has salt with an amount (not "to taste") and at least two real flavors (garlic, ginger, herbs, spices, citrus, vinegar, chili). Keep oil to what the dish needs.\n` +
+        // (No example dish here: "8 oz boneless lamb shoulder" as the example made lamb and zucchini turn up again and again.)
+        `- dish: a well-known, well-liked dish people really cook at home, the kind with hundreds of good reviews on a recipe site. Ingredients that belong together; no invented or unusual combinations and no rare specialty ingredients.\n` +
+        `- ingredients: every item specific, with its amount and unit ("1 tsp ground cumin", "1/2 tsp salt", "1 cup low-sodium broth"). ` +
+        `Name the exact cut of meat or fish, which vegetables, each spice, the salt, the oil and any liquid. Never "vegetables", "meat" or "spices". Each ingredient once.\n` +
+        `- flavor: FULL of flavor. Seasoning has almost no calories, so a light dish is never bland. A savory dish has salt with an amount (not "to taste") and at least three of: garlic or onion, spices, fresh herbs, citrus or vinegar, chili heat, umami (soy sauce, miso, parmesan, tomato paste). A sweet breakfast uses fruit, cinnamon or vanilla, citrus zest or nuts. Keep oil to what the dish needs.\n` +
         `- steps: ${L.minSteps + 1} to ${L.maxSteps} steps in order, from prep (cutting, measuring, preheating) to plating. Each step starts with a verb ("Dice…", "Heat…", "Simmer…") and is one or two full sentences with times and heat. ` +
         `Use every ingredient in the steps. The last step says how to serve it. No descriptions of the dish.\n` +
         `- time_minutes: the total time, prep included.\n- Use ${units}. Give each temperature once (e.g. "400°F"), not in two units.`;
@@ -586,7 +594,10 @@ function repairMeal(meal, type, job) {
 }
 // Real problems are worth asking again for; anything else is fixed in code or lived with (one step
 // or ingredient too many, a vague amount).
-const HARD_PROBLEM = /far from the \d+ kcal|incomplete|cut off|length limit|isn't a|is a dinner dish|too heavy|is a dessert|not a meal|needs cooking|takes about|same dish as|^only [0-2] ingredient|^no name|^no calories|which they avoid/i;
+// A savory AI recipe needs at least this flavor score (planner.js flavorScore, 0–10).
+const AI_FLAVOR_MIN = 5;
+const FLAVOR_WORDS = { aromatics: 'garlic or onion', spices: 'spices', herbs: 'fresh herbs', sour: 'lemon, lime or vinegar', heat: 'a little chili', umami: 'umami (soy sauce, miso, parmesan)', sauce: 'a sauce', ginger: 'ginger', 'warm spice': 'cinnamon', vanilla: 'vanilla', fruit: 'fruit', citrus: 'citrus zest', nutty: 'nuts', sweet: 'a little honey' };
+const HARD_PROBLEM = /taste bland|unusual combination|far from the \d+ kcal|incomplete|cut off|length limit|isn't a|is a dinner dish|too heavy|is a dessert|not a meal|needs cooking|takes about|same dish as|^only [0-2] ingredient|^no name|^no calories|which they avoid/i;
 function hardProblems(problems) { return (problems || []).filter(p => HARD_PROBLEM.test(p)); }
 // What the person avoids (allergies, diet, dislikes), when the app is running.
 function avoidCheck() {
@@ -878,7 +889,13 @@ async function generatePlanOnDevice(messages, hooks, state, run) {
             if (day[type]) continue;   // made before the app was closed
             if (h.isCancelled()) break;
             const todays = PLAN_MEALS.map(t => day[t] && day[t].name).filter(Boolean);
-            const ask = mealAsk({ type, d, cuisine, recent: usedNames(todays).slice(-4), conversation });
+            // A cuisine for lunch and dinner only: a "Japanese" or "Thai" breakfast made odd dishes
+            // (fish flakes on rice, kaffir lime eggs). Breakfast stays a familiar breakfast.
+            // "Make it different from": this meal's earlier dishes too (three breakfasts in a row were
+            // spinach and feta eggs when only the last four dishes of any meal were listed).
+            const sameMeal = st.days.map(day => day && day[type] && day[type].name).filter(Boolean).slice(-4);
+            const recent = sameMeal.concat(usedNames(todays).slice(-3)).filter((n, i, a) => a.indexOf(n) === i);
+            const ask = mealAsk({ type, d, cuisine: type === 'breakfast' ? '' : cuisine, recent, conversation });
             stat.promptChars = Math.max(stat.promptChars, system.length + ask.length);
             const r = await makeMeal({ type, system, ask, grammar, schema, earlier: usedNames(todays), id: `${d}-${type}`, label: `Day ${d + 1} ${type}`, limits: slotLimitsFor(type, d), kcal: mealKcalFor(type, d) }, run,
                 { onAttempt: a => h.onMeal(d, type, a), isCancelled: h.isCancelled });

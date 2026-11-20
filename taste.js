@@ -118,12 +118,15 @@
         const effortLiked = [], tooMuch = [];
         let small = 0, loved = 0, ratings = 0;
         const times = { breakfast: [], lunch: [], dinner: [] };
+        // Thumbs up or down on a dish itself (the latest one counts): a "no" keeps it out of plans.
+        const verdicts = {};
         const add = (map, k, v) => { if (k) map[k] = (map[k] || 0) + v; };
         s.events.forEach(e => {
             const w = weightOf(e, now);
             let v = 0;
             if (e.type === 'rate') {
                 ratings++;
+                if (e.name) { const k = dishName(e.name); if (e.rating === 'up' || e.rating === 'down') verdicts[k] = e.rating; else delete verdicts[k]; }
                 v = e.rating === 'up' ? WEIGHTS.up : e.rating === 'down' ? WEIGHTS.down : 0;
                 (e.tags || []).forEach(tag => {
                     v += WEIGHTS[tag] || 0;
@@ -175,17 +178,22 @@
             proteins: sorted(prot, 1).slice(0, 5),
             spice, effort, maxEffort, filling, repeats,
             mealTimes: { breakfast: avgHour(times.breakfast), lunch: avgHour(times.lunch), dinner: avgHour(times.dinner) },
-            scores: { ing, cui },
+            scores: { ing, cui }, verdicts,
             learnedAnything: s.events.length > 0 || Object.keys(o.ingredients).length > 0,
         };
     }
 
+    function dishName(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+    // 'up', 'down' or '' for a dish they rated themselves.
+    function verdictOf(prof, recipe) { return (prof && prof.on && recipe && prof.verdicts && prof.verdicts[dishName(recipe.name)]) || ''; }
     // How well a recipe suits the person, from −1 to 1 (0 when there's nothing to go on). With
     // explore = true, a recipe from a cuisine they haven't tried gets a small push now and then.
     function score(prof, recipe, { explore = false, seed = 0 } = {}) {
         if (!prof || !prof.on || !recipe) return 0;
         const d = describe(recipe);
-        let s = 0;
+        const v = verdictOf(prof, recipe);
+        if (v === 'down') return -1;
+        let s = v === 'up' ? 0.5 : 0;
         const ingS = d.ings.map(k => prof.scores.ing[k] || 0);
         const strongNo = ingS.filter(v => v <= -2.5).length;
         s += Math.tanh(ingS.reduce((a, b) => a + b, 0) / 6) * 0.6;
@@ -219,7 +227,7 @@
         return parts.length ? `What they like (learned from what they cook and rate): ${parts.join(' ')}` : '';
     }
 
-    const api = { empty, clean, record, fromChat, profile, score, guidance, describe, ratingOf, forget, ingredientWords, TAGS, WEIGHTS };
+    const api = { empty, clean, record, fromChat, profile, score, verdictOf, dishName, guidance, describe, ratingOf, forget, ingredientWords, TAGS, WEIGHTS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishTaste = api;
 })(typeof window !== 'undefined' ? window : globalThis);

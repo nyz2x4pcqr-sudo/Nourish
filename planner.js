@@ -450,6 +450,126 @@
         return added;
     }
 
+    // === FLAVOR SCORE, FAMILIAR DISHES AND A RECIPE'S QUALITY ===
+    // Seasoning is near zero calories, so a low-calorie dish never has to be bland. The flavor score
+    // (0–10) counts the kinds of real seasoning a recipe uses, not how many lines it has: aromatics
+    // (garlic, onion), spices, fresh herbs, something sour (citrus, vinegar), heat, umami and salt
+    // with an amount. Sweet breakfasts are scored on their own flavors (vanilla, cinnamon, fruit…).
+    const FLAVOR_GROUPS = [
+        ['aromatics', 2, /\b(garlic|onions?|shallots?|scallions?|spring onions?|green onions?|leeks?)\b/i],
+        ['sauce', 1.5, /\b(bbq sauce|barbecue sauce|pesto|salsa verde|enchilada sauce|marinara|curry paste|teriyaki|chimichurri|hoisin|sweet chil[ei] sauce|chil[ei] sauce|buffalo sauce|tzatziki|hummus|green chiles|romesco|tahini sauce|peanut sauce|satay sauce|tikka masala sauce|jerk sauce|mole)\b/i],
+        ['spices', 2, /\b(cumin|paprika|ground coriander|coriander seeds?|turmeric|garam masala|curry (powder|paste)|chil[ei] powder|cinnamon|cardamom|allspice|five[- ]spice|za'?atar|sumac|cajun|jerk|berbere|ras el hanout|baharat|fennel seeds?|mustard seeds?|oregano|thyme|rosemary|sage|italian seasoning|herbes de provence|bay lea(f|ves)|nutmeg|old bay|taco seasoning|fajita seasoning|dukkah|tikka|tandoori|shawarma|chaat masala|everything (bagel )?seasoning|everything bagel|lemon pepper|cloves? ground|ground cloves)\b/i],
+        ['herbs', 1.5, /\b(basil|cilantro|parsley|dill|mint|tarragon|chives|fresh (thyme|rosemary|oregano|sage|coriander)|coriander leaves|herbs?)\b/i],
+        ['sour', 1.5, /\b(lemons?|limes?|vinegar|zest|orange juice|tamarind|pickled|pickles?|capers|sumac|tomatillos?|kimchi|sauerkraut|yogh?urt sauce|tzatziki|salsa)\b/i],
+        ['heat', 1, /\b(chil(i|e|li)e?s?|jalape[nñ]os?|serranos?|habaneros?|scotch bonnet|cayenne|sriracha|gochujang|gochugaru|harissa|chipotle|hot sauce|red pepper flakes|crushed red pepper|chil[ei] flakes|sambal|chili crisp|chili oil|peri[- ]?peri|szechuan|sichuan|wasabi|horseradish|dijon|mustard|black pepper|cracked pepper|white pepper)\b/i],
+        ['umami', 1, /\b(soy sauce|tamari|fish sauce|miso|parmesan|parmigiano|pecorino|anchov(y|ies)|worcestershire|tomato paste|sun[- ]dried tomato|mushrooms?|nutritional yeast|oyster sauce|hoisin|olives|feta|dashi|coconut aminos|marmite|bouillon|stock|broth|seaweed|nori|smoked)\b/i],
+        ['ginger', 0.5, /\b(ginger|lemongrass|galangal|kaffir|makrut)\b/i],
+    ];
+    const SWEET_FLAVORS = [
+        ['warm spice', 2, /\b(cinnamon|cardamom|nutmeg|ginger|allspice|pumpkin (pie )?spice|chai)\b/i],
+        ['vanilla', 1.5, /\b(vanilla|almond extract)\b/i],
+        ['fruit', 2, /\b(berr(y|ies)|strawberr|blueberr|raspberr|banana|apples?|pears?|mango|peach|cherr(y|ies)|pineapple|kiwi|figs?|dates|raisins|pomegranate|orange|passion ?fruit|grapes)\b/i],
+        ['citrus', 1.5, /\b(lemon|lime|orange) (zest|juice)|\bzest\b/i],
+        ['nutty', 1.5, /\b(peanut butter|almond butter|nut butter|tahini|toasted|walnuts?|pecans?|almonds?|hazelnuts?|pistachios?|coconut|sesame)\b/i],
+        ['sweet', 1, /\b(honey|maple|cocoa|cacao|dark chocolate|chocolate chips?|jam|brown sugar|dates)\b/i],
+        ['salt', 0.5, /\b(salt|pinch of salt)\b/i],
+    ];
+    function flavorScore(r) {
+        const text = `${r && r.name || ''} ${((r && r.ingredients) || []).join(' ')}`;
+        const savory = isSavory(r);
+        const groups = savory ? FLAVOR_GROUPS : SWEET_FLAVORS;
+        const found = groups.filter(g => g[2].test(text));
+        let score = found.reduce((s, g) => s + g[1], 0);
+        if (savory) {
+            const c = flavorCheck(r);
+            if (c.salt) score += 1;
+            // Several different spices (a real spice mix) count a little more.
+            const spices = new Set((text.match(new RegExp(FLAVOR_GROUPS.find(g => g[0] === 'spices')[2].source, 'gi')) || []).map(x => x.toLowerCase()));
+            if (spices.size >= 3) score += 0.5;
+        } else score *= 1.1;
+        score = Math.round(Math.min(10, score) * 10) / 10;
+        return { score, savory, has: found.map(g => g[0]), missing: groups.filter(g => found.indexOf(g) < 0).map(g => g[0]) };
+    }
+    // A dish people know and actually cook: tacos, curry, stir-fry, chili, soup, omelette… Unusual
+    // ingredients or odd pairings (sweet things in savory dishes, offal, rare specialties) make a dish
+    // less familiar, unless lots of people rate it highly.
+    const FAMILIAR = /\b(tacos?|burritos?|burrito bowls?|fajitas?|enchiladas?|quesadillas?|nachos|chili|chilli|curry|curries|tikka|masala|korma|dal|dhal|daal|biryani|stir[- ]?fry|fried rice|noodles?|pad thai|lo mein|ramen|pho|teriyaki|bulgogi|bibimbap|poke|sushi|soup|stew|chowder|bisque|salad|bowls?|wraps?|sandwich(es)?|toasties?|burgers?|sliders|pitas?|gyros?|shawarma|kebabs?|kabobs?|souvlaki|falafel|hummus|pasta|spaghetti|penne|linguine|lasagn[ae]|bolognese|carbonara|primavera|risotto|gnocchi|pizza|flatbread|meatballs?|meatloaf|sheet[- ]pan|skillet|one[- ]pot|casserole|traybake|frittata|omelet(te)?s?|scramble(d)?|shakshuka|(scrambled|poached|fried|baked|boiled) eggs|eggs (benedict|florentine)|egg (muffins|cups|bites|sandwich|wrap)|breakfast (burrito|sandwich|bowl|hash)|hash|oats|oatmeal|overnight oats|porridge|pancakes?|waffles?|french toast|granola|parfait|smoothie( bowl)?|chia pudding|yogh?urt bowl|avocado toast|french toast|bagel|muffins?|lettuce (wraps|cups)|stuffed (peppers|chicken|sweet potatoes)|(roast|roasted|grilled|baked|pan[- ]seared|lemon|garlic|honey|crispy|blackened) (chicken|salmon|cod|fish|shrimp|tofu|pork|turkey)|chicken breasts?|salmon fillets?|tandoori|jerk|bean|lentil|chickpea|fried|jambalaya|paella|gumbo|tagine|souvlaki|piccata|marsala|parmesan|cacciatore|satay|larb|laksa|katsu|tempura|dumplings|gyoza|spring rolls|summer rolls|banh mi|tostadas?|taquitos|carnitas|al pastor|ceviche|gazpacho|minestrone|ratatouille|fritters|patties|cakes)\b/i;
+    const STRANGE = /\b(liver|kidneys?|tripe|offal|gizzards?|tongue|brains?|blood|eel|jellyfish|sea cucumber|durian|natto|bitter melon|katsuobushi|lollipops?|marshmallows?|gummy|candy|jelly beans|rhubarb compote|sour cream porridge|cola|soda|jell-?o|spam|hot dogs?|ketchup rice|mayonnaise salad|cereal|chips)\b/i;
+    const SWEET_IN_SAVORY = /\b(chocolate|cocoa|marshmallow|caramel|frosting|sprinkles|jam|maple syrup|honey)\b/i;
+    function familiarity(r) {
+        const name = String((r && r.name) || '');
+        const text = `${name} ${((r && r.ingredients) || []).join(' ')}`;
+        let f = FAMILIAR.test(name) ? 1 : 0.45;
+        if (STRANGE.test(text)) f -= 0.5;
+        if (isSavory(r) && SWEET_IN_SAVORY.test(name) && !/\b(honey|maple)[- ](garlic|mustard|soy|sriracha|glazed?|chipotle|lime|ginger|balsamic|dijon)/i.test(name)) f -= 0.3;
+        // Very long names are usually invented combinations ("Coconut Turmeric Kale Mango Quinoa Crunch").
+        if (name.split(/\s+/).length > 9) f -= 0.15;
+        // Lots of people cooked it and loved it: familiar enough, whatever it's called.
+        const rt = r && r.rating;
+        if (rt && rt.value >= 4.5 && rt.count >= 25) f = Math.max(f, 0.9);
+        return Math.max(0, Math.min(1, Math.round(f * 100) / 100));
+    }
+    // The site's own star rating, counted for what it's worth: a 5.0 from one review means little,
+    // a 4.8 from 900 a lot (a Bayesian average pulled towards 4.0, weighted by how many reviewed it).
+    function ratingScore(rating) {
+        const v = rating && Number(rating.value), n = rating && Number(rating.count) || 0;
+        if (!(v > 0) || n < 1) return 0;
+        const C = 12;
+        const avg = (v * n + 4.0 * C) / (n + C);
+        const conf = Math.min(1, Math.log10(1 + n) / 2.5);   // 300+ reviews = full confidence
+        return Math.max(-0.6, Math.min(1, (avg - 3.9) / 0.9)) * conf;
+    }
+    // A recipe's quality for planning (about −0.4…1.2): stars and reviews, the flavor score, how
+    // familiar the dish is, and the source (sources.js tier: trusted, flavor-focused sites first).
+    function quality(r) {
+        if (!r) return 0;
+        if (r._quality && r._quality.v === QUALITY_VERSION) return r._quality.q;
+        const fl = flavorScore(r);
+        const fam = familiarity(r);
+        const stars = ratingScore(r.rating);
+        const tier = r.source_tier === 'trusted' ? 0.15 : r.source_tier === 'low' ? -0.15 : 0;
+        const q = Math.round((0.35 * stars + 0.4 * (fl.score / 10) + 0.25 * fam + tier) * 1000) / 1000;
+        try { Object.defineProperty(r, '_quality', { value: { v: QUALITY_VERSION, q }, enumerable: false, configurable: true, writable: true }); } catch (e) { /* frozen */ }
+        return q;
+    }
+    // Tastes of something: real seasoning and a dish people know.
+    function tasty(r) { const fl = flavorScore(r); return fl.score >= (fl.savory ? BLAND_BELOW : 3) && familiarity(r) >= 0.3; }
+    const QUALITY_VERSION = 1;
+    const QUALITY_WEIGHT = 3;
+    const BLAND_BELOW = 4;          // a savory flavor score under this tastes plain
+    // Near-zero-calorie ways to make a plain recipe tastier, chosen for its cuisine and for what it's
+    // missing (no herbs → fresh herbs; nothing sour → citrus). Suggestions only: the recipe isn't
+    // changed unless the person taps "Add", and then its calories are counted (app.js).
+    const BOOSTS = {
+        aromatics: { any: ['2 cloves garlic, minced', '2 green onions, sliced'] },
+        spices: { mexican: ['1 tsp ground cumin', '1 tsp smoked paprika'], indian: ['1 tsp garam masala', '1/2 tsp ground turmeric'], italian: ['1 tsp dried oregano', '1/2 tsp red pepper flakes'],
+            mediterranean: ['1 tsp za\'atar', '1/2 tsp ground cumin'], 'middle eastern': ['1 tsp za\'atar', '1/2 tsp sumac'], thai: ['1/2 tsp red pepper flakes'], chinese: ['1/2 tsp five-spice powder'],
+            japanese: ['1/2 tsp shichimi togarashi'], korean: ['1/2 tsp gochugaru'], any: ['1 tsp smoked paprika', '1/2 tsp garlic powder'] },
+        herbs: { mexican: ['2 tbsp chopped fresh cilantro'], thai: ['2 tbsp fresh Thai basil'], italian: ['2 tbsp chopped fresh basil'], indian: ['2 tbsp chopped fresh cilantro'], any: ['2 tbsp chopped fresh parsley', '1 tbsp chopped fresh dill'] },
+        sour: { mexican: ['1 lime, juiced'], thai: ['1 lime, juiced'], japanese: ['1 tsp rice vinegar'], chinese: ['1 tsp rice vinegar'], any: ['1 tbsp lemon juice', '1 tsp lemon zest'] },
+        heat: { mexican: ['1 tsp chipotle hot sauce'], korean: ['1 tsp gochujang'], thai: ['1 tsp sriracha'], any: ['1 tsp hot sauce', '1/4 tsp cayenne pepper', '1/4 tsp black pepper'] },
+        umami: { japanese: ['1 tsp low-sodium soy sauce'], chinese: ['1 tsp low-sodium soy sauce'], thai: ['1 tsp fish sauce'], italian: ['1 tbsp grated parmesan'], any: ['1 tsp low-sodium soy sauce', '1 tsp tomato paste'] },
+    };
+    const SWEET_BOOSTS = ['1/2 tsp ground cinnamon', '1/2 tsp vanilla extract', '1 tsp orange zest', 'a pinch of salt', '1/4 tsp ground cardamom'];
+    function flavorBoosts(r, max = 3) {
+        const fl = flavorScore(r);
+        if (fl.score >= (fl.savory ? 6 : 5)) return [];
+        const have = `${r.name || ''} ${(r.ingredients || []).join(' ')}`.toLowerCase();
+        const out = [];
+        const take = line => {
+            const word = line.toLowerCase().replace(/^[\d/ .]+(tsp|tbsp|cloves?|cup)?\s*/, '').replace(/^(a pinch of|ground|dried|chopped fresh|fresh|grated|low-sodium)\s+/g, '').split(/[ ,]/)[0];
+            if (out.length < max && word && have.indexOf(word) < 0 && !out.some(o => o.line === line)) out.push({ line });
+        };
+        if (!fl.savory) { SWEET_BOOSTS.forEach(take); return out; }
+        const cuisine = cuisineOf(r);
+        // What it's missing, most useful first.
+        ['aromatics', 'sour', 'herbs', 'spices', 'heat', 'umami'].filter(g => fl.missing.indexOf(g) >= 0).forEach(g => {
+            const set = BOOSTS[g];
+            (set[cuisine] || set.any).slice(0, 1).forEach(take);
+        });
+        return out;
+    }
+
     // === A LIGHT CHANGE FOR SOMETHING THE PERSON AVOIDS ===
     // A real recipe with one disliked ingredient on the side (not in the dish's name, not an allergy
     // or the diet: those are never adapted) gets a sensible swap: mushrooms → zucchini, cilantro →
@@ -776,7 +896,8 @@
         if (n.fiber_g != null) cost += Math.max(0, (fiberWant - n.fiber_g * f) / fiberWant) * 0.15;
         // Calorie density: lunch and dinner under about 1.5 kcal per gram fill you up for fewer
         // calories (more so when losing weight).
-        if (ctx.meal !== 'breakfast' && r.kcal_per_g > 1.5) cost += (r.kcal_per_g - 1.5) * (ctx.goal === 'Cut' ? 1.6 : 0.8);
+        // (Softer since 0.1.17: a strong pull to watery dishes picked plain soups and salads over tastier ones.)
+        if (ctx.meal !== 'breakfast' && r.kcal_per_g > 1.6) cost += (r.kcal_per_g - 1.6) * (ctx.goal === 'Cut' ? 0.8 : 0.4);
         // Lower-carb: carbs over the meal's share count against a recipe (fat is already checked).
         if (ctx.targets.pref === 'lower-carb' && ctx.targets.carbs > 0) cost += Math.max(0, (n.carbs_g * f - ctx.targets.carbs * share * 1.1) / (ctx.targets.carbs * share)) * 1.5;
         // Whole ingredients first.
@@ -784,9 +905,18 @@
         // Fatty fish about once a week: favoured until the week has some.
         if (ctx.wantFish && isFattyFish(r)) cost -= 1.2;
         if (r.nutrition_unmatched) cost += 0.2;
-        // Highly rated on its own site (with enough ratings to mean something) comes first.
-        if (r.rating && r.rating.count >= 5) cost -= Math.max(-0.4, Math.min(0.4, (r.rating.value - 4.2) * 0.5));
-        if (r.reseasoned || r.bland) cost += 0.4;
+        // Tasty first (0.1.17): highly rated with many reviews, real seasoning, a dish people know,
+        // from a trusted site. Worth as much as a big miss on protein, so among the recipes that fit
+        // the calories, the tastiest one wins, not just the leanest.
+        // The bonus counts in full only for a recipe that also carries its share of protein, so taste
+        // never costs the day its protein (it decides among recipes that keep the goals).
+        const q = quality(r) - 0.45;
+        const enough = pShare > 0 ? Math.min(1, Math.pow(rShare / pShare, 2)) : 1;
+        cost -= q * QUALITY_WEIGHT * (q > 0 ? enough : 1);
+        const fl = flavorScore(r);
+        if (fl.score < (fl.savory ? BLAND_BELOW : 3)) cost += ((fl.savory ? BLAND_BELOW : 3) - fl.score) * 0.8;
+        if (familiarity(r) < 0.3) cost += 1;
+        if (r.reseasoned) cost += 0.2;
         // The person's own books come first when they fit about as well (still at most 3 a week from one book).
         if (r.from_book) cost -= 0.3;
         // Nutrition checked by more than one source comes first; figures that disagree never reach here.
@@ -795,6 +925,8 @@
         cost += (ctx.sourcePenalty && ctx.sourcePenalty(r)) || 0;
         // What the app has learned the person likes (taste.js): −1…1, worth up to about a slot's worth of fit.
         if (ctx.taste) { try { cost -= ctx.taste(r) * 0.8; } catch (e) { /* no profile */ } }
+        // A dish they gave a thumbs down stays out unless nothing else fits; a thumbs up comes back more.
+        if (ctx.taste && ctx.taste.verdict) { const v = ctx.taste.verdict(r); if (v === 'down') cost += 6; else if (v === 'up') cost -= 0.6; }
         cost += (ctx.cuisineCount[cuisineOf(r)] || 0) * 0.35;
         // Nourish's own recipes as a backup (the default): only when nothing from the web or the
         // library fits about as well.
@@ -929,10 +1061,12 @@
                 else fits.forEach(x => { x.cost += 2; });
                 // Nourish's own recipes are a backup: with any web or book recipe that fits this
                 // slot, they're not in the running at all (a weaker fit from the web still comes first).
-                if (ctx.builtinMode === 'backup' && fits.filter(x => x.r.source_id !== 'builtin').length >= 1) {
+                // Since 0.1.17 a web recipe has to taste of something to keep them out: when every web
+                // recipe that fits is bland or odd, Nourish's own (seasoned) recipes compete with them.
+                if (ctx.builtinMode === 'backup' && fits.some(x => x.r.source_id !== 'builtin' && tasty(x.r))) {
                     const web = fits.filter(x => x.r.source_id !== 'builtin');
                     fits.length = 0; web.forEach(x => fits.push(x));
-                }
+                } else if (ctx.builtinMode === 'backup') fits.forEach(x => { if (x.r.source_id === 'builtin') x.cost -= 2.5; });
                 // Recent plans' dishes only when nothing new fits (favourites are always welcome).
                 const fresh = fits.filter(x => isFav(x.r) || !recent.has(x.r.name));
                 top[m] = (fresh.length ? fresh : fits.map(x => ({ r: x.r, cost: x.cost + 1 }))).sort((a, b) => a.cost - b.cost).slice(0, 8);
@@ -1633,7 +1767,7 @@
         }).join('');
     }
 
-    const api = { spreadOver, stepTimers, stepIngredients, ingredientFoods, balanceDay, applyDayRules: balanceDay, proteinExtras, extrasFor, PROTEIN_EXTRAS, MAX_EXTRAS, proteinNote, PORTION_MIN, PORTION_MAX, weeklyTargets, WEEKDAYS, fatTip, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, outSlot, isOut, outMeal, outKcal, applyEatingOut, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { spreadOver, stepTimers, stepIngredients, ingredientFoods, balanceDay, applyDayRules: balanceDay, proteinExtras, extrasFor, PROTEIN_EXTRAS, MAX_EXTRAS, proteinNote, PORTION_MIN, PORTION_MAX, weeklyTargets, WEEKDAYS, fatTip, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, outSlot, isOut, outMeal, outKcal, applyEatingOut, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, flavorScore, familiarity, ratingScore, quality, tasty, flavorBoosts, BLAND_BELOW, reseason, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);

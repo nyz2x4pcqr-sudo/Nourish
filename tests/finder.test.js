@@ -35,8 +35,8 @@ const RECIPES = [
     R('Lamb Kofta with Tzatziki', ['1 lb ground lamb', '1 onion', '2 cloves garlic', '1 tsp cumin', '1 tsp salt', '1/2 cup tzatziki', '4 pita']),
     R('Mushroom Barley Soup', ['1 cup barley', '8 oz mushrooms', '1 carrot', '1 onion', '6 cups vegetable broth', '1 tsp thyme', '1 tsp salt']),
 ];
-// Five of the sites in use (sources.js); wellplated plays the one that refuses.
-const SITES = ['skinnytaste', 'thehealthymaven', 'cafedelites', 'wellplated', 'recipetineats'];
+// Five of the sites in use (sources.js); loveandlemons plays the one that refuses.
+const SITES = ['kalynskitchen', 'thegirlonbloor', 'cafedelites', 'loveandlemons', 'recipetineats'];
 const slug = s => s.toLowerCase().replace(/[^a-z]+/g, '-');
 const PAGES = {};
 // Real recipe pages say what meal they are (recipeCategory); every recipe is on two sites (dedupe).
@@ -45,7 +45,7 @@ RECIPES.forEach((r, i) => {
     [i, i + 2].forEach(k => { const site = S.byId(SITES[k % SITES.length]); PAGES[`https://${site.domain}/${slug(r.name)}/`] = r; });
 });
 
-function fakeWeb({ refuse = 'wellplated' } = {}) {
+function fakeWeb({ refuse = 'loveandlemons' } = {}) {
     const calls = [];
     const fetchPage = async url => {
         calls.push(url);
@@ -83,7 +83,7 @@ test('plans a week from several sites at once, skipping the one that refuses', a
     assert.ok(meals.length >= 8, `only ${meals.length} meals`);
     meals.forEach(r => assert.ok(r.source_url && r.source_name, `${r.name} has no source`));
     assert.ok(new Set(meals.map(r => r.source_name)).size >= 3, 'recipes came from only one or two places');
-    assert.ok(plan.stats.failed.includes('wellplated'));
+    assert.ok(plan.stats.failed.includes('loveandlemons'));
     assert.ok(!meals.some(r => /\bcake\b|ideas/i.test(r.name)));
     assert.ok(!web.calls.some(u => /search=all\b/.test(u)), '"All food" was searched for');
     // Complete days hit the target; slots without a good recipe are reported for the AI to write.

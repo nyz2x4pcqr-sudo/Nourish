@@ -158,12 +158,15 @@ test('breads, snack bars and sauces are not meals', () => {
 test('optional snacks fit inside the day, and meals can be switched off', () => {
     const res = PL.planWeek({ pools, settings: { calorie_target: 1800, protein_target: 110, snacks_per_day: '2' }, days: 3, people: 1 });
     res.days.forEach((day, i) => {
-        assert.equal(day.snacks.length, 2);
-        assert.notEqual(day.snacks[0].name, day.snacks[1].name);
+        // The two snacks asked for (a protein extra may come on top, on a day short of protein).
+        const asked = day.snacks.filter(s => !s.protein_extra);
+        assert.equal(asked.length, 2);
+        assert.ok(day.snacks.length - asked.length <= 2);
+        assert.notEqual(asked[0].name, asked[1].name);
         near(PL.dayTotals(day).kcal, 1800, 0.05);
-        day.snacks.forEach(s => near(s.nutrition.calories, 180, 0.35));
+        asked.forEach(s => near(s.nutrition.calories, 180, 0.35));
     });
-    assert.notEqual(res.days[0].snacks[0].name, res.days[1].snacks[0].name, 'the same snack every day');
+    assert.notEqual(res.days[0].snacks.filter(s => !s.protein_extra)[0].name, res.days[1].snacks.filter(s => !s.protein_extra)[0].name, 'the same snack every day');
     const noNuts = PL.planWeek({ pools, settings: { calorie_target: 1800, snacks_per_day: '3' }, days: 4, exclude: require('../prefs.js').excluder({ avoid: 'nuts', allergies: 'peanuts', diet: '' }) });
     noNuts.days.forEach(d => d.snacks.forEach(s => assert.ok(!/almond|peanut|pistachio|trail mix/i.test(s.name + s.ingredients.join(' ')), s.name)));
     const twoMeals = PL.planWeek({ pools, settings: { calorie_target: 1600, meal_slots: 'lunch,dinner' }, days: 2 });
