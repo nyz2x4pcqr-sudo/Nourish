@@ -1585,6 +1585,9 @@ a.settings-button { display: flex; text-decoration: none; }
 
 /* This week: the budget as a range, how it's going, and a one-tap way to even it out. */
 .week-card { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); border-radius: var(--r-xl); }
+/* The week's fiber, vitamins and minerals (information): padded like the week card above it. */
+.plan-flags { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); border-radius: var(--r-xl); }
+.plan-flags .recipe-note { margin: 0; }
 .week-card.status-over { border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
 .week-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
 .week-pill { padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-caption, 12px); font-weight: 750; letter-spacing: .02em; }

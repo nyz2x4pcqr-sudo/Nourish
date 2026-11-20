@@ -465,6 +465,8 @@ async function makeMeal(job, run, h) {
             if (repairs.length) logPlan(`${job.label || job.type}: fixed in code`, repairs);
         }
         const problems = allProblems(meal, job.type, job.earlier, job.grammar ? L : job.schema ? PC_LIMITS : null, job.limits);
+        const kcalOff = meal && typeof meal === 'object' ? kcalProblem(meal, job.kcal) : '';
+        if (kcalOff) problems.push(kcalOff);
         const hard = hardProblems(problems);
         if (firstProblems == null) firstProblems = problems;
         const score = mealScore(meal, hard) + (problems.length - hard.length) * 0.01;
@@ -584,7 +586,7 @@ function repairMeal(meal, type, job) {
 }
 // Real problems are worth asking again for; anything else is fixed in code or lived with (one step
 // or ingredient too many, a vague amount).
-const HARD_PROBLEM = /incomplete|cut off|length limit|isn't a|is a dinner dish|too heavy|is a dessert|not a meal|needs cooking|takes about|same dish as|^only [0-2] ingredient|^no name|^no calories|which they avoid/i;
+const HARD_PROBLEM = /far from the \d+ kcal|incomplete|cut off|length limit|isn't a|is a dinner dish|too heavy|is a dessert|not a meal|needs cooking|takes about|same dish as|^only [0-2] ingredient|^no name|^no calories|which they avoid/i;
 function hardProblems(problems) { return (problems || []).filter(p => HARD_PROBLEM.test(p)); }
 // What the person avoids (allergies, diet, dislikes), when the app is running.
 function avoidCheck() {
@@ -800,12 +802,33 @@ function slotRulesText(type, d) {
     const time = L.noCook ? 'No cooking at all (no stove or oven): grab-and-go or no-cook food' : isFinite(L.minutes) ? `Ready in ${L.minutes} minutes or less` : '';
     return ` It must be ${what}.${time ? ` ${time}, at most ${L.ingredients} ingredients and ${L.steps} steps.` : ''}`;
 }
-function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
+// A meal's share of the day: its calories (what the recipe is asked for, and checked against).
+function mealShareOf(type) {
     const s = typeof settings !== 'undefined' ? settings : {};
     const split = Planner && Planner.splitOf(s);   // the person's calorie split (Settings), 25/30/45 by default
-    const share = (split && split[PLAN_MEALS.indexOf(type)]) || MEAL_SHARE[type] || 0.33;
+    return (split && split[PLAN_MEALS.indexOf(type)]) || MEAL_SHARE[type] || 0.33;
+}
+function mealKcalFor(type, d) {
+    const s = typeof settings !== 'undefined' ? settings : {};
     const dayKcal = typeof dayKcalTarget === 'function' && d != null ? dayKcalTarget(d) : (Number(s.calorie_target) || 2000);
-    const kcal = Math.round(dayKcal * share / 10) * 10;
+    return Math.round(dayKcal * mealShareOf(type) / 10) * 10;
+}
+// A portion is ¾ to 1½ of the recipe's serving (since 0.1.14), so a serving far outside about
+// 0.55-1.55 times the meal's calories can't be sized to fit: a "1 serving" dinner with 800 g of lamb
+// (3,040 kcal for a 900 kcal dinner) is made again. Calories here are Nourish's own, from the
+// ingredients, never the model's figure.
+const KCAL_FIT = { min: 0.55, max: 1.55 };
+function kcalProblem(meal, want) {
+    const kcal = meal && meal.nutrition && Number(meal.nutrition.calories);
+    if (!want || !kcal) return '';
+    if (kcal > want * KCAL_FIT.max) return `about ${Math.round(kcal)} kcal a serving, far from the ${want} kcal this meal needs: smaller amounts`;
+    if (kcal < want * KCAL_FIT.min) return `about ${Math.round(kcal)} kcal a serving, far from the ${want} kcal this meal needs: bigger amounts`;
+    return '';
+}
+function mealAsk({ type, d, cuisine, recent, conversation, dish, extra }) {
+    const s = typeof settings !== 'undefined' ? settings : {};
+    const share = mealShareOf(type);
+    const kcal = mealKcalFor(type, d);
     const protein = Math.round((typeof proteinTarget === 'function' ? proteinTarget() : Number(s.protein_target) || 100) * share);
     // No day number, day name or person's name anywhere a small model could copy into the dish's name.
     return `${conversation ? conversation + '\n\n' : ''}${dish ? `Write the full recipe for "${dish}", a ${type}` : `Make one ${type} recipe`}` +
@@ -857,7 +880,7 @@ async function generatePlanOnDevice(messages, hooks, state, run) {
             const todays = PLAN_MEALS.map(t => day[t] && day[t].name).filter(Boolean);
             const ask = mealAsk({ type, d, cuisine, recent: usedNames(todays).slice(-4), conversation });
             stat.promptChars = Math.max(stat.promptChars, system.length + ask.length);
-            const r = await makeMeal({ type, system, ask, grammar, schema, earlier: usedNames(todays), id: `${d}-${type}`, label: `Day ${d + 1} ${type}`, limits: slotLimitsFor(type, d) }, run,
+            const r = await makeMeal({ type, system, ask, grammar, schema, earlier: usedNames(todays), id: `${d}-${type}`, label: `Day ${d + 1} ${type}`, limits: slotLimitsFor(type, d), kcal: mealKcalFor(type, d) }, run,
                 { onAttempt: a => h.onMeal(d, type, a), isCancelled: h.isCancelled });
             if (!r) break;   // cancelled
             if (!r.meal) throw new Error(`The AI couldn't write Day ${d + 1} ${type} (${r.problems.slice(0, 2).join('; ')}). Try again, or try another model.`);
@@ -1748,5 +1771,5 @@ function switchToPhone() {
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { mealSchema, PC_LIMITS, PC_MEAL_TOKENS, DESCRIBE_GRAMMAR, describeFromRecipe, descriptionProblem, recipeFacts, repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
+    module.exports = { kcalProblem, mealKcalFor, KCAL_FIT, mealSchema, PC_LIMITS, PC_MEAL_TOKENS, DESCRIBE_GRAMMAR, describeFromRecipe, descriptionProblem, recipeFacts, repairMeal, nameProblem, dishNameFor, hardProblems, aiChoose, aiSubstitute, aiDescribe, slotLimitsFor, slotRulesText, slotCheck, quickMealFor, allProblems, IMPORT_LIMITS, IMPORT_TOKENS, IMPORT_TEXT_CHARS, importGrammar, nutritionGrammar, extractRecipe, estimateNutrition, PLAN_LIMITS, MEAL_TOKENS, MEAL_ATTEMPTS, MEAL_EXTRA_ATTEMPTS, EDIT_TOKENS, mealGrammar, editGrammar, makeMeal, allProblems, recipeRules, mealAsk, mealSystem, mealFormat, servingsWanted, completeMeal, mealProblems, tidyMeal, junkRows, dropJunk, sameDish, dishWords, generatePlanOnDevice, GBNF_MEAL, discoverModels, pickQuant, paramsFromName, baseKey, prettyModelName, compareVersions, pickUpdate, rankModels, assessModel, memoryBudget, stripThinking, GBNF_EDIT };
 }

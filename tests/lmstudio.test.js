@@ -31,3 +31,31 @@ test('a step that ran into the length limit is flagged, so the meal is made agai
     assert.ok(O.allProblems(meal, 'dinner', [], O.PC_LIMITS).some(p => /length limit/.test(p)));
     assert.ok(!O.allProblems(meal, 'dinner', [], null).some(p => /length limit/.test(p)));
 });
+
+test('a serving no portion can bring near the meal\'s calories is a real problem', () => {
+    const at = kcal => ({ nutrition: { calories: kcal } });
+    assert.equal(O.kcalProblem(at(900), 900), '');
+    assert.equal(O.kcalProblem(at(1300), 900), '', '¾ of it fits');
+    assert.equal(O.kcalProblem(at(520), 900), '', '1½ of it fits');
+    assert.match(O.kcalProblem(at(3040), 900), /about 3040 kcal a serving, far from the 900 kcal this meal needs: smaller amounts/);
+    assert.match(O.kcalProblem(at(300), 900), /bigger amounts/);
+    assert.equal(O.kcalProblem(at(3040), 0), '', 'no target, no check');
+    assert.equal(O.kcalProblem({}, 900), '', 'no calories: another check reports that');
+    assert.equal(O.hardProblems([O.kcalProblem(at(3040), 900)]).length, 1);
+});
+
+test('a "one serving" dinner with a whole lamb shoulder is made again, and a fitting one kept', async () => {
+    const steps = ['Cut the lamb into cubes and rub with the cumin and salt.', 'Brown the lamb in the olive oil for 8 minutes.',
+        'Add the onion and broth, cover and simmer for 40 minutes.', 'Pour boiling water over the couscous and let it stand for 5 minutes.',
+        'Serve the lamb over the couscous.'];
+    const dinner = (lamb, couscous) => ({ name: 'Cumin Lamb with Couscous', servings: 1, time_minutes: 60, steps,
+        ingredients: [`${lamb} g boneless lamb shoulder`, '1 tsp ground cumin', '1/2 tsp salt', '1 tbsp olive oil', '1 small onion', '1/2 cup low-sodium chicken broth', `${couscous} g couscous`],
+        nutrition: { calories: 900, protein_g: 50, carbs_g: 60, fat_g: 40 } });
+    const answers = [dinner(800, 200), dinner(200, 60)];
+    const asks = [];
+    const r = await O.makeMeal({ type: 'dinner', system: 's', ask: 'a', earlier: [], kcal: 900 }, async msgs => { asks.push(msgs[1].content); return JSON.stringify(answers[asks.length - 1]); });
+    assert.equal(asks.length, 2);
+    assert.match(asks[1], /far from the 900 kcal this meal needs: smaller amounts/);
+    assert.ok(r.meal.nutrition.calories < 900 * O.KCAL_FIT.max, String(r.meal.nutrition.calories));
+    assert.deepEqual(r.problems, []);
+});

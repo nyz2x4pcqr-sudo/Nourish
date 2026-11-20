@@ -3510,7 +3510,7 @@ function updatePlanScreen() {
         return;
     }
     const flagCard = planFlags && planFlags.length ? h('section', { class: 'card plan-flags' },
-        h('div', { class: 'eyebrow', text: 'This week' }),
+        h('div', { class: 'eyebrow', text: 'Nutrition this week' }),
         ...planFlags.map(f => h('p', { class: 'recipe-note', text: f }))) : null;
     setChildren(container, cooking, typeof weekCard === 'function' ? weekCard() : null, flagCard, ...daysData.map((day, idx) => h('section', { class: `card plan-day${isToday(idx) ? ' is-today' : ''}` },
         h('div', { class: 'plan-day-head' },
@@ -5222,8 +5222,8 @@ async function fillMissingMeals(plan) {
                 extra: [prefs.likes ? `They like: ${prefs.likes}.` : '', prefs.hates ? `Never use: ${prefs.hates}.` : '',
                     sameDay.length ? 'Use a different main protein and vegetable from the other meals that day.' : ''].filter(Boolean).join(' ') });
             try {
-                const r = await makeMeal({ type: slot.meal, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null,
-                    earlier: others, id: `fill-${slot.day}-${slot.meal}`, label: `${dayName(slot.day)} ${slot.meal}`, limits: slotLimitsFor(slot.meal, slot.day) }, run, { isCancelled: () => localPlanCancelled });
+                const r = await makeMeal({ type: slot.meal, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null, schema: onPhone ? null : mealSchema(servings),
+                    earlier: others, id: `fill-${slot.day}-${slot.meal}`, label: `${dayName(slot.day)} ${slot.meal}`, limits: slotLimitsFor(slot.meal, slot.day), kcal: mealKcalFor(slot.meal, slot.day) }, run, { isCancelled: () => localPlanCancelled });
                 if (r && r.meal) {
                     meal = normalizeMeal(r.meal);
                     if (meal && exclude(meal)) { nlog('plan', `The AI's ${slot.meal} "${meal.name}" has ${exclude(meal)}, which is avoided; not used`, null, 'warn'); meal = null; }
@@ -5339,9 +5339,9 @@ async function makeMealFor(dayIndex, mealType, mode, onAttempt) {
         extra: !retry && current ? `It must not be ${current.name} or anything like it.` : '' });
     const isCancelled = () => localPlanCancelled;
     const run = onPhone ? phoneRunner({ onStatus: text => showJobBar('busy', text), isCancelled }) : aiRunner();
-    return makeMeal({ type: mealType, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null,
+    return makeMeal({ type: mealType, system: mealSystem(servings), ask, grammar: onPhone ? mealGrammar(servings) : null, schema: onPhone ? null : mealSchema(servings),
         earlier: retry ? others : others.concat(current ? [current.name] : []), id: `${mode}-${dayIndex}-${mealType}`,
-        label: `${dayName(dayIndex)} ${mealType}`, limits: slotLimitsFor(mealType, dayIndex) }, run, { onAttempt, isCancelled });
+        label: `${dayName(dayIndex)} ${mealType}`, limits: slotLimitsFor(mealType, dayIndex), kcal: mealKcalFor(mealType, dayIndex) }, run, { onAttempt, isCancelled });
 }
 
 // The Swap and Try again buttons on a recipe.
