@@ -40,12 +40,12 @@ jobs:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: Nourish-*
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: plan-audit
           path: audit
