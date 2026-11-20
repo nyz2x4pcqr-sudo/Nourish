@@ -703,6 +703,10 @@
         const k = factor * people / from;
         out.ingredients = (r.ingredients || []).map(l => scaleLine(l, k));
         out.servings = people;
+        // Hands-on time, when the recipe's own total is mostly waiting (freezing fruit for an hour,
+        // chilling overnight): the plan shows the minutes of work, as the planner judged them.
+        const prof = profileOf(r), given = Number(r.active_minutes) || Number(r.time_minutes) || 0;
+        if (!prof.timeEstimated && given && prof.minutes < given - 5) out.active_minutes = prof.minutes;
         if (Math.abs(factor - 1) > 0.05 || from !== people) out.scaled = { from_servings: from, portion: Math.round(factor * 100) / 100 };
         delete out._lines; delete out._fit;
         // Honest numbers: worked out again from the amounts as written after scaling (2 eggs, not

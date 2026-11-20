@@ -20,7 +20,7 @@
     const EXTRA = {
         'hamburger buns': 'bread', 'hamburger bun': 'bread', 'burger buns': 'bread', 'burger bun': 'bread', 'buns': 'bread', 'bun': 'bread',
         'sub rolls': 'bread', 'sub roll': 'bread', 'hoagie rolls': 'bread', 'dinner rolls': 'bread', 'crusty bread': 'bread', 'baguette': 'bread',
-        'bean sprouts': 'cabbage', 'red chilies': 'jalapeno', 'red chili': 'jalapeno', 'thai chilies': 'jalapeno', 'green chilies': 'jalapeno', 'chilies': 'jalapeno',
+        'jalapeno pepper': 'jalapeno', 'jalapeno peppers': 'jalapeno', 'jalapeño pepper': 'jalapeno', 'jalapeño peppers': 'jalapeno', 'soya milk': 'soy milk', 'soymilk': 'soy milk', 'red chilies': 'jalapeno', 'red chili': 'jalapeno', 'thai chilies': 'jalapeno', 'green chilies': 'jalapeno', 'chilies': 'jalapeno',
         'chili bean paste': 'miso', 'doubanjiang': 'miso', 'arugula': 'lettuce', 'rocket': 'lettuce',
         // Cured and salted meats, and legumes the table names differently.
         'salt pork': 'bacon', 'fatback': 'bacon', 'pork belly': 'bacon', 'pancetta': 'bacon', 'guanciale': 'bacon',
@@ -63,6 +63,9 @@
         // A whole nutmeg weighs about 7 g.
         'whole nutmeg': { n: [525, 5.8, 49.3, 36.3, 20.8, 25.9, 184, 350, 183], a: ['nutmeg seed', 'whole nutmegs'], u: [[7, 'none'], [7, 'whole']] },
         'chili crisp': { n: [600, 4, 12, 58, 4, 8, 30, 200, 30], a: ['chili crunch', 'chilli crisp', 'chili oil crisp', 'spicy chili crisp', 'chili onion crunch'], u: [[13, 'tbsp'], [4, 'tsp']] },
+        // Canned pumpkin is lighter than butternut squash; mung bean sprouts aren't cabbage.
+        'pumpkin puree': { n: [34, 1.1, 8.1, 0.3, 2.9, 0.1, 5, 206, 23], a: ['pumpkin purée', 'canned pumpkin', 'pure pumpkin', 'pumpkin puree', 'solid pack pumpkin'], u: [[245, 'cup'], [425, 'can']] },
+        'bean sprouts': { n: [30, 3, 5.9, 0.2, 1.8, 0.1, 6, 149, 21], a: ['mung bean sprouts', 'beansprouts', 'bean sprout'], u: [[104, 'cup']] },
         'sweet chili sauce': { n: [207, 0.4, 51, 0.6, 1, 0, 8, 90, 4], a: ['thai sweet chili sauce', 'sweet chilli sauce', 'thai sweet chilli sauce'], u: [[19, 'tbsp']] },
     };
     Object.keys(SUPPLEMENT).forEach(k => { if (!FOODS[k]) FOODS[k] = SUPPLEMENT[k]; });

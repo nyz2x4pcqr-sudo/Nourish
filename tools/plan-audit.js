@@ -245,7 +245,7 @@ function checkMeal(meal, slot, ctx) {
     const avoid = String(ctx.avoid || '').split(',').concat(String(ctx.settings.allergies || '').split(',')).map(s => s.trim().toLowerCase()).filter(Boolean);
     avoid.forEach(a => {
         const re = AVOID_WORDS[a] || new RegExp(`\\b${a.replace(/s$/, '')}s?\\b`, 'i');
-        const hit = (meal.ingredients || []).concat([name]).find(l => re.test(a === 'dairy' ? l.replace(/\b(peanut|almond|cashew|nut|seed|sunflower|apple|cocoa|shea|soy|oat|coconut|rice|plant|vegan|dairy-free|non-dairy)[- ](butter|milk|cream|yogh?urt|cheese)\b/gi, '') : l) && !/\b(free|vegan|dairy-free|plant-based|non-dairy|coconut milk|oat milk|almond milk|soy milk|nut-free)\b/i.test(l));
+        const hit = (meal.ingredients || []).concat([name]).find(l => re.test(a === 'dairy' ? l.replace(/\b(peanut|almond|cashew|nut|seed|sunflower|apple|cocoa|shea|soy|soya|oat|coconut|rice|plant|vegan|dairy-free|non-dairy)[- ](butter|milk|cream|yogh?urt|cheese)\b/gi, '') : l) && !/\b(free|vegan|dairy-free|plant-based|non-dairy|coconut milk|oat milk|almond milk|soy milk|nut-free)\b/i.test(l));
         if (hit) add('avoided food present', 'problem', `${a}: "${hit}"`);
     });
     const dietRe = DIET_WORDS[ctx.settings.diet];
