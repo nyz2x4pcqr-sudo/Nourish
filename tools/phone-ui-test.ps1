@@ -57,7 +57,21 @@ if (-not $Apk) {
     $Apk = Join-Path $dl "Nourish.apk"
     if (-not (Test-Path $Apk)) { throw "No Android build found on GitHub; pass -Apk <path>" }
 }
-& $adb install -r -d $Apk | Out-Host
+# adb prints install errors on stderr; read them as text instead of stopping the script.
+$ErrorActionPreference = "Continue"
+$install = (& $adb install -r -d $Apk 2>&1 | Out-String)
+Write-Host $install.Trim()
+if ($install -match "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
+    # Each GitHub build is signed with a new key, so Android refuses it as an update. Remove the old
+    # copy (and its data: the flows start from first launch anyway) and install the new one.
+    Write-Host "The installed app was signed differently; removing it and installing this build."
+    & $adb uninstall io.github.nourish.app | Out-Host
+    $install = (& $adb install $Apk 2>&1 | Out-String)
+    Write-Host $install.Trim()
+}
+$ErrorActionPreference = "Stop"
+# Never test an old copy by mistake: stop if the install didn't work.
+if ($install -notmatch "Success") { throw "Installing $Apk failed" }
 
 # 3. The flows.
 New-Item -ItemType Directory -Force $out | Out-Null
