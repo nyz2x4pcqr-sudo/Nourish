@@ -25,10 +25,10 @@ env:
     timeout: 60000
 - assertVisible: ".*Maestro Test Oat Bowl.*"
 - takeScreenshot: 06-imported
+# The sheet's last row (no tab bar over it), so it can't always be scrolled to the middle.
 - scrollUntilVisible:
     element: "Save to Cookbook"
     direction: DOWN
-    centerElement: true
 - tapOn: "Save to Cookbook"
 # The same page again, the way a share sheet might add a tracking tag.
 - scrollUntilVisible:
