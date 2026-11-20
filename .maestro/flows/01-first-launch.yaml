@@ -22,7 +22,13 @@ appId: io.github.nourish.app
 - assertVisible: "Appearance.*Ember.*"
 - takeScreenshot: 01-settings
 # The profile, as a new user would open it.
-- tapOn: "Set up your profile.*"
+# A tap while Settings is still settling can be lost (iPhone run 44706917890): tap until it opens.
+- repeat:
+    times: 3
+    while:
+      notVisible: "Goal.*"
+    commands:
+      - tapOn: "Set up your profile.*"
 - extendedWaitUntil:
     visible: "Your profile"
     timeout: 10000
