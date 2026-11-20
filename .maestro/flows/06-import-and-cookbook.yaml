@@ -45,7 +45,10 @@ env:
 - takeScreenshot: 06-duplicate-warning
 - assertVisible: "Open the saved one"
 - tapOn: "Close"
-# The Cookbook has it, once.
+# The Cookbook has it, once. Its button is at the top of the Plan screen.
+- scrollUntilVisible:
+    element: "Cookbook"
+    direction: UP
 - tapOn: "Cookbook"
 - extendedWaitUntil:
     visible: ".*Maestro Test Oat Bowl.*"

@@ -6,11 +6,11 @@ appId: io.github.nourish.app
     text: "Grocery"
     retryTapIfNoChange: true
 - takeScreenshot: 08-grocery
+# The last thing on the page, just above the tab bar: it can't be scrolled to the middle.
 - scrollUntilVisible:
     element: "Already in your pantry.*"
     direction: DOWN
     timeout: 60000
-    centerElement: true
 - tapOn: "Already in your pantry.*"
 - scrollUntilVisible:
     element: "Change what.s in your pantry"
