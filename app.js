@@ -5739,6 +5739,9 @@ async function runImport() {
         result.notes.push(recipe.nutrition_basis === 'source' ? 'Nutrition from the recipe, checked against USDA data' : 'Nutrition calculated from the ingredients (USDA data)');
         nlog('import', `Found "${recipe.name}" in ${Math.round((Date.now() - started) / 100) / 10} s (${result.how === 'structured' ? 'recipe data on the page' : 'read by the AI'}): ${(recipe.ingredients || []).length} ingredients, ${(recipe.steps || []).length} steps`, result.notes);
         showImportStatus('');
+        // Let go of the link box first: on Android its keyboard closed after the recipe sheet opened,
+        // and the WebView then scrolled that sheet to its bottom, past the "already saved" note.
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
         closeImportSheet();
         $('importUrl').value = '';
         $('importText').value = '';
@@ -5820,7 +5823,11 @@ function openRecipeEditor(recipe, { mode = 'import', notes = [], mealType = 'din
     $('recipeEditSheet').classList.add('active');
     // After it's shown: a hidden sheet ignores scrollTop, and a second import opened where the first
     // was left (at its Save button), with the "already saved" note out of sight (phone UI tests).
-    $('recipeEditContent').scrollTop = 0;
+    const top = () => { const c = $('recipeEditContent'); if (c && editing) c.scrollTop = 0; };
+    top();
+    // Again once a closing keyboard has resized the page (Android, phone UI tests).
+    requestAnimationFrame(top);
+    setTimeout(top, 400);
 }
 
 function closeRecipeEditor() {
