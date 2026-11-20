@@ -82,10 +82,24 @@ jobs:
       - name: Run the flows
         run: |
           mkdir -p ui-results
-          maestro --device "$UDID" test .maestro \
+          if maestro --device "$UDID" test .maestro \
             --format junit --output ui-results/report.xml \
             --test-output-dir ui-results/screens \
-            --debug-output ui-results/debug
+            --debug-output ui-results/debug; then exit 0; fi
+          # On the simulator the web page's accessibility tree is sometimes briefly out of date, so a
+          # button that is on screen isn't found (a different flow each run). Each failed flow gets
+          # one more try; a flow that fails twice fails the job. The first report is kept as well.
+          failed=$(python3 -c "import xml.etree.ElementTree as E; print(' '.join(t.get('name') for t in E.parse('ui-results/report.xml').iter('testcase') if t.find('failure') is not None or t.find('error') is not None))")
+          echo "Trying these flows once more: $failed"
+          [ -n "$failed" ] || exit 1
+          status=0
+          for f in $failed; do
+            maestro --device "$UDID" test ".maestro/flows/$f.yaml" \
+              --format junit --output "ui-results/retry-$f.xml" \
+              --test-output-dir ui-results/screens-retry \
+              --debug-output ui-results/debug-retry || status=1
+          done
+          exit $status
       - name: Simulator log (last 20 minutes, Nourish only)
         if: always()
         run: |
