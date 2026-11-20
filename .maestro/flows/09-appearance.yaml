@@ -1,0 +1,47 @@
+# Settings → Appearance: contrast, coloured amounts, spacing, corners and a light theme; then back
+# to the default dark look.
+appId: io.github.nourish.app
+---
+- launchApp
+- tapOn: "Settings"
+- tapOn: "Appearance.*"
+- extendedWaitUntil:
+    visible: "Ember.*"
+    timeout: 10000
+- takeScreenshot: 09-appearance
+- scrollUntilVisible:
+    element: "Increase contrast.*"
+    direction: DOWN
+- tapOn: "Increase contrast.*"
+- tapOn: "Coloured amounts.*"
+- scrollUntilVisible:
+    element: "Roomy"
+    direction: DOWN
+- tapOn: "Roomy"
+- tapOn: "Square"
+- takeScreenshot: 09-options-set
+- scrollUntilVisible:
+    element: "Paper.*"
+    direction: UP
+- tapOn: "Paper.*"
+- waitForAnimationToEnd
+- takeScreenshot: 09-paper-theme
+- tapOn: "Today"
+- waitForAnimationToEnd
+- takeScreenshot: 09-today-paper-roomy-square
+# Back to the defaults.
+- tapOn: "Settings"
+- tapOn: "Appearance.*"
+- tapOn: "Ember.*"
+- scrollUntilVisible:
+    element: "Increase contrast.*"
+    direction: DOWN
+- tapOn: "Increase contrast.*"
+- tapOn: "Coloured amounts.*"
+- scrollUntilVisible:
+    element: "Comfortable"
+    direction: DOWN
+- tapOn: "Comfortable"
+- tapOn: "Round"
+- tapOn: "Today"
+- takeScreenshot: 09-today-default

@@ -1,0 +1,47 @@
+# Logging a one-off snack and a food that repeats every day.
+appId: io.github.nourish.app
+---
+- launchApp
+- tapOn: "Today"
+- scrollUntilVisible:
+    element: "Add food.*"
+    direction: DOWN
+- tapOn: "Add food.*"
+- extendedWaitUntil:
+    visible: "e.g. 2 slices of pizza and a coffee"
+    timeout: 10000
+- takeScreenshot: 03-add-food
+# A snack, once.
+- tapOn: "e.g. 2 slices of pizza and a coffee"
+- inputText: "1 apple"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Add ·.*"
+    timeout: 20000
+- takeScreenshot: 03-apple-found
+- tapOn: "Add ·.*"
+- extendedWaitUntil:
+    visible: ".*Apple.*"
+    timeout: 10000
+# A food that logs itself every day.
+- scrollUntilVisible:
+    element: "Add food.*"
+    direction: UP
+- tapOn: "Add food.*"
+- tapOn: "e.g. 2 slices of pizza and a coffee"
+- inputText: "1 cup black coffee"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Log this by itself"
+    timeout: 20000
+- tapOn: "Off"
+- tapOn: "Every day"
+- takeScreenshot: 03-coffee-every-day
+- tapOn: "Add ·.*"
+- extendedWaitUntil:
+    visible: ".*[Cc]offee.*"
+    timeout: 10000
+- scrollUntilVisible:
+    element: ".*Apple.*"
+    direction: DOWN
+- takeScreenshot: 03-today-with-snacks

@@ -1,0 +1,20 @@
+# The shopping list folds pantry staples away; the pantry list is in Settings → Grocery list.
+appId: io.github.nourish.app
+---
+- launchApp
+- tapOn: "Grocery"
+- waitForAnimationToEnd
+- takeScreenshot: 08-grocery
+- scrollUntilVisible:
+    element: "Already in your pantry.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn: "Already in your pantry.*"
+- takeScreenshot: 08-pantry-open
+- tapOn: "Settings"
+- tapOn: "Grocery list"
+- extendedWaitUntil:
+    visible: "Keep pantry staples off the list.*"
+    timeout: 10000
+- takeScreenshot: 08-pantry-settings
+- tapOn: "Settings"

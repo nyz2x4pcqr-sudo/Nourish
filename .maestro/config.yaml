@@ -1,0 +1,22 @@
+# Nourish phone UI tests (Maestro). They walk through the app like a person would, in this order,
+# on one phone: each flow carries on from where the one before left off (only the first starts fresh).
+#
+# Run them all:   maestro test .maestro -e RECIPE_URL=<link to fixtures/test-oat-bowl.html>
+#   iPhone simulator: http://127.0.0.1:8099/test-oat-bowl.html   (the Mac running the simulator)
+#   Android emulator: http://10.0.2.2:8099/test-oat-bowl.html    (the PC running the emulator)
+# with `python -m http.server 8099 --bind 127.0.0.1` running in .maestro/fixtures.
+# See tools/phone-ui-test.ps1 (Android on a PC) and .github/workflows/phone-ui-tests.yml (iPhone on GitHub).
+flows:
+  - "flows/*.yaml"
+executionOrder:
+  continueOnFailure: true
+  flowsOrder:
+    - 01-first-launch
+    - 02-generate-plan
+    - 03-log-food
+    - 04-reopen-keeps-food
+    - 05-weekly-budget
+    - 06-import-and-cookbook
+    - 07-cook-mode
+    - 08-pantry
+    - 09-appearance

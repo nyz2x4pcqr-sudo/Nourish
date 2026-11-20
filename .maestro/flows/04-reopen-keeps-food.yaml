@@ -1,0 +1,16 @@
+# The food log survives closing the app (the 0.1.14 bug: the food log and the activity log were
+# saved under the same name, so logged food vanished after a restart).
+appId: io.github.nourish.app
+---
+- stopApp
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: "Today's meals"
+    timeout: 60000
+- scrollUntilVisible:
+    element: ".*Apple.*"
+    direction: DOWN
+    timeout: 20000
+- assertVisible: ".*[Cc]offee.*"
+- takeScreenshot: 04-after-reopen

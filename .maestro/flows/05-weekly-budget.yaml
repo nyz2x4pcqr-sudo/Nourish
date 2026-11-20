@@ -1,0 +1,12 @@
+# The week's calorie budget on the Plan screen.
+appId: io.github.nourish.app
+---
+- launchApp
+- tapOn: "Plan"
+- extendedWaitUntil:
+    visible: "(?i)this week"
+    timeout: 10000
+- assertVisible: "Budget .* kcal"
+- assertVisible: "(?i)(on track|over|under).*"
+- takeScreenshot: 05-plan-week-budget
+- assertVisible: ".*Eating out.*"

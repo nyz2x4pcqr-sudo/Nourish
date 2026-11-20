@@ -1,0 +1,100 @@
+name: Phone UI tests (iPhone simulator)
+
+# Builds Nourish for the iPhone simulator (no signing), boots an iPhone 16 Pro (or the closest one),
+# installs the app and walks through it like a person with the Maestro flows in .maestro/.
+# Every screen is saved as a picture. Download them from the run's page ("phone-ui-ios"), or:
+#   gh run download <run id> -n phone-ui-ios
+# Run it: Actions tab → "Phone UI tests (iPhone simulator)" → Run workflow. Free on the standard
+# macOS runner for this public repo.
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "Simulator to use (the closest iPhone is picked if it's missing)"
+        default: "iPhone 16 Pro"
+  push:
+    branches: [main]
+    paths: [".maestro/**", ".github/workflows/phone-ui-tests.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phone-ui-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MAESTRO_VERSION: "2.12.0"
+  MAESTRO_SHA256: a6044a84542f522f434c5dc3d609e60c7446d423f3ed1b2ae513f5c48663ec5e
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      # The same llama.cpp build the phone app workflow saves (so it isn't rebuilt here).
+      - name: Restore llama.cpp for iOS
+        id: llama-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: mobile/ios/Frameworks
+          key: llama-xcframework-${{ hashFiles('mobile/android/app/src/main/cpp/CMakeLists.txt', 'mobile/ci/prepare-ios.sh') }}
+      - name: Copy the web app in (and build llama.cpp if it wasn't saved)
+        run: bash mobile/ci/prepare-ios.sh
+      - name: Generate the Xcode project
+        working-directory: mobile/ios
+        run: xcodegen generate
+      - name: Build for the simulator
+        working-directory: mobile/ios
+        run: |
+          xcodebuild -project Nourish.xcodeproj -target Nourish -configuration Debug -sdk iphonesimulator \
+            SYMROOT="$PWD/build-sim" CODE_SIGNING_ALLOWED=NO build -quiet
+      - name: Boot the simulator and install Nourish
+        env:
+          WANT: ${{ inputs.device || 'iPhone 16 Pro' }}
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, os, sys
+          want = os.environ['WANT']
+          devices = json.load(sys.stdin)['devices']
+          phones = [d for runtime, ds in sorted(devices.items()) if 'iOS' in runtime for d in ds if d['name'].startswith('iPhone')]
+          exact = [d for d in phones if d['name'] == want]
+          pros = [d for d in phones if 'Pro' in d['name'] and 'Max' not in d['name']]
+          pick = (exact or pros or phones)[-1]
+          print(pick['udid']); print('Using', pick['name'], file=sys.stderr)")
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" mobile/ios/build-sim/Debug-iphonesimulator/Nourish.app
+      - name: Install Maestro ${{ env.MAESTRO_VERSION }}
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          echo "$MAESTRO_SHA256  $RUNNER_TEMP/maestro.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$HOME"
+          echo "$HOME/maestro/bin" >> "$GITHUB_PATH"
+      - name: Serve the test recipe page
+        working-directory: .maestro/fixtures
+        run: nohup python3 -m http.server 8099 --bind 127.0.0.1 > "$RUNNER_TEMP/fixtures.log" 2>&1 &
+      - name: Run the flows
+        run: |
+          mkdir -p ui-results
+          maestro --device "$UDID" test .maestro \
+            -e RECIPE_URL=http://127.0.0.1:8099/test-oat-bowl.html \
+            --format junit --output ui-results/report.xml \
+            --test-output-dir ui-results/screens \
+            --debug-output ui-results/debug
+      - name: Simulator log (last 20 minutes, Nourish only)
+        if: always()
+        run: |
+          mkdir -p ui-results
+          xcrun simctl spawn "$UDID" log show --last 20m --style compact --predicate 'process == "Nourish"' > ui-results/simulator-nourish.log 2>&1 || true
+          tail -n 60 ui-results/simulator-nourish.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phone-ui-ios
+          path: ui-results/
+          retention-days: 14

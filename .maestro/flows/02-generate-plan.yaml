@@ -1,0 +1,32 @@
+# A 7-day plan from real recipes (Nourish's own recipes fill any gaps). No AI: the phone has no
+# model and can't reach LM Studio. Lunch is "Eating out" (My schedule), so it's left unplanned.
+appId: io.github.nourish.app
+---
+- launchApp
+- tapOn: "Today"
+- tapOn: "Generate Meal Plan"
+# The first plan asks how long each meal can take; lunch is eaten out.
+- extendedWaitUntil:
+    visible: "Quick question.*"
+    timeout: 10000
+- takeScreenshot: 02-schedule-question
+- tapOn:
+    text: "Eating out"
+    index: 1
+- tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "Generate Plan"
+    timeout: 10000
+- assertVisible: ".*Lunch Eating out.*"
+- tapOn: "Maintain"
+- takeScreenshot: 02-new-plan-sheet
+- tapOn: "Generate Plan"
+- takeScreenshot: 02-generating
+- extendedWaitUntil:
+    visible: "Today's meals"
+    timeout: 300000
+- waitForAnimationToEnd
+- takeScreenshot: 02-today-with-plan
+- assertVisible: ".*Eating out.*"
+- assertVisible: ".*kept for it.*"
+- assertNotVisible: "Generate Meal Plan"
