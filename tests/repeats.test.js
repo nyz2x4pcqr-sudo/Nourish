@@ -85,7 +85,7 @@ test('the built-in recipes: at least 60 per meal, original names, every one fits
         const meal = r.category[0];
         assert.equal(PL.slotProblem(r, meal), '', `${r.name}: ${PL.slotProblem(r, meal)}`);
         assert.ok(PL.flavorCheck(r).ok, `${r.name} isn't seasoned`);
-        assert.deepEqual(r.nutrition, N.calculate(r.ingredients, r.servings).nutrition, `${r.name}: nutrition not from the calculator`);
+        assert.deepEqual(r.nutrition, N.calculate(r.ingredients, r.servings, r.steps).nutrition, `${r.name}: nutrition not from the calculator`);
         assert.ok(!(r.nutrition_unmatched || []).length, `${r.name}: ${r.nutrition_unmatched}`);
         assert.ok(r.steps.length >= 2 && r.steps.every(s => /[.!]$/.test(s)), `${r.name}: steps`);
         all.slice(0, i).forEach(o => assert.ok(!PL.sameDish(o.name, r.name), `"${o.name}" and "${r.name}" are the same dish`));

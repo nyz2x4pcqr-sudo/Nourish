@@ -27,14 +27,19 @@
         fish: ['fish', 'salmon', 'tuna', 'cod', 'tilapia', 'halibut', 'trout', 'mackerel', 'sardine', 'lox', 'smoked salmon', 'gravlax', 'kipper', 'herring', 'anchovy', 'haddock', 'pollock', 'snapper', 'bass', 'swordfish', 'catfish', 'fish sauce', 'worcestershire'],
         shellfish: ['shellfish', 'shrimp', 'prawn', 'crab', 'lobster', 'scallop', 'clam', 'mussel', 'oyster', 'crawfish', 'crayfish', 'langoustine', 'squid', 'calamari', 'octopus', 'oyster sauce'],
         seafood: ['fish', 'salmon', 'tuna', 'cod', 'tilapia', 'halibut', 'trout', 'mackerel', 'sardine', 'lox', 'smoked salmon', 'gravlax', 'kipper', 'herring', 'anchovy', 'haddock', 'shrimp', 'prawn', 'crab', 'lobster', 'scallop', 'clam', 'mussel', 'oyster', 'squid', 'calamari', 'octopus', 'fish sauce', 'oyster sauce'],
-        dairy: ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'yoghurt', 'ghee', 'whey', 'parmesan', 'mozzarella', 'cheddar', 'feta', 'ricotta', 'paneer', 'halloumi', 'cream cheese', 'sour cream', 'buttermilk', 'half and half', 'creme fraiche', 'mascarpone', 'goat cheese', 'cottage cheese', 'gruyere', 'brie', 'casein'],
+        dairy: ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'yoghurt', 'ghee', 'whey', 'parmesan', 'mozzarella', 'cheddar', 'feta', 'ricotta', 'paneer', 'halloumi', 'cream cheese', 'sour cream', 'buttermilk', 'half and half', 'creme fraiche', 'mascarpone', 'goat cheese', 'cottage cheese', 'gruyere', 'brie', 'casein',
+            // Protein powder is whey (milk) unless it says it's made from plants (NOT below).
+            'protein powder'],
         lactose: ['milk', 'cream', 'yogurt', 'ice cream', 'buttermilk', 'cream cheese', 'sour cream', 'half and half', 'ricotta', 'cottage cheese', 'whey'],
         egg: ['egg', 'mayonnaise', 'mayo', 'aioli', 'meringue', 'egg white', 'egg yolk', 'eggnog'],
         gluten: ['wheat', 'flour', 'bread', 'pasta', 'spaghetti', 'penne', 'noodle', 'couscous', 'bulgur', 'barley', 'rye', 'semolina', 'spelt', 'farro', 'seitan', 'breadcrumb', 'panko', 'crouton', 'tortilla', 'pita', 'naan', 'bagel', 'cracker', 'soy sauce', 'beer', 'orzo', 'udon', 'ramen', 'bun', 'brioche', 'baguette', 'sourdough', 'focaccia', 'ciabatta', 'pastry', 'pie crust', 'puff pastry', 'dumpling', 'gnocchi', 'lasagna', 'lasagne', 'macaroni', 'fettuccine', 'linguine', 'rigatoni', 'fusilli', 'pizza dough', 'crumpet', 'english muffin', 'graham cracker', 'matzo', 'freekeh', 'flour tortilla'],
         wheat: ['wheat', 'flour', 'bread', 'pasta', 'spaghetti', 'penne', 'noodle', 'couscous', 'bulgur', 'semolina', 'spelt', 'farro', 'breadcrumb', 'panko', 'tortilla', 'pita', 'naan', 'bagel', 'cracker', 'orzo', 'udon'],
         peanut: ['peanut', 'peanut butter', 'satay', 'groundnut', 'peanut oil', 'trail mix', 'snickers', 'candy bar', 'pad thai'],
         nut: ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'nut butter', 'almond butter', 'almond milk', 'almond flour', 'praline', 'marzipan', 'nutella', 'trail mix', 'nut'],
-        'tree nut': ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'almond butter', 'almond milk', 'almond flour', 'trail mix', 'nut butter', 'mixed nuts', 'nut milk', 'nut flour'],
+        'tree nut': ['almond', 'walnut', 'pecan', 'cashew', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'brazil nut', 'almond butter', 'almond milk', 'almond flour', 'trail mix', 'nut butter', 'mixed nuts', 'nut milk', 'nut flour',
+            // "Nut or seed butter", "chopped nuts", pesto (pine nuts), praline, marzipan, Nutella. Peanuts,
+            // nutmeg and butternut stay fine (NOT.nut).
+            'cashew butter', 'praline', 'marzipan', 'nutella', 'pesto', 'nuts', 'nut'],
         soy: ['soy', 'soya', 'tofu', 'tempeh', 'edamame', 'miso', 'soy sauce', 'tamari', 'soy milk'],
         sesame: ['sesame', 'tahini', 'sesame oil', 'sesame seed', 'hummus'],
         cucumber: ['cucumber', 'pickle', 'gherkin', 'cornichon', 'tzatziki', 'relish'],
@@ -63,7 +68,7 @@
     };
     // Words that aren't the food they look like: "peanut butter" isn't dairy, "eggplant" isn't egg.
     const NOT = {
-        butter: ['peanut butter', 'almond butter', 'nut butter', 'cashew butter', 'apple butter', 'cocoa butter', 'butternut', 'butter bean', 'butterhead', 'sunflower butter', 'vegan butter', 'plant butter', 'plant-based butter'],
+        butter: ['peanut butter', 'almond butter', 'nut butter', 'cashew butter', 'apple butter', 'cocoa butter', 'butternut', 'butter bean', 'butterhead', 'butter lettuce', 'sunflower butter', 'vegan butter', 'plant butter', 'plant-based butter'],
         milk: ['coconut milk', 'almond milk', 'oat milk', 'soy milk', 'soya milk', 'rice milk', 'cashew milk', 'dairy-free milk', 'plant milk', 'plant-based milk', 'non-dairy milk'],
         cream: ['coconut cream', 'cream of tartar', 'oat cream', 'soy cream', 'cashew cream'],
         yogurt: ['soy yogurt', 'soya yogurt', 'coconut yogurt', 'oat yogurt', 'almond yogurt', 'dairy-free yogurt', 'plant-based yogurt', 'vegan yogurt'],
@@ -76,6 +81,9 @@
         cheese: ['vegan cheese', 'nutritional yeast', 'dairy-free cheese', 'plant-based cheese'],
         dairy: ['dairy-free', 'dairy free', 'non-dairy', 'nondairy'],
         gluten: ['gluten-free', 'gluten free'],
+        // Someone who avoids olives still cooks with olive oil.
+        olive: ['olive oil'],
+        'protein powder': ['pea protein powder', 'plant protein powder', 'plant-based protein powder', 'vegan protein powder', 'soy protein powder', 'rice protein powder', 'hemp protein powder', 'pea protein'],
     };
     // "Gluten-free pasta", "gluten-free buns": not the gluten food they name.
     (GROUPS.gluten || []).forEach(t => { NOT[t] = (NOT[t] || []).concat([`gluten-free ${t}`, `gluten free ${t}`, `gluten-free ${t}s`, `gluten free ${t}s`]); });

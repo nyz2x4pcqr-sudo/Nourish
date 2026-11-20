@@ -525,12 +525,32 @@
             const best = [0, 0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1].reduce((a, b) => (Math.abs(b - part) < Math.abs(a - part) ? b : a));
             q = whole + best;
         } else q = q >= 0.3 ? Math.max(0.25, Math.round(q * 4) / 4) : Math.max(0.125, Math.round(q * 8) / 8);   // kitchen fractions: ¼ ½ ¾ (⅛ for pinches)
+        // The factor this line changed by: things counted whole are rounded (1½ chops → 2), but a
+        // change of unit (½ cup → 1¼ tbsp) isn't a change of amount ("(50g)" must become "(10g)").
+        const eff = item.qty > 0 && (!unit || unit === item.unit) && Math.abs(Math.log(q / item.qty / k)) < Math.log(2) ? q / item.qty : k;
+        // Under a kilo or a litre reads better in grams or millilitres: 125 g, not 0.125 kg.
+        if (unit === 'kg' && q < 1) { q = Math.max(5, Math.round(q * 1000 / 5) * 5); unit = 'g'; }
+        if (unit === 'l' && q < 1) { q = Math.max(5, Math.round(q * 1000 / 5) * 5); unit = 'ml'; }
         const amount = U.formatAmount(q, unit);
-        // A total weight written beside the amount ("4 salmon fillets (approx. 480g)", "3 bones, about
-        // 1 lb") is scaled with it, or it would still say the whole recipe's weight.
-        const ratio = item.qty > 0 ? q / item.qty : k;
-        const text = String(item.text || '').replace(/((?:\(|,\s*)(?:about|approx\.?|approximately|roughly|around|total(?:ling)?)?\s*)(\d+(?:\.\d+)?)(\s*-?\s*(?:g|grams?|kg|oz|ounces?|lbs?|pounds?)\b)/gi,
-            (m, pre, n, u) => (/^\s*-/.test(u) || /oz|ounce/i.test(u) && /\b(cans?|tins?)\b/i.test(item.text) ? m : `${pre}${Math.round(Number(n) * ratio * 10) / 10}${u}`));
+        // A total weight written beside the amount ("4 salmon fillets (approx. 480g)", "2 pork chops
+        // (1 1/2 pounds total)", "3 bones, about 1 lb") is scaled with it, or it would still say the
+        // whole recipe's weight. A can's own size ("(15 oz) can") and a weight "each" are not.
+        let text = String(item.text || '').replace(/((?:\(|,\s*)(?:about|approx\.?|approximately|roughly|around|total(?:ling)?)?\s*)((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?)(\s*(?:g|grams?|kg|kilograms?|oz|ounces?|lbs?|pounds?)\b)(?![^)]*\beach\b)/gi,
+            (m, pre, num, u) => {
+                if (/oz|ounce/i.test(u) && /\b(cans?|tins?)\b/i.test(item.text)) return m;
+                const n = U.parseNumber(num.trim());
+                if (!n) return m;
+                const v = n.value * eff;
+                const metric = /^\s*(g|grams?|kg|kilograms?)$/i.test(u);
+                const w = metric ? Math.max(5, Math.round(v / 5) * 5) : Math.max(0.125, Math.round(v * 4) / 4);
+                return `${pre}${metric ? w : U.formatQty(w)}${!metric && w <= 1 ? u.replace(/(pound|ounce)s\b/i, '$1') : u}`;
+            });
+        // A second amount for the same thing ("1 kg / 2 lb beef mince") is scaled too.
+        text = text.replace(/^\/\s*((?:\d+\s+)?\d+(?:\/\d+|\.\d+)?|[½¼¾])\s*(lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|litres?|liters?|cups?|tbsp|tsp|tablespoons?|teaspoons?|quarts?)\b/i, (m0, num, u) => {
+            const n = U.parseNumber(num); if (!n) return m0;
+            const v = n.value * eff, metric = /^(g|grams?|kg|ml|l)$/i.test(u);
+            return `/ ${metric ? Math.max(5, Math.round(v / 5) * 5) : U.formatQty(Math.max(0.125, Math.round(v * 4) / 4))} ${u}`;
+        });
         return item.note !== undefined ? `${text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${text}`.trim();
     }
     const baseCalc = new WeakMap();   // a recipe's own calculation, worked out once

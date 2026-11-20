@@ -29,6 +29,7 @@
         'natural yogurt': 'yogurt', 'stock cube': 'chicken broth', 'stock pot': 'chicken broth', 'gem lettuce': 'lettuce', 'little gem': 'lettuce',
         'plain flour': 'flour', 'self raising flour': 'flour', 'self-raising flour': 'flour', 'wholemeal flour': 'flour', 'caster sugar': 'sugar', 'demerara sugar': 'brown sugar',
         'icing sugar': 'powdered sugar', 'beetroot': 'beet', 'beetroots': 'beet', 'back bacon': 'bacon', 'streaky bacon': 'bacon', 'gammon': 'ham', 'prawns': 'shrimp', 'king prawns': 'shrimp',
+        'nut butter': 'peanut butter', 'nut or seed butter': 'peanut butter', 'seed butter': 'peanut butter', 'sunflower seed butter': 'peanut butter', 'cashew butter': 'peanut butter',
         'single cream': 'half and half', 'soured cream': 'sour cream', 'mince': 'ground beef', 'beef mince': 'ground beef', 'pork mince': 'ground pork', 'turkey mince': 'ground turkey', 'lamb mince': 'ground lamb',
         'mixed salad leaves': 'lettuce', 'salad leaves': 'lettuce', 'mixed greens': 'lettuce', 'mixed salad greens': 'lettuce', 'spring mix': 'lettuce', 'salad greens': 'lettuce',
         'tenderstem': 'broccoli', 'sweetcorn': 'corn', 'mangetout': 'snow peas', 'sugar snap peas': 'snow peas', 'chestnut mushrooms': 'mushrooms', 'baby plum tomatoes': 'cherry tomatoes',
@@ -76,10 +77,13 @@
 
     const FISH = /\b(salmon|cod|tilapia|trout|haddock|halibut|pollock|mackerel|sea bass|snapper|tuna steak|swordfish|fish)\b/;
     // Grams in one of a thing the table weighs another way (a rice cake, a lasagna sheet, a bun).
-    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, dumplings: 25, 'whole spice berries': 0.2, 'whole nutmeg': 7, nutmeg: 2, tofu: 396, 'silken tofu': 340, 'cherry tomatoes': 17, 'grape tomatoes': 8 };
+    const EACH = { 'rice cake': 9, ginger: 8, eggplant: 450, pasta: 20, 'whole wheat pasta': 20, 'egg noodles': 20, dumplings: 25, 'whole spice berries': 0.2, 'whole nutmeg': 7, nutmeg: 2, tofu: 396, 'silken tofu': 340, 'cherry tomatoes': 17, 'grape tomatoes': 8, shrimp: 15, anchovies: 4 };
     const EACH_PHRASE = [[/\b(buns?|rolls?)\b/, 60], [/\bbaguette\b/, 250]];
     // A cup of something light and airy (chips, flakes) weighs far less than a cup of water.
-    const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60 };
+    const CUP = { 'tortilla chips': 28, 'potato chips': 20, popcorn: 8, 'buttered popcorn': 11, coconut: 80, pretzels: 45, cereal: 30, crackers: 60,
+        // Meat, fish and grated cheese are lighter by the cup than their density suggests (they don't pack).
+        'chicken breast': 140, chicken: 140, 'chicken thigh': 140, 'turkey breast': 140, ham: 140, 'ground beef': 225, 'lean ground beef': 225, 'ground turkey': 225, 'ground chicken': 225, 'ground pork': 225,
+        shrimp: 145, tuna: 150, salmon: 140, cod: 140, crab: 135, lobster: 145, cheddar: 113, mozzarella: 112, parmesan: 100, feta: 150, 'goat cheese': 120, cheese: 113, 'monterey jack': 113 };
 
     // The part of a bony or shelled food that's eaten, when it's bought by weight ("2 lb bone-in
     // chicken thighs", "4 lb baby back ribs", "2 lb shell-on shrimp"): USDA's refuse (bone, shell)
@@ -154,10 +158,18 @@
         const variants = [base, base.split(' ').map(singular).join(' '), base.replace(PREP, ' ').replace(/\s+/g, ' ').trim()];
         variants.push(variants[2].split(' ').map(singular).join(' '));
         const all = variants.join(' | ');
+        // The food is what the line ends on ("high protein vanilla yogurt" is a yogurt): among the
+        // matches, prefer one ending on that word. "2 garlic cloves" ends on a part, not a food.
+        const head = singular(variants[2].split(' ').pop() || '');
+        const useHead = head.length > 2 && !/^(clove|leave|leaf|sprig|stalk|rib|head|bunch|piece|slice|stick|wedge|floret|chunk|strip|cube|spear|ear|half|halve|part|white|yolk)$/.test(head);
         let out = null;
         for (const [re, phrase, key, first] of PATTERNS) {
             if (all.indexOf(first) < 0) continue;   // quick check before the pattern
-            if (variants.some(v => re.test(v))) { out = { key, food: FOODS[key], phrase }; break; }
+            if (!variants.some(v => re.test(v))) continue;
+            const hit = { key, food: FOODS[key], phrase };
+            if (!out) out = hit;
+            if (!useHead) break;
+            if (singular(phrase.split(' ').pop()) === head) { out = hit; break; }
         }
         if (matched.size > 20000) matched.clear();
         matched.set(base, out);
@@ -252,10 +264,11 @@
         // "8 marrow bones (about 3 pounds)", "2 racks ribs (about 4 lb)": the weight in brackets.
         const about = raw.match(/\((?:about|approx\.?|approximately|roughly|around|total(?:ling)?)?\s*(\d+(?:\.\d+)?|\d+\s+\d\/\d|\d\/\d)\s*(pounds?|lbs?|kg|kilos?|grams?|g|ounces?|oz)\b[^)]*\)/i)
             || raw.match(/,\s*(?:about|approx\.?|approximately|roughly|around|total(?:ling)?)\s+(\d+(?:\.\d+)?|\d+\s+\d\/\d|\d\/\d)\s*(pounds?|lbs?|kg|kilos?|grams?|g|ounces?|oz)\b/i);
-        if (about && qty != null && !G[item.unit] && !ML[item.unit] && !/\b(cans?|tins?|packages?|packets?|jars?|bags?|containers?|cartons?|blocks?|boxes?)\b/i.test(raw)) {
+        if (about && qty != null && !G[item.unit] && (!ML[item.unit] || /^(cup|tbsp|tsp)$/.test(item.unit)) && !/\b(cans?|tins?|packages?|packets?|jars?|bags?|containers?|cartons?|blocks?|boxes?)\b/i.test(raw)) {
             const q = about[1].includes('/') ? about[1].split(/\s+/).reduce((a, x) => a + (x.includes('/') ? Number(x.split('/')[0]) / Number(x.split('/')[1]) : Number(x)), 0) : Number(about[1]);
             const u = about[2].toLowerCase();
             grams = q * (/^(lb|pound)/.test(u) ? 453.6 : /^(kg|kilo)/.test(u) ? 1000 : /^(oz|ounce)/.test(u) ? 28.35 : 1);
+            if (/\beach\b/i.test(about[0])) grams *= qty;   // "4 chicken breasts (about 6 oz each)"
         }
         const pack = raw.match(PACK);
         if (grams != null) { /* the weight in brackets */ }
@@ -267,6 +280,8 @@
             // amount is the pack's own size ("15 oz can tomatoes").
             const count = qty != null && !(G[item.unit] || ML[item.unit]) ? qty : 1;
             grams = each * (count || 1);
+            // Canned lentils are already cooked (counted as dry lentils, a can had three times the calories).
+            if (/\b(cans?|tins?)\b/i.test(raw) && m.key === 'lentils' && FOODS['cooked lentils']) Object.assign(m, { key: 'cooked lentils', food: FOODS['cooked lentils'] });
         } else if (qty != null) {
             const unit = item.unit;
             if (G[unit]) grams = qty * G[unit];
@@ -351,6 +366,11 @@
         let m;
         while ((m = re.exec(how))) liquids.add(m[1] || m[2] || m[3]);
         const brined = /\bbrine\b/.test(how);
+        // Sentences that dredge, dip or roll something in a coating (not a sauce, batter or dough):
+        // the part from the verb on, when something goes in or through it ("roll up and serve" isn't).
+        const coatSentences = how.split(/[.;!]\s*/).filter(sn => !/\b(batter|sauce|dough|filling|glaze|dressing|stir|mix|whisk|fold)\b/.test(sn))
+            .map(sn => { const v = /\b(dredge|dredging|coat|coating|dip|dipping|bread|breading|roll)\b(?!\s+(up|out)\b)/.exec(sn); return v ? sn.slice(v.index) : ''; })
+            .filter(sn => /\b(in|into|with|through)\b/.test(sn));
         (ingredients || []).forEach((line, i) => {
             if (i in out || isHeader(line)) return;
             const t = clean(line);
@@ -358,6 +378,11 @@
             if (/\b(parmesan|parmigiano|pecorino|grana padano|cheese)\b[^,]*\brinds?\b|\brinds?\b[^,]*\b(parmesan|parmigiano|pecorino|grana padano|cheese)\b/.test(t)) { out[i] = 0.1; return; }
             // The salt, sugar and water of a brine the steps make ("dissolve the salt in the water to make a brine").
             if (brined && /\b(salt|sugar|brown sugar|water|peppercorns|bay)\b/.test(t) && /\b(cups?|quarts?|gallons?|litres?|liters?|l)\b|\b[2-9]\d* ?(tbsp|tablespoons?)\b|\b\d+\s*\/\s*\d+\s*cups?\b/.test(String(line).toLowerCase())) { out[i] = 0; return; }
+            // A breading station: flour, beaten egg and crumbs the food is dredged or rolled in. Only
+            // what sticks is eaten (about a third); the rest stays in the bowls.
+            const coat = /\b(flour|panko|breadcrumbs?|crumbs|cornmeal|cornstarch|cornflour|eggs?)\b/.exec(t);
+            if (coat && (/\(\s*for (the )?(coating|breading|dredging)\s*\)|\bfor (dredging|coating|breading|dusting)\b/i.test(String(line))
+                || coatSentences.some(sn => new RegExp('\\b' + coat[1].replace(/s$/, '')).test(sn)))) { out[i] = 0.35; return; }
             liquids.forEach(liq => { if (new RegExp(`\\b${liq.split(' ')[0]}\\b`).test(t) && !/\b(oil)\b/.test(t)) out[i] = /brine|water|soaking/.test(liq) ? 0 : 0.2; });
         });
         return out;
