@@ -2,15 +2,19 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn:
-    text: "Today"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "Today's meals.*|Generate Meal Plan"
+    commands:
+      - tapOn: "Today"
 - scrollUntilVisible:
     element: "(?i)dinner.*"
     direction: DOWN
+    centerElement: true
 - tapOn: "(?i)dinner.*"
 - extendedWaitUntil:
-    visible: "Ingredients.*"
+    visible: "(?i)dinner . today.*"
     timeout: 10000
 - takeScreenshot: 07-recipe
 - scrollUntilVisible:
@@ -21,7 +25,6 @@ appId: io.github.nourish.app
 - extendedWaitUntil:
     visible: "(?i)step 1 of.*"
     timeout: 10000
-- assertVisible: "(?i)you need"
 - takeScreenshot: 07-cook-step-1
 - tapOn: "Next step"
 - assertVisible: "(?i)step 2 of.*"

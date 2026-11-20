@@ -1045,9 +1045,12 @@
     function stepIngredients(ingredients, step) {
         const text = ' ' + String(step || '').toLowerCase().replace(/[^a-z\s-]/g, ' ').replace(/\s+/g, ' ') + ' ';
         const sing = w => w.replace(/(ies)$/, 'y').replace(/(oes|ches|shes|sses)$/, m => m.slice(0, -2)).replace(/([^s])s$/, '$1');
-        const words = new Set(text.trim().split(' ').map(sing));
+        const list = text.trim().split(' ').map(sing);
+        const words = new Set(list);
         const out = [];
-        (ingredients || []).forEach((line, i) => {
+        const SKIP = /^(fresh|large|small|medium|chopped|sliced|diced|minced|grated|ground|whole|low-sodium|cooked|dried|boneless|skinless|for|and|the|of)$/;
+        const wordsOf = n => String(n).toLowerCase().split(/\s+/).filter(w => w.length > 2 && !SKIP.test(w));
+        const namesOf = line => {
             const m = N.matchFood(line);
             const names = new Set();
             if (m) { names.add(m.phrase); names.add(m.key); }
@@ -1055,11 +1058,35 @@
             const item = U.splitIngredient(String(line));
             const own = String(item.text || line).toLowerCase().replace(/\(.*?\)|,.*$/g, '').replace(/[^a-z\s-]/g, ' ').trim();
             if (own) names.add(own);
-            const hit = Array.from(names).some(n => {
-                const ws = String(n).toLowerCase().split(/\s+/).filter(w => w.length > 2 && !/^(fresh|large|small|medium|chopped|sliced|diced|minced|grated|ground|whole|low-sodium|cooked|dried|boneless|skinless|for|and|the|of)$/.test(w));
+            return Array.from(names);
+        };
+        const lines = (ingredients || []).map(line => {
+            const names = namesOf(line);
+            const all = new Set(names.flatMap(n => wordsOf(n).map(sing)));
+            const heads = new Set(names.map(n => wordsOf(n)).filter(ws => ws.length).map(ws => sing(ws[ws.length - 1])));
+            return { names, all, heads };
+        });
+        // Two lines with the same last word ("toasted sesame oil", "olive oil"): the word before it in
+        // the step says which one is meant. "Whisk the sesame oil" isn't the olive oil; "the oil" is
+        // either, so both are shown.
+        const headMeans = (i, head) => {
+            const rivals = lines.filter((l, j) => j !== i && l.heads.has(head));
+            if (!rivals.length) return true;
+            return list.some((w, k) => {
+                if (w !== head) return false;
+                const before = list[k - 1];
+                if (!before || SKIP.test(before)) return true;
+                if (lines[i].all.has(before)) return true;
+                return !rivals.some(l => l.all.has(before));
+            });
+        };
+        (ingredients || []).forEach((line, i) => {
+            const hit = lines[i].names.some(n => {
+                const ws = wordsOf(n);
                 if (!ws.length) return false;
                 const head = sing(ws[ws.length - 1]);
-                if (words.has(head) || text.indexOf(' ' + ws.join(' ') + ' ') >= 0) return true;
+                if (text.indexOf(' ' + ws.join(' ') + ' ') >= 0) return true;
+                if (words.has(head) && headMeans(i, head)) return true;
                 // A step often says the family ("the beef") where the list names the cut ("sirloin steak").
                 return Object.keys(STEP_FAMILY).some(f => words.has(f) && ws.some(w => STEP_FAMILY[f].indexOf(sing(w)) >= 0));
             });

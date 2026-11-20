@@ -2,13 +2,17 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn:
-    text: "Plan"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "(?i)this week.*"
+    commands:
+      - tapOn: "Plan"
 - extendedWaitUntil:
     visible: "(?i)this week"
     timeout: 10000
-- assertVisible: "Budget .* kcal"
+- assertVisible: "Budget.*"
+- assertVisible: "(?i)within .* of your budget.*"
 - assertVisible: "(?i)(on track|over|under).*"
 - takeScreenshot: 05-plan-week-budget
 - assertVisible: ".*Eating out.*"

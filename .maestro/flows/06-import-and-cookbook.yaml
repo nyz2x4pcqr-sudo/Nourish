@@ -6,17 +6,20 @@ env:
   RECIPE_URL: https://raw.githubusercontent.com/nyz2x4pcqr-sudo/Nourish/main/.maestro/fixtures/test-oat-bowl.html
 ---
 - launchApp
-- tapOn:
-    text: "Plan"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "(?i)this week.*"
+    commands:
+      - tapOn: "Plan"
 - tapOn: "Add a recipe from a link"
 - extendedWaitUntil:
-    visible: "A recipe site, YouTube, TikTok, Instagram…"
+    visible: '(?i)(recipe link|A recipe site, YouTube, TikTok, Instagram…)'
     timeout: 10000
-- tapOn: "A recipe site, YouTube, TikTok, Instagram…"
+- tapOn: '(?i)(recipe link|A recipe site, YouTube, TikTok, Instagram…)'
 - inputText: ${RECIPE_URL}
-- hideKeyboard
-- tapOn: "Find the recipe"
+# Enter starts the search (on iPhone, hiding the keyboard already does).
+- pressKey: Enter
 - extendedWaitUntil:
     visible: "Check the recipe"
     timeout: 60000
@@ -25,14 +28,14 @@ env:
 - scrollUntilVisible:
     element: "Save to Cookbook"
     direction: DOWN
+    centerElement: true
 - tapOn: "Save to Cookbook"
 # The same page again, the way a share sheet might add a tracking tag.
 - tapOn: "Add a recipe from a link"
-- tapOn: ".*test-oat-bowl.*"
-- eraseText: 200
+- tapOn: '(?i)(recipe link|A recipe site, YouTube, TikTok, Instagram…)'
 - inputText: ${RECIPE_URL + '?utm_source=share'}
-- hideKeyboard
-- tapOn: "Find the recipe"
+# Enter starts the search (on iPhone, hiding the keyboard already does).
+- pressKey: Enter
 - extendedWaitUntil:
     visible: "You already saved this recipe.*"
     timeout: 60000

@@ -10,9 +10,12 @@ appId: io.github.nourish.app
 - takeScreenshot: 01-welcome
 - assertVisible: "Generate Meal Plan"
 # Dark is the default look ("Ember", the warm dark theme).
-- tapOn:
-    text: "Settings"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "Appearance.*"
+    commands:
+      - tapOn: "Settings"
 - extendedWaitUntil:
     visible: "Appearance.*"
     timeout: 15000
@@ -34,7 +37,10 @@ appId: io.github.nourish.app
     element: "Budget.*"
     direction: DOWN
 - takeScreenshot: 01-profile-budget
-- tapOn:
-    text: "Today"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "Today's meals.*|Generate Meal Plan"
+    commands:
+      - tapOn: "Today"
 - assertVisible: "Generate Meal Plan"

@@ -1627,7 +1627,9 @@ a.settings-button { display: flex; text-decoration: none; }
 /* === Cook mode: one step at a time, big and calm, with the step's ingredients and timers === */
 .recipe-steps-head { display: flex; align-items: center; gap: var(--s-3); margin: 0 2px var(--s-3); }
 .recipe-steps-head .recipe-steps-hint { flex: 1; margin: 0; }
-.cook-btn { flex: none; padding: 8px 14px; min-height: 0; font-size: var(--fs-caption); }
+/* width: auto undoes .btn-primary's full width; without it the button took the whole row on a phone,
+   squeezing the hint into a one-word column and pushing "Cook mode" off the right edge. */
+.cook-btn { flex: none; width: auto; padding: 8px 14px; min-height: 0; font-size: var(--fs-caption); }
 .cook-mode { display: none; position: fixed; inset: 0; z-index: 250; background: var(--bg); color: var(--text);
     padding: calc(var(--safe-top, 0px) + var(--s-4)) var(--s-5) calc(env(safe-area-inset-bottom, 0px) + var(--s-5)); }
 .cook-mode.active { display: flex; flex-direction: column; gap: var(--s-4); }

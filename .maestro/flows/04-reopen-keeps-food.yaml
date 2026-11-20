@@ -6,7 +6,7 @@ appId: io.github.nourish.app
 - launchApp:
     stopApp: true
 - extendedWaitUntil:
-    visible: "Today's meals"
+    visible: "Today's meals.*"
     timeout: 60000
 - scrollUntilVisible:
     element: ".*Apple.*"

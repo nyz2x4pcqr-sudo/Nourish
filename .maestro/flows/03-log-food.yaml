@@ -2,19 +2,24 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn:
-    text: "Today"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "Today's meals.*|Generate Meal Plan"
+    commands:
+      - tapOn: "Today"
 - scrollUntilVisible:
     element: "Add food.*"
     direction: DOWN
+    centerElement: true
+# The box is named by its label on Android and by its example text on iPhone.
 - tapOn: "Add food.*"
 - extendedWaitUntil:
-    visible: "e.g. 2 slices of pizza and a coffee"
+    visible: '(?i)(what did you have\?|e\.g\. 2 slices of pizza and a coffee)'
     timeout: 10000
 - takeScreenshot: 03-add-food
 # A snack, once.
-- tapOn: "e.g. 2 slices of pizza and a coffee"
+- tapOn: '(?i)(what did you have\?|e\.g\. 2 slices of pizza and a coffee)'
 - inputText: "1 apple"
 - pressKey: Enter
 - extendedWaitUntil:
@@ -33,13 +38,14 @@ appId: io.github.nourish.app
     element: "Add food.*"
     direction: UP
 - tapOn: "Add food.*"
-- tapOn: "e.g. 2 slices of pizza and a coffee"
+- tapOn: '(?i)(what did you have\?|e\.g\. 2 slices of pizza and a coffee)'
 - inputText: "1 cup black coffee"
 - pressKey: Enter
 - extendedWaitUntil:
     visible: "Log this by itself"
     timeout: 20000
-- tapOn: "Off"
+# The repeat menu is named "Repeat <food>" on Android and shows "Off" on iPhone.
+- tapOn: "Repeat .*|Off"
 - tapOn: "Every day"
 - takeScreenshot: 03-coffee-every-day
 - scrollUntilVisible:
@@ -49,5 +55,7 @@ appId: io.github.nourish.app
 - scrollUntilVisible:
     element: ".*[Cc]offee.*"
     direction: DOWN
-- assertVisible: ".*Apple.*"
+- scrollUntilVisible:
+    element: ".*Apple.*"
+    direction: UP
 - takeScreenshot: 03-today-with-snacks

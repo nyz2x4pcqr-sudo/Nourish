@@ -105,6 +105,19 @@ test('cook mode: timers from a step\'s words, and the ingredients each step uses
     assert.deepEqual(used('Thinly slice the beef.'), ['9 oz sirloin steak']);
 });
 
+test('cook mode: "sesame oil" in a step is not the olive oil (two lines ending in the same word)', () => {
+    // Seen in the phone UI tests: step 1 of a Sesame Noodle Bowl listed the olive oil for drizzling.
+    const ing = ['1½ tbsp white miso paste', '1½ tbsp rice vinegar', '1 tsp toasted sesame oil', '1 medium orange', 'Extra-virgin olive oil (for drizzling)', '6 oz shiitake mushrooms'];
+    const used = s => PL.stepIngredients(ing, s).map(i => ing[i]);
+    assert.deepEqual(used('Whisk together the miso, rice vinegar and sesame oil. Squeeze in the orange.'),
+        ['1½ tbsp white miso paste', '1½ tbsp rice vinegar', '1 tsp toasted sesame oil', '1 medium orange']);
+    assert.deepEqual(used('Heat a drizzle of olive oil and add the mushrooms.'), ['Extra-virgin olive oil (for drizzling)', '6 oz shiitake mushrooms']);
+    // Just "the oil": either could be meant, so both are shown.
+    assert.deepEqual(used('Heat the oil.'), ['1 tsp toasted sesame oil', 'Extra-virgin olive oil (for drizzling)']);
+    // One oil only: "the oil" and "sesame oil" both find it, as before.
+    assert.deepEqual(PL.stepIngredients(['2 tbsp olive oil', '1 onion'], 'Heat the oil, then add the onion.'), [0, 1]);
+});
+
 test('the pantry keeps staples off the shopping list, including more specific names', () => {
     const pantry = G.pantryList('Salt, olive oil\nsoy sauce;  black pepper ');
     assert.deepEqual(pantry, ['salt', 'olive oil', 'soy sauce', 'black pepper']);

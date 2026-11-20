@@ -40,6 +40,8 @@ if (-not $running) {
 & $adb shell input keyevent KEYCODE_WAKEUP
 & $adb shell wm dismiss-keyguard
 & $adb shell cmd statusbar collapse
+# Gboard's "Try out your stylus" lesson pops up over text boxes on test taps; turn handwriting off.
+& $adb shell settings put secure stylus_handwriting_enabled 0
 Write-Host "Emulator ready."
 
 # 2. The app: a given APK, or the newest Android build of main from GitHub Actions.

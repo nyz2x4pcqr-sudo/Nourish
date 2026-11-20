@@ -33,7 +33,7 @@ appId: io.github.nourish.app
 - tapOn: "Generate Plan"
 - takeScreenshot: 02-generating
 - extendedWaitUntil:
-    visible: "Today's meals"
+    visible: "Today's meals.*"
     timeout: 300000
 - takeScreenshot: 02-today-with-plan
 - scrollUntilVisible:

@@ -3,9 +3,12 @@
 appId: io.github.nourish.app
 ---
 - launchApp
-- tapOn:
-    text: "Settings"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "Appearance.*"
+    commands:
+      - tapOn: "Settings"
 - tapOn: "Appearance.*"
 - extendedWaitUntil:
     visible: "Ember.*"
@@ -14,55 +17,74 @@ appId: io.github.nourish.app
 - scrollUntilVisible:
     element: "Increase contrast.*"
     direction: DOWN
+    centerElement: true
 - tapOn: "Increase contrast.*"
 - scrollUntilVisible:
     element: "Coloured amounts.*"
     direction: DOWN
+    centerElement: true
 - tapOn: "Coloured amounts.*"
 - scrollUntilVisible:
     element: "Roomy"
     direction: DOWN
+    centerElement: true
 - tapOn: "Roomy"
 - scrollUntilVisible:
     element: "Square"
     direction: DOWN
+    centerElement: true
 - tapOn: "Square"
 - takeScreenshot: 09-options-set
 - scrollUntilVisible:
     element: "Paper.*"
     direction: UP
+    centerElement: true
 - tapOn: "Paper.*"
 - takeScreenshot: 09-paper-theme
-- tapOn:
-    text: "Today"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "Today's meals.*|Generate Meal Plan"
+    commands:
+      - tapOn: "Today"
 - takeScreenshot: 09-today-paper-roomy-square
 # Back to the defaults.
-- tapOn:
-    text: "Settings"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "Appearance.*"
+    commands:
+      - tapOn: "Settings"
 - tapOn: "Appearance.*"
 - scrollUntilVisible:
     element: "Ember.*"
     direction: DOWN
+    centerElement: true
 - tapOn: "Ember.*"
 - scrollUntilVisible:
     element: "Increase contrast.*"
     direction: DOWN
+    centerElement: true
 - tapOn: "Increase contrast.*"
 - scrollUntilVisible:
     element: "Coloured amounts.*"
     direction: DOWN
+    centerElement: true
 - tapOn: "Coloured amounts.*"
 - scrollUntilVisible:
     element: "Comfortable"
     direction: DOWN
+    centerElement: true
 - tapOn: "Comfortable"
 - scrollUntilVisible:
     element: "Round"
     direction: DOWN
+    centerElement: true
 - tapOn: "Round"
-- tapOn:
-    text: "Today"
-    retryTapIfNoChange: true
+- repeat:
+    times: 3
+    while:
+      notVisible: "Today's meals.*|Generate Meal Plan"
+    commands:
+      - tapOn: "Today"
 - takeScreenshot: 09-today-default

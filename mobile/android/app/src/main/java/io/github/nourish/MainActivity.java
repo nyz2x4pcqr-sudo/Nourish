@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowInsets;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -43,6 +44,7 @@ public class MainActivity extends Activity implements NativeBridge.Host {
     private static final String LOCAL_URL = "https://" + LOCAL_HOST + "/app/index.html";
 
     private WebView web;
+    private int[] safeArea = { 0, 0, 0, 0 };   // top, bottom, left, right, in screen pixels
     private NativeBridge bridge;
     private String serverUrl;
     private String connectError;
@@ -56,6 +58,21 @@ public class MainActivity extends Activity implements NativeBridge.Host {
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#0C0B0A"));
         setContentView(web);
+        // Android 15 draws apps edge to edge, under the status bar and the gesture bar, and the
+        // WebView reports 0 for env(safe-area-inset-*). Tell the page how big those bars are (as
+        // --native-safe-*, like the iPhone app), so headers and the buttons at the bottom of sheets
+        // aren't hidden behind them. On older Android the bars sit outside the app and this is 0.
+        web.setOnApplyWindowInsetsListener((v, insets) -> {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                safeArea = new int[] { i.top, i.bottom, i.left, i.right };
+            } else {
+                safeArea = new int[] { insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetBottom(),
+                        insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetRight() };
+            }
+            sendSafeArea();
+            return insets;
+        });
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -113,6 +130,17 @@ public class MainActivity extends Activity implements NativeBridge.Host {
         } else {
             loadForMode();
         }
+    }
+
+    private void sendSafeArea() {
+        if (web == null) return;
+        float d = getResources().getDisplayMetrics().density;
+        String[] names = { "top", "bottom", "left", "right" };
+        StringBuilder js = new StringBuilder("(function (s) {");
+        for (int k = 0; k < 4; k++) {
+            js.append(" s.setProperty('--native-safe-").append(names[k]).append("', '").append(Math.round(safeArea[k] / d)).append("px');");
+        }
+        web.evaluateJavascript(js.append(" })(document.documentElement.style)").toString(), null);
     }
 
     private void loadForMode() {
@@ -356,6 +384,7 @@ public class MainActivity extends Activity implements NativeBridge.Host {
 
         @Override
         public void onPageFinished(WebView view, String url) {
+            sendSafeArea();
             if (url.startsWith(CONNECT_PAGE)) {
                 try {
                     JSONObject info = new JSONObject();
