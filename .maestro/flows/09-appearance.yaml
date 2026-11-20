@@ -42,11 +42,13 @@ appId: io.github.nourish.app
     centerElement: true
 - tapOn: "Square"
 - takeScreenshot: 09-options-set
+# The Paper theme, by its note: an app icon is also called "Paper", and switching the app icon
+# closes the app on Android.
 - scrollUntilVisible:
-    element: "Paper.*"
+    element: ".*Warm light.*"
     direction: UP
     centerElement: true
-- tapOn: "Paper.*"
+- tapOn: ".*Warm light.*"
 - takeScreenshot: 09-paper-theme
 - repeat:
     times: 3

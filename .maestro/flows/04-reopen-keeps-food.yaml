@@ -12,5 +12,10 @@ appId: io.github.nourish.app
     element: ".*Apple.*"
     direction: DOWN
     timeout: 20000
+# 0.1.17: the "Up next" card is taller, so scroll on to the coffee too.
+- scrollUntilVisible:
+    element: ".*[Cc]offee.*"
+    direction: DOWN
+    timeout: 20000
 - assertVisible: ".*[Cc]offee.*"
 - takeScreenshot: 04-after-reopen
