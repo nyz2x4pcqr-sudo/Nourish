@@ -3909,6 +3909,10 @@ function normalizeMeal(m) {
         description: m.description ? (NourishImport.wholeSentences(String(m.description), 260) || undefined) : undefined,
         rating: m.rating && Number(m.rating.value) > 0 ? { value: toNumber(m.rating.value), count: toNumber(m.rating.count) || 0 } : undefined,
         cuisine: m.cuisine ? String(m.cuisine).slice(0, 30) : undefined,
+        // The recipe's own photo (https only) and the flavour boosts the person added.
+        image: typeof m.image === 'string' && /^https:\/\/[^\s"'<>]+$/i.test(m.image) ? m.image.slice(0, 400) : undefined,
+        flavor_boosts: Array.isArray(m.flavor_boosts) && m.flavor_boosts.length ? m.flavor_boosts.map(String).slice(0, 6) : undefined,
+        source_tier: m.source_tier === 'trusted' || m.source_tier === 'low' ? m.source_tier : undefined,
         // The meal the recipe's source files it under: part of telling a breakfast from a dinner.
         category: Array.isArray(m.category) ? m.category.map(String).slice(0, 6) : m.category ? String(m.category).slice(0, 80) : undefined,
         library_path: m.library_path ? String(m.library_path).slice(0, 300) : undefined,
@@ -5934,7 +5938,7 @@ function editedRecipe() {
         nutrition: numOrNull('editKcal') != null ? { calories: numOrNull('editKcal'), protein_g: numOrNull('editProtein') || 0, carbs_g: numOrNull('editCarbs') || 0, fat_g: numOrNull('editFat') || 0 } : null,
         // Numbers typed in by hand are kept; otherwise they're worked out again from the ingredients.
         nutrition_basis: editing.nutritionEdited ? 'source' : undefined,
-        source_url: r.source_url, source_name: r.source_name, via_url: r.via_url, via_name: r.via_name,
+        source_url: r.source_url, source_name: r.source_name, via_url: r.via_url, via_name: r.via_name, image: r.image,
     };
     if (recipe.name.length < 2) return fail('Give the recipe a name.');
     if (!recipe.ingredients.length) return fail('Add at least one ingredient.');

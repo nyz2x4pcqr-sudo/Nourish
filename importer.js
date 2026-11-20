@@ -202,7 +202,8 @@
     // The first complete sentences of a text, at most `max` characters; '' when even the first
     // sentence is longer (a cut-off sentence is never shown).
     function wholeSentences(text, max = 220) {
-        const t = String(text || '').replace(/\s+/g, ' ').trim();
+        // Stray punctuation left at the start by a site's markup ("). I use…") is dropped.
+        const t = String(text || '').replace(/\s+/g, ' ').trim().replace(/^[\s).,;:!?\]}–—-]+/, '');
         if (!t) return '';
         const parts = t.match(/[^.!?]+[.!?]+(?:["'”’)]+)?(?=\s|$)/g) || [];
         let out = '';

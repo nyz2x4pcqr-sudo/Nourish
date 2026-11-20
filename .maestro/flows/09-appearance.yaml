@@ -24,6 +24,13 @@ appId: io.github.nourish.app
     direction: DOWN
     centerElement: true
 - tapOn: "Coloured amounts.*"
+# 0.1.17: recipe photos can be switched off (nothing is downloaded) and back on.
+- scrollUntilVisible:
+    element: "Recipe photos.*"
+    direction: DOWN
+    centerElement: true
+- tapOn: "Recipe photos.*"
+- tapOn: "Recipe photos.*"
 - scrollUntilVisible:
     element: "Roomy"
     direction: DOWN
