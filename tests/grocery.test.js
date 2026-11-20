@@ -91,3 +91,11 @@ test('amount caps judge the main ingredient, not a flavour word in brackets or i
     assert.equal(u.clampIngredient('1 cup extra virgin olive oil, plus more').clamped, 'oils and vinegars: at most ¼ cup');
     assert.equal(u.clampIngredient('1/4 cup kosher salt').clamped, 'salt and raising agents: at most 1 tbsp');
 });
+
+test('fresh coriander and ground coriander stay two lines (the plan audit lost the cilantro)', () => {
+    const G = require('../grocery.js');
+    const out = G.dedupeIngredients(['1 tsp coriander ground', '5 tsp fresh coriander (chopped)', '1 onion', '1 onion, chopped']);
+    assert.ok(out.some(l => /fresh coriander/.test(l)), JSON.stringify(out));
+    assert.ok(out.some(l => /coriander ground/.test(l)), JSON.stringify(out));
+    assert.equal(out.filter(l => /onion/.test(l)).length, 1, JSON.stringify(out));
+});

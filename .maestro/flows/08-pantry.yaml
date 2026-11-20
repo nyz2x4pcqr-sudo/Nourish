@@ -10,10 +10,12 @@ appId: io.github.nourish.app
     element: "Already in your pantry.*"
     direction: DOWN
     timeout: 60000
+    centerElement: true
 - tapOn: "Already in your pantry.*"
 - scrollUntilVisible:
     element: "Change what.s in your pantry"
     direction: DOWN
+    centerElement: true
 - takeScreenshot: 08-pantry-open
 - tapOn: "Change what.s in your pantry"
 - extendedWaitUntil:

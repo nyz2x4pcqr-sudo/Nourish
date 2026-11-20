@@ -57,5 +57,5 @@ appId: io.github.nourish.app
     direction: DOWN
 - scrollUntilVisible:
     element: ".*Apple.*"
-    direction: UP
+    direction: DOWN
 - takeScreenshot: 03-today-with-snacks

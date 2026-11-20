@@ -133,8 +133,12 @@
     function dedupeIngredients(list) {
         const out = [];
         const at = new Map();
+        // Fresh herbs and their dried, ground or seed forms are different things to buy and cook
+        // with: "5 tsp fresh coriander (chopped)" and "1 tsp ground coriander" stay two lines (merged,
+        // the cilantro vanished from the recipe; the plan audit found it).
+        const form = line => (/\b(ground|dried|powder(ed)?|seeds?|flakes)\b/i.test(line) ? 'dry' : '');
         (list || []).forEach(line => {
-            const key = ingredientKey(line);
+            const key = `${ingredientKey(line)}|${form(String(line))}`;
             if (!at.has(key)) { at.set(key, out.length); out.push(line); return; }
             const i = at.get(key);
             const prev = out[i];

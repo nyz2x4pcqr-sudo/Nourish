@@ -5817,8 +5817,10 @@ function openRecipeEditor(recipe, { mode = 'import', notes = [], mealType = 'din
                     h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => saveImported('plan') }, icon('i-calendar'), target ? `Add to ${dayName(target.dayIndex)} ${MEAL_LABELS[target.mealType].toLowerCase()}` : 'Add to plan…'),
                     h('label', { class: 'edit-also' }, h('input', { type: 'checkbox', id: 'editAlsoSave', checked: true }), 'Also keep it in my Cookbook when adding to the plan'))));
     ['editKcal', 'editProtein', 'editCarbs', 'editFat'].forEach(id => $(id).addEventListener('input', () => { const chip = $('editEstimated'); if (chip) chip.textContent = 'Edited'; editing.nutritionEdited = true; }));
-    $('recipeEditContent').scrollTop = 0;
     $('recipeEditSheet').classList.add('active');
+    // After it's shown: a hidden sheet ignores scrollTop, and a second import opened where the first
+    // was left (at its Save button), with the "already saved" note out of sight (phone UI tests).
+    $('recipeEditContent').scrollTop = 0;
 }
 
 function closeRecipeEditor() {

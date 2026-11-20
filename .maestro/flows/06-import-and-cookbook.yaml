@@ -31,6 +31,9 @@ env:
     centerElement: true
 - tapOn: "Save to Cookbook"
 # The same page again, the way a share sheet might add a tracking tag.
+- scrollUntilVisible:
+    element: "Add a recipe from a link"
+    direction: UP
 - tapOn: "Add a recipe from a link"
 - tapOn: '(?i)(recipe link|A recipe site, YouTube, TikTok, Instagram…)'
 - inputText: ${RECIPE_URL + '?utm_source=share'}

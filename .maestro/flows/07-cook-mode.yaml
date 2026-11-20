@@ -30,4 +30,8 @@ appId: io.github.nourish.app
 - assertVisible: "(?i)step 2 of.*"
 - takeScreenshot: 07-cook-step-2
 - tapOn: "Leave cook mode"
+# The recipe comes back where it was left; its Close button is at the top.
+- scrollUntilVisible:
+    element: "Close"
+    direction: UP
 - tapOn: "Close"
