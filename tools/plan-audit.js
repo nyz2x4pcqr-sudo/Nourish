@@ -213,10 +213,12 @@ function checkMeal(meal, slot, ctx) {
     // 4. The recipe as written: nothing added, removed or swapped (0.1.13 added chicken, eggs, powder,
     // fiber foods and oil swaps to recipes). Its foods must be the original's (amounts follow the portion).
     if (meal.protein_added || meal.fiber_added || meal.fat_swapped || meal.trimmed || meal.reseasoned || meal.adapted) add('recipe changed', 'problem', `${meal.protein_added ? `added ${[].concat(meal.protein_added).join(', ')}` : meal.fiber_added ? `added ${[].concat(meal.fiber_added).join(', ')}` : meal.fat_swapped ? 'oil swapped for butter' : meal.trimmed ? 'oil or sugar cut' : meal.reseasoned ? 'seasoning added' : 'an ingredient swapped'}`);
-    const orig = ctx.original && ctx.original(meal);
-    if (orig && !meal.builtin && !meal.quick) {
+    const origs = ctx.original && ctx.original(meal);
+    if (origs && origs.length && !meal.builtin && !meal.quick) {
+        // Against the closest copy of the recipe (a name can be in the pool more than once).
         const now = PL.ingredientFoods(meal);
-        const missing = orig.filter(x => !now.includes(x)), extra = now.filter(x => !orig.includes(x));
+        const diff = o => ({ missing: o.filter(x => !now.includes(x)), extra: now.filter(x => !o.includes(x)) });
+        const { missing, extra } = origs.map(diff).sort((a, b) => (a.missing.length + a.extra.length) - (b.missing.length + b.extra.length))[0];
         if (missing.length || extra.length) add('recipe changed', 'problem', `${extra.length ? `added: ${extra.slice(0, 3).join(', ')}` : ''}${extra.length && missing.length ? '; ' : ''}${missing.length ? `missing: ${missing.slice(0, 3).join(', ')}` : ''}`);
     }
 
@@ -404,7 +406,9 @@ async function main() {
                 sourceOf, spareWeb, spareNames,
                 split: planSourceSplit(daysData),
                 // The recipes as written (the pool the plan was made from), to check nothing was changed.
-                originals: Object.fromEntries(MEALS.flatMap(t => ((lastPlanPools || {})[t] || []).map(r => [r.name, NourishPlanner.ingredientFoods(r)]))),
+                // Every copy of a name: one recipe can be in the pool twice, from the recipe library and
+                // fresh from the web, and the page may have changed in between.
+                originals: MEALS.flatMap(t => ((lastPlanPools || {})[t] || []).map(r => [r.name, NourishPlanner.ingredientFoods(r)])).reduce((o, [n, f]) => ((o[n] = o[n] || []).push(f), o), {}),
                 // The day's numbers as the app shows them.
                 shown: daysData.map(d => ({ kcal: sumNutrient(d, 'calories'), protein: sumNutrient(d, 'protein_g') })),
                 log: activityLog.filter(l => l.t >= since && l.area === 'plan').map(l => l.msg + (l.details ? ` ${l.details.slice(0, 400)}` : '')),
