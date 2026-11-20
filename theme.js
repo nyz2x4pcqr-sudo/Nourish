@@ -79,7 +79,7 @@
         pink: { name: 'Rose', accent: '#F08BA8', accent2: '#FFC0D1', deep: '#C24E72' },
         teal: { name: 'Mint', accent: '#5FD0B8', accent2: '#A6EEDD', deep: '#1F9682' },
     };
-    const DEFAULTS = { theme: 'ember', bg: '', custom_bg: '', accent: 'orange', custom_accent: '', font_pair: 'editorial', text_size: 'default', bold_text: 'off', icon_style: 'outline', app_icon: 'default' };
+    const DEFAULTS = { theme: 'ember', bg: '', custom_bg: '', accent: 'orange', custom_accent: '', font_pair: 'editorial', text_size: 'default', bold_text: 'off', icon_style: 'outline', app_icon: 'default' , density: 'comfortable', corners: 'round', high_contrast: 'off', colour_amounts: 'off' };
 
     // Older settings: theme dark/light/system.
     function themeId(theme) { return { dark: 'ember', light: 'paper', system: 'auto' }[theme] || (THEMES[theme] || theme === 'auto' ? theme : 'ember'); }
@@ -168,6 +168,15 @@
         out.theme = id;
         // The original themes keep their hand-tuned values at their own background.
         if (!custom && bg === t.bgs[0] && (id === 'ember' || id === 'paper')) Object.assign(out.vars, ORIGINAL[id]);
+        // Increase contrast: quieter text moves most of the way to the main text colour, and edges get firmer.
+        if (s.high_contrast === 'on' && hexToRgb(out.vars['--text']) && hexToRgb(out.bg)) {
+            const text = out.vars['--text'];
+            if (hexToRgb(out.vars['--text-2'])) out.vars['--text-2'] = mix(out.vars['--text-2'], text, 0.6);
+            if (hexToRgb(out.vars['--text-3'])) out.vars['--text-3'] = mix(out.vars['--text-3'], text, 0.5);
+            out.vars['--border'] = rgba(text, 0.22);
+            out.vars['--border-strong'] = rgba(text, 0.38);
+            out.vars['--hairline'] = rgba(text, 0.18);
+        }
         return out;
     }
     const ORIGINAL = {
@@ -184,6 +193,9 @@
         minimal: { name: 'Minimal', note: 'Light and airy', heading: 'Manrope', body: 'Manrope' },
     };
     const TEXT_SIZES = { small: 'Small', default: 'Default', large: 'Large', xl: 'Extra large' };
+    // How much room things get, and how round the corners are.
+    const DENSITIES = { compact: 'Compact', comfortable: 'Comfortable', roomy: 'Roomy' };
+    const CORNERS = { round: 'Round', soft: 'Soft', square: 'Square' };
     const ICON_STYLES = { outline: 'Outline', bold: 'Bold', light: 'Light', duotone: 'Filled', sharp: 'Sharp' };
     // Home screen icons (the phone apps can switch between these).
     const APP_ICONS = {
@@ -200,7 +212,7 @@
     if (typeof document !== 'undefined' && typeof localStorage !== 'undefined') {
         try {
             const saved = {};
-            ['theme', 'bg', 'custom_bg', 'accent', 'custom_accent', 'font_pair', 'text_size', 'bold_text', 'icon_style'].forEach(k => { const v = localStorage.getItem(k); if (v != null) saved[k] = v; });
+            ['theme', 'bg', 'custom_bg', 'accent', 'custom_accent', 'font_pair', 'text_size', 'bold_text', 'icon_style', 'density', 'corners', 'high_contrast', 'colour_amounts'].forEach(k => { const v = localStorage.getItem(k); if (v != null) saved[k] = v; });
             const look = resolve(saved, !!(root.matchMedia && root.matchMedia('(prefers-color-scheme: light)').matches));
             const el = document.documentElement;
             Object.keys(look.vars).forEach(k => el.style.setProperty(k, look.vars[k]));
@@ -209,10 +221,13 @@
             if (TEXT_SIZES[saved.text_size]) el.setAttribute('data-text', saved.text_size);
             if (ICON_STYLES[saved.icon_style]) el.setAttribute('data-icons', saved.icon_style);
             if (saved.bold_text === 'on') el.setAttribute('data-bold', 'on');
+            if (DENSITIES[saved.density]) el.setAttribute('data-density', saved.density);
+            if (CORNERS[saved.corners]) el.setAttribute('data-corners', saved.corners);
+            if (saved.colour_amounts === 'on') el.setAttribute('data-amounts', 'colour');
         } catch (e) { /* storage unavailable: app.js applies the look */ }
     }
 
-    const api = { THEMES, BG_NAMES, ACCENTS, FONTS, TEXT_SIZES, ICON_STYLES, APP_ICONS, DEFAULTS, resolve, build, accentOf, themeId, contrast, luminance, mix, hexToRgb, rgbToHex };
+    const api = { THEMES, BG_NAMES, ACCENTS, FONTS, TEXT_SIZES, DENSITIES, CORNERS, ICON_STYLES, APP_ICONS, DEFAULTS, resolve, build, accentOf, themeId, contrast, luminance, mix, hexToRgb, rgbToHex };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishTheme = api;
 })(typeof window !== 'undefined' ? window : globalThis);

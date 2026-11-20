@@ -91,6 +91,9 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(self.client.get(f"/{f}").status_code, 404, f)
         self.assertEqual(self.client.get("/backend/.env").status_code, 404)
         self.assertEqual(self.client.get("/.git/config").status_code, 404)
+        # Always re-checked, so an update never mixes old and new files.
+        self.assertEqual(self.client.get("/theme.js").headers.get("cache-control"), "no-cache")
+        self.assertEqual(r.headers.get("cache-control"), "no-cache")
 
     def test_every_served_file_exists(self):
         for name in main.FRONTEND_FILES:

@@ -190,7 +190,7 @@
         const d = date instanceof Date ? date : new Date(date);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
-    function empty() { return { days: {}, recents: [], favorites: [] }; }
+    function empty() { return { days: {}, recents: [], favorites: [], repeats: [] }; }
     function cleanItem(x) {
         if (!x || typeof x !== 'object' || !x.name || !x.nutrition) return null;
         const n = x.nutrition;
@@ -211,9 +211,15 @@
             const d = log.days[k] || {};
             const meals = {};
             Object.keys(d.meals || {}).forEach(m => { if (['eaten', 'skipped'].includes(d.meals[m])) meals[m] = d.meals[m]; });
-            const items = (Array.isArray(d.items) ? d.items : []).map(cleanItem).filter(Boolean).slice(0, 100);
-            if (items.length || Object.keys(meals).length) out.days[k] = { items, meals };
+            const items = (Array.isArray(d.items) ? d.items.map(x => Object.assign(cleanItem(x) || {}, x && x.repeat ? { repeat: String(x.repeat) } : {})) : []).filter(x => x.name).slice(0, 100);
+            const repeated = (Array.isArray(d.repeated) ? d.repeated : []).map(String).slice(0, 50);
+            if (items.length || Object.keys(meals).length || repeated.length) out.days[k] = Object.assign({ items, meals }, repeated.length ? { repeated } : {});
         });
+        out.repeats = (Array.isArray(log.repeats) ? log.repeats : []).map(r => {
+            const item = r && cleanItem(r.item);
+            const days = (Array.isArray(r && r.days) ? r.days : []).map(Number).filter(d => d >= 0 && d <= 6);
+            return item && days.length ? { id: String(r.id || item.id), item, days: Array.from(new Set(days)).sort(), since: /^\d{4}-\d{2}-\d{2}$/.test(r.since) ? r.since : '' } : null;
+        }).filter(Boolean).slice(0, 30);
         // Keep about a year.
         const keys = Object.keys(out.days).sort();
         keys.slice(0, Math.max(0, keys.length - 400)).forEach(k => delete out.days[k]);
@@ -247,6 +253,81 @@
         if (status === 'eaten' || status === 'skipped') d.meals[meal] = status; else delete d.meals[meal];
     }
 
+    // === REPEATS ===
+    // A snack or drink that's had on set days (a morning coffee, a daily protein shake) is logged by
+    // itself on those days. days: weekdays, Monday = 0. Taking it off a day's log keeps it off that day.
+    const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
+    const WEEKDAYS_ONLY = [0, 1, 2, 3, 4];
+    function repeatOf(log, item) { return (log.repeats || []).find(r => sameFood(r.item, item)) || null; }
+    function setRepeat(log, item, days, todayKey) {
+        log.repeats = (log.repeats || []).filter(r => !sameFood(r.item, item));
+        const list = Array.from(new Set((days || []).map(Number).filter(d => d >= 0 && d <= 6))).sort();
+        if (!list.length) return null;
+        const it = cleanItem(Object.assign({}, item, { id: undefined }));
+        const r = { id: 'r' + it.id, item: it, days: list, since: todayKey || '' };
+        log.repeats.push(r);
+        // Already logged today: that entry counts as today's repeat.
+        if (todayKey) {
+            const d = day(log, todayKey);
+            const here = d.items.find(x => sameFood(x, it));
+            if (here) { here.repeat = r.id; d.repeated = Array.from(new Set((d.repeated || []).concat(r.id))); }
+        }
+        return r;
+    }
+    // Logs the repeats due on `key` (a date) once. Returns the items added.
+    function applyRepeats(log, key, weekday) {
+        const added = [];
+        (log.repeats || []).forEach(r => {
+            if (r.days.indexOf(weekday) < 0 || (r.since && key < r.since)) return;
+            const d = day(log, key);
+            if ((d.repeated || []).indexOf(r.id) >= 0) return;
+            const it = cleanItem(Object.assign({}, r.item, { id: undefined, time: Date.now() }));
+            it.repeat = r.id;
+            d.items.push(it);
+            d.repeated = (d.repeated || []).concat(r.id);
+            added.push(it);
+        });
+        return added;
+    }
+    function repeatLabel(days) {
+        const s = (days || []).slice().sort().join();
+        if (s === EVERY_DAY.join()) return 'Every day';
+        if (s === WEEKDAYS_ONLY.join()) return 'Weekdays';
+        if (s === '5,6') return 'Weekends';
+        const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        return (days || []).map(d => names[d]).join(', ');
+    }
+
+    // === THE WEEK'S BUDGET ===
+    // How the week is going against its calorie budget, counting what was really eaten: extras
+    // (snacks, drinks) and skipped meals change it. days: [{ target, planDay, entry, when }] where
+    // when is 'past', 'today' or 'future'. A past day with nothing logged counts as planned.
+    // "On track" is within 5% of the budget (a range, not a single number: portions are estimates).
+    function weekBalance(days) {
+        const sumPlan = pd => slotsOf(pd).reduce((t, [, m]) => t + ((m && m.nutrition && Number(m.nutrition.calories)) || 0), 0);
+        let budget = 0, projected = 0, extras = 0, skipped = 0;
+        const future = [];
+        (days || []).forEach((d, i) => {
+            const target = Number(d.target) || 0;
+            budget += target;
+            if (d.when === 'future') { projected += sumPlan(d.planDay); future.push(i); return; }
+            const t = totals(d.planDay, d.entry);
+            projected += t.planned.calories;
+            extras += t.extras.calories;
+            skipped += sumPlan(d.planDay) + t.extras.calories - t.planned.calories;
+        });
+        const diff = Math.round(projected - budget);
+        const tolerance = Math.round(budget * 0.05);
+        const status = Math.abs(diff) <= tolerance ? 'on-track' : diff > 0 ? 'over' : 'under';
+        return {
+            budget: Math.round(budget), projected: Math.round(projected), diff, tolerance, status,
+            range: [budget - tolerance, budget + tolerance].map(Math.round),
+            extras: Math.round(extras), skipped: Math.round(skipped), futureDays: future,
+            // What each day still to come would change by to land on the budget.
+            perFutureDay: future.length ? Math.round(-diff / future.length) : 0,
+        };
+    }
+
     // The day in numbers. planDay: { breakfast, lunch, dinner, snacks: [] } from the plan.
     // planned: everything planned that isn't skipped, plus extras; eaten: meals marked eaten plus extras.
     function totals(planDay, entry) {
@@ -273,7 +354,8 @@
         return out;
     }
 
-    const api = { parse, estimate, splitText, setAmount, search, fromOpenFoodFacts, manual, dayKey, empty, clean, cleanItem, add, update, remove, toggleFavorite, isFavorite, setMeal, totals, slotsOf, SERVINGS };
+    const api = { parse, estimate, splitText, setAmount, search, fromOpenFoodFacts, manual, dayKey, empty, clean, cleanItem, add, update, remove, toggleFavorite, isFavorite, setMeal, totals, slotsOf, SERVINGS,
+        repeatOf, setRepeat, applyRepeats, repeatLabel, EVERY_DAY, WEEKDAYS_ONLY, weekBalance };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishLog = api;
 })(typeof window !== 'undefined' ? window : globalThis);

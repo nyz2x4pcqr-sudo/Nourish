@@ -140,16 +140,21 @@ def health():
     return {"status": "ok"}
 
 
+# The app's files are checked with the PC on every load ("no-cache" still uses the saved copy when it
+# hasn't changed), so after an update the browser never mixes a new app.js with an old theme.js.
+NO_STALE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/")
 def index():
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return FileResponse(FRONTEND_DIR / "index.html", headers=NO_STALE)
 
 
 @app.get("/{name}")
 def frontend_file(name: str):
     if name not in FRONTEND_FILES:
         raise HTTPException(status_code=404)
-    return FileResponse(FRONTEND_DIR / name)
+    return FileResponse(FRONTEND_DIR / name, headers=NO_STALE)
 
 
 _lan_cache = {"at": 0.0, "urls": []}

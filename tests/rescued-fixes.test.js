@@ -61,7 +61,7 @@ test('a breading station: most of the flour, egg and crumbs stay in the bowls', 
 });
 
 test('bracketed weights scale with their line, also when the unit changes', () => {
-    assert.equal(PL.scaleLine('2 bone-in pork chops (1 1/2 pounds total)', 0.5), '1 bone-in pork chops (¾ pound total)');
+    assert.equal(PL.scaleLine('2 bone-in pork chops (1 1/2 pounds total)', 0.5), '1 bone-in pork chop (¾ pound total)');
     assert.equal(PL.scaleLine('1/2 cup (50g) parmesan', 0.15), '1¼ tbsp (10g) parmesan');
     assert.equal(PL.scaleLine('1 kg / 2 lb beef mince', 0.125), '125 g / ¼ lb beef mince');
     // Unchanged: a can's own size isn't scaled.

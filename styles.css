@@ -1424,6 +1424,10 @@ a.settings-button { display: flex; text-decoration: none; }
 .food-unit { color: var(--text-2); font-size: var(--fs-footnote); font-weight: 600; flex: 1; min-width: 4em; }
 .food-row-kcal { font-weight: 750; white-space: nowrap; }
 .food-row-macros { margin-top: 6px; font-size: var(--fs-caption); color: var(--text-3); font-weight: 600; }
+.food-repeat { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: var(--fs-caption); color: var(--text-2); font-weight: 600; }
+.food-repeat svg { width: 16px; height: 16px; color: var(--text-3); flex: none; }
+.food-repeat span { flex: 1; }
+.food-repeat select { width: auto; min-width: 7.5em; padding: 6px 10px; font-size: var(--fs-caption); }
 .food-kcal-input { display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-2); font-size: var(--fs-footnote); color: var(--text-2); }
 .food-kcal-input input { width: 6em; }
 .food-results { display: flex; flex-direction: column; margin-top: var(--s-2); border-radius: var(--r); overflow: hidden; border: 1px solid var(--hairline); }
@@ -1575,6 +1579,18 @@ a.settings-button { display: flex; text-decoration: none; }
 .learned-summary p { margin: 0 0 6px; line-height: 1.5; }
 #recipeSheet .rate-row { padding: 0 var(--s-5); }
 
+/* This week: the budget as a range, how it's going, and a one-tap way to even it out. */
+.week-card { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); border-radius: var(--r-xl); }
+.week-card.status-over { border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
+.week-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.week-pill { padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-caption, 12px); font-weight: 750; letter-spacing: .02em; }
+.week-pill.on-track { background: color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); }
+.week-pill.over { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.week-pill.under { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-text); }
+.week-detail { margin: 0; padding: 0 4px; color: var(--text-2); font-size: var(--fs-footnote, 13px); line-height: 1.45; }
+.week-share { margin-top: var(--s-1); }
+.week-card .link-btn { align-self: flex-start; min-height: 36px; }
+
 /* Weekly calories: the week view on the Plan screen and the big-day rows in Settings. */
 .week-card .week-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: var(--s-2); }
 .week-day { display: flex; flex-direction: column; align-items: center; padding: 6px 2px; border-radius: 10px; background: var(--surface-2, rgba(127,127,127,.08)); font-size: var(--fs-caption, 12px); min-width: 0; }
@@ -1600,3 +1616,54 @@ a.settings-button { display: flex; text-decoration: none; }
 .settings-hint.warn { color: var(--danger); }
 .recipe-credit { text-align: center; margin: var(--s-2) 0 var(--s-4); }
 .header-actions .link-btn { white-space: nowrap; }
+
+/* === Cook mode: one step at a time, big and calm, with the step's ingredients and timers === */
+.recipe-steps-head { display: flex; align-items: center; gap: var(--s-3); margin: 0 2px var(--s-3); }
+.recipe-steps-head .recipe-steps-hint { flex: 1; margin: 0; }
+.cook-btn { flex: none; padding: 8px 14px; min-height: 0; font-size: var(--fs-caption); }
+.cook-mode { display: none; position: fixed; inset: 0; z-index: 250; background: var(--bg); color: var(--text);
+    padding: calc(var(--safe-top, 0px) + var(--s-4)) var(--s-5) calc(env(safe-area-inset-bottom, 0px) + var(--s-5)); }
+.cook-mode.active { display: flex; flex-direction: column; gap: var(--s-4); }
+.cook-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-3); }
+.cook-title { font-family: var(--font-display); font-size: var(--fs-title-3); font-weight: 600; margin-top: 2px; }
+.cook-progress { display: flex; gap: 4px; }
+.cook-progress span { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); }
+.cook-progress span.done { background: var(--accent-deep, var(--accent)); }
+.cook-progress span.current { background: var(--accent); }
+.cook-timers { display: flex; flex-direction: column; gap: var(--s-2); }
+.cook-timer { display: flex; align-items: center; gap: var(--s-2); padding: 6px 6px 6px 12px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--border); }
+.cook-timer.done { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); }
+.cook-timer-label { flex: 1; font-size: var(--fs-caption); color: var(--text-2); font-weight: 600; }
+.cook-timer b { font-size: var(--fs-title-3); font-variant-numeric: tabular-nums; }
+.cook-timer .icon-btn { width: 32px; height: 32px; }
+.cook-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--s-5); padding-top: var(--s-2); }
+.cook-step { font-size: clamp(1.35rem, 5.4vw, 2rem); line-height: 1.38; font-weight: 500; letter-spacing: -0.01em; margin: 0; text-wrap: pretty; }
+.cook-uses { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-4); }
+.cook-uses ul { margin: var(--s-2) 0 0; padding-left: 1.1em; display: grid; gap: 6px; font-size: var(--fs-body); }
+.cook-start-timers { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.cook-nav { display: grid; grid-template-columns: 1fr 2fr; gap: var(--s-3); }
+.cook-nav .btn { min-height: 54px; }
+@media (min-width: 900px) { .cook-mode.active { padding-left: max(var(--s-5), calc(50vw - 380px)); padding-right: max(var(--s-5), calc(50vw - 380px)); } }
+
+/* === Pantry: staples folded away under the shopping list === */
+.pantry-card summary { list-style: none; cursor: pointer; }
+.pantry-card summary::-webkit-details-marker { display: none; }
+.pantry-card .chev { width: 18px; height: 18px; color: var(--text-3); transition: transform .2s; }
+.pantry-card[open] .chev { transform: rotate(90deg); }
+.pantry-hint { margin: 0 var(--s-4) var(--s-3); font-size: var(--fs-caption); color: var(--text-3); }
+.pantry-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 var(--s-4); }
+.pantry-card .link-btn { margin: var(--s-2) var(--s-3) var(--s-2); }
+.pantry-edit { flex-direction: column; align-items: stretch; gap: var(--s-2); }
+.pantry-edit textarea { width: 100%; min-height: 8em; font: inherit; resize: vertical; }
+.pantry-card summary > span { flex: 1; }
+.food-barcode + .sheet-hint { margin: var(--s-2) 2px 0; font-size: var(--fs-caption); color: var(--text-3); }
+
+/* === Spacing, corners and coloured amounts (Settings → Appearance) === */
+[data-density="compact"] { --s-3: 10px; --s-4: 12px; --s-5: 16px; --s-6: 20px; --s-7: 22px; --s-8: 26px; }
+[data-density="roomy"]   { --s-3: 14px; --s-4: 20px; --s-5: 24px; --s-6: 30px; --s-7: 34px; --s-8: 40px; }
+[data-density="compact"] .meal-card, [data-density="compact"] .settings-row { min-height: 0; }
+[data-corners="soft"]   { --r-xs: 6px; --r-sm: 8px; --r: 12px; --r-lg: 15px; --r-xl: 18px; --r-2xl: 22px; }
+[data-corners="square"] { --r-xs: 3px; --r-sm: 4px; --r: 6px; --r-lg: 8px; --r-xl: 10px; --r-2xl: 12px; }
+[data-amounts="colour"] .recipe-ingredient .qty,
+[data-amounts="colour"] .cook-uses .qty { color: var(--accent-text); }
+[data-amounts="colour"] .recipe-ingredient.done .qty { color: var(--text-3); }

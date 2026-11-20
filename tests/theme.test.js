@@ -55,3 +55,15 @@ test('a custom accent gets matching shades and readable text on buttons', () => 
         }
     }
 });
+
+test('Increase contrast makes quiet text clearly readable on every theme, and leaves it alone when off', () => {
+    for (const theme of Object.keys(T.THEMES)) {
+        const plain = T.resolve({ theme }, false), more = T.resolve({ theme, high_contrast: 'on' }, false);
+        assert.ok(T.contrast(more.vars['--text-3'], more.bg) >= 4.5, `${theme}: quiet text at least 4.5:1`);
+        assert.ok(T.contrast(more.vars['--text-3'], more.bg) > T.contrast(plain.vars['--text-3'], plain.bg), `${theme}: more than before`);
+        assert.equal(T.resolve({ theme, high_contrast: 'off' }, false).vars['--text-3'], plain.vars['--text-3']);
+    }
+    assert.equal(T.DEFAULTS.density, 'comfortable');
+    assert.equal(T.DEFAULTS.corners, 'round');
+    assert.ok(T.DENSITIES.compact && T.CORNERS.square);
+});

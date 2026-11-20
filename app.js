@@ -140,6 +140,12 @@ const SETTINGS_DEFAULTS = {
     for (let d = 0; d < 7; d++) SETTINGS_DEFAULTS[`sched_d${d}_${m}`] = '';
 });
 SETTINGS_DEFAULTS.sched_weekend = 'off';
+SETTINGS_DEFAULTS.density = 'comfortable';      // Settings → Appearance → Spacing
+SETTINGS_DEFAULTS.corners = 'round';
+SETTINGS_DEFAULTS.high_contrast = 'off';
+SETTINGS_DEFAULTS.colour_amounts = 'off';
+SETTINGS_DEFAULTS.pantry_on = 'on';   // staples you always have stay off the shopping list
+SETTINGS_DEFAULTS.pantry = '';        // your own pantry list; empty = the starter list
 SETTINGS_DEFAULTS.sched_asked = '';   // 'yes' once the quick questions were answered or skipped
 SETTINGS_DEFAULTS.allow_leftovers = 'off';
 SETTINGS_DEFAULTS.source_cap = 3;            // at most this many meals a week from one book, one site or Nourish's own recipes
@@ -235,6 +241,13 @@ const LOG_KEY = 'nourish_log';
 const LOG_MAX = 1500;
 let activityLog = [];
 try { activityLog = JSON.parse(localStorage.getItem(LOG_KEY) || '[]') || []; } catch (e) { activityLog = []; }
+// Up to 0.1.14 the food log was saved under this same name, so each one overwrote the other. The
+// food log has its own name now (FOOD_LOG_KEY); a food log found here is moved there first.
+const FOOD_LOG_KEY = 'nourish_food_log';
+if (!Array.isArray(activityLog)) {
+    try { if (activityLog && activityLog.days && localStorage.getItem(FOOD_LOG_KEY) === null) localStorage.setItem(FOOD_LOG_KEY, JSON.stringify(activityLog)); } catch (e) { /* storage blocked */ }
+    activityLog = [];
+}
 let logSaveTimer = null;
 
 function redactSecrets(text) {
@@ -351,7 +364,7 @@ function loadLocalState() {
 
     chatHistory = cleanChat(loadJSON('nourish_chat', []));
     cookbook = cleanCookbook(loadJSON('nourish_cookbook', null));
-    foodLog = NourishLog.clean(loadJSON('nourish_log', null));
+    foodLog = NourishLog.clean(loadJSON(FOOD_LOG_KEY, null));
     taste = NourishTaste.clean(loadJSON('nourish_taste', null));
 }
 
@@ -370,7 +383,7 @@ function persistLocal(section) {
     else if (section === 'grocery') store('nourish_grocery', grocery);
     else if (section === 'chat') store('nourish_chat', chatHistory);
     else if (section === 'cookbook') store('nourish_cookbook', cookbook);
-    else if (section === 'log') store('nourish_log', foodLog);
+    else if (section === 'log') store(FOOD_LOG_KEY, foodLog);
     else if (section === 'taste') store('nourish_taste', taste);
 }
 
@@ -430,6 +443,9 @@ const SECTIONS = ['settings', 'prefs', 'plan', 'grocery', 'chat', 'cookbook', 'l
 const syncMeta = Object.assign(
     Object.fromEntries(SECTIONS.map(s => [s, { rev: 0, dirty: false, ver: 0 }])),
     loadJSON('nourish_sync', {}));
+// No food log saved under its own name yet (see FOOD_LOG_KEY): this device's copy may have been
+// overwritten by the activity log, so take the PC's copy again on the next sync.
+try { if (localStorage.getItem(FOOD_LOG_KEY) === null && !syncMeta.log.dirty) syncMeta.log.rev = 0; } catch (e) { /* storage blocked */ }
 let syncTimer = null;
 let syncing = false;
 let syncAgain = false;
@@ -638,6 +654,10 @@ function applyAppearance() {
     root.setAttribute('data-font', T.FONTS[settings.font_pair] ? settings.font_pair : 'editorial');
     root.setAttribute('data-bold', on('bold_text') ? 'on' : 'off');
     root.setAttribute('data-icons', T.ICON_STYLES[settings.icon_style] ? settings.icon_style : 'outline');
+    root.setAttribute('data-density', (T.DENSITIES || {})[settings.density] ? settings.density : 'comfortable');
+    root.setAttribute('data-corners', (T.CORNERS || {})[settings.corners] ? settings.corners : 'round');
+    root.setAttribute('data-contrast', on('high_contrast') ? 'more' : 'normal');
+    root.setAttribute('data-amounts', on('colour_amounts') ? 'colour' : 'plain');
     if (on('reduce_motion')) root.setAttribute('data-motion', 'reduced');
     else root.removeAttribute('data-motion');
     const light = look.mode === 'light';
@@ -1157,7 +1177,7 @@ function setSetting(key, value, { quiet = false } = {}) {
     if (APPEARANCE_KEYS.includes(key)) { applyAppearance(); if (settingsPage === 'appearance') refreshLookPreview(); }
     if (key === 'today_stats') updateTodayScreen();
     if (['calorie_target', 'protein_target', 'body_weight', 'protein_auto', 'week_start', 'show_nutrition', 'name'].includes(key)) { updateTodayScreen(); updatePlanScreen(); }
-    if (key === 'grocery_hide_checked') updateGroceryScreen();
+    if (['grocery_hide_checked', 'pantry_on', 'pantry'].includes(key)) updateGroceryScreen();
     if (key === 'units') refreshUnits();
 }
 
@@ -1190,7 +1210,9 @@ function weekDayKcal(i) {
     if (!w.confirmed) return 0;   // not confirmed yet: plain daily targets meanwhile
     return w.perDay[i % 7] || 0;
 }
-function dayKcalTarget(i) { return weekDayKcal(i) || Number(settings.calorie_target) || 2000; }
+// A day re-balanced for the week's budget (This week → Share it out) keeps its own target.
+function dayKcalTarget(i) { const d = daysData[i]; return (d && Number(d.target_kcal) > 0 ? Number(d.target_kcal) : 0) || weekDayKcal(i) || Number(settings.calorie_target) || 2000; }
+function baseKcalTarget(i) { return weekDayKcal(i) || Number(settings.calorie_target) || 2000; }
 // Settings → Profile → Your week (Weekly mode): big days, what the other days get, and the 75% floor.
 let bigDaysDraft = null;   // big days being edited, before they're confirmed (only when they hit the floor)
 function bigDaysGroup() {
@@ -1222,30 +1244,74 @@ function bigDaysGroup() {
         preview, warn,
     ], 'Your week has the budget of seven normal days. A big day gets the calories you set; the other days share what\'s left evenly. No day goes under 75% of a normal day, and protein and fiber targets stay the same every day.');
 }
-// The week view on the Plan screen (Weekly mode): budget, eaten so far, what's left, and each day.
+// The week against its calorie budget, counting what was really eaten (planned meals not skipped,
+// plus snacks and extras from the food log). foodlog.js weekBalance does the sums.
+function weekBalanceNow() {
+    if (daysData.length < 2) return null;
+    const today = todayIndex();
+    return NourishLog.weekBalance(daysData.slice(0, 7).map((day, i) => ({
+        // The budget is the planned week (big days included), not a re-balanced day's new target.
+        target: baseKcalTarget(i), planDay: day, entry: logEntry(i), when: i < today ? 'past' : i === today ? 'today' : 'future',
+    })));
+}
+// Days still to come (after today) the difference can be shared over, and their targets now.
+function shareOutTargets() { return daysData.slice(0, 7).map((d, i) => dayKcalTarget(i)); }
+function shareOutWeek() {
+    const b = weekBalanceNow();
+    if (!b || !b.futureDays.length || b.status === 'on-track') return;
+    // Only what's outside the range is shared out; the days already moved count as moved.
+    const already = b.futureDays.reduce((t, i) => t + (dayKcalTarget(i) - baseKcalTarget(i)), 0);
+    const want = -b.diff - already;
+    const r = NourishPlanner.spreadOver(daysData, { idxs: b.futureDays, targets: shareOutTargets(), change: want, settings: plannerSettings(), people: servingsWanted() });
+    if (!r.applied) { showToast('The days to come are already as small as they go (75% of a normal day).', false); return; }
+    daysData = r.days.map((d, i) => (b.futureDays.includes(i) ? Object.assign({}, d, { target_kcal: r.targets[i] }) : d));
+    changed('plan');
+    renderAll();
+    const each = Math.round(Math.abs(r.applied) / b.futureDays.length);
+    showToast(`${r.applied < 0 ? 'Smaller' : 'Bigger'} portions for the rest of the week: about ${formatCalories(each)} kcal a day${r.left ? `. ${formatCalories(Math.abs(r.left))} kcal is more than the plan can fairly take` : ''}.`, false);
+}
+function undoShareOut() {
+    daysData = daysData.map((d, i) => {
+        if (!(Number(d.target_kcal) > 0)) return d;
+        const back = NourishPlanner.fitDay(d, plannerSettings(dayTargetsFor(i)), servingsWanted());
+        delete back.target_kcal;
+        return back;
+    });
+    changed('plan');
+    renderAll();
+    showToast('Portions are back to the plan', false);
+}
+// The week view on the Plan screen: budget as a range, what's been eaten and logged, and a one-tap
+// fix that resizes the days to come. In Weekly mode it also shows each day's calories.
 function weekCard() {
     const w = weekPlan();
-    if (!w || !daysData.length) return null;
+    const b = weekBalanceNow();
+    if (!b) return null;
     const today = todayIndex();
-    let eaten = 0;
-    const per = daysData.slice(0, 7).map((day, i) => {
-        const t = NourishLog.totals(day, logEntry(i));
-        const used = i < today ? (t.tracking ? t.eaten.calories : t.planned.calories) : i === today ? t.eaten.calories : 0;
-        eaten += used;
-        return { i, target: w.confirmed ? w.perDay[i] : Number(settings.calorie_target) || 2000, planned: Math.round(t.planned.calories) };
-    });
-    const budget = w.confirmed ? w.planned : (Number(settings.calorie_target) || 2000) * 7;
-    return h('section', { class: 'card week-card' },
-        h('div', { class: 'eyebrow', text: 'Your week' }),
+    const moved = daysData.some(d => Number(d.target_kcal) > 0);
+    const word = { 'on-track': 'On track', over: 'Over', under: 'Under' }[b.status];
+    const detail = b.status === 'on-track'
+        ? `Within ${formatCalories(b.tolerance)} kcal of your budget (${formatCalories(b.range[0])}–${formatCalories(b.range[1])}).`
+        : `About ${formatCalories(Math.abs(b.diff))} kcal ${b.status === 'over' ? 'over' : 'under'} your budget for the week.`;
+    const why = [b.extras ? `${formatCalories(b.extras)} kcal of snacks and extras logged` : '', b.skipped ? `${formatCalories(b.skipped)} kcal skipped` : ''].filter(Boolean).join(', ');
+    return h('section', { class: `card week-card status-${b.status}` },
+        h('div', { class: 'week-card-head' },
+            h('div', { class: 'eyebrow', text: 'This week' }),
+            h('span', { class: `week-pill ${b.status}`, text: word })),
         h('p', { class: 'day-status' },
-            h('span', {}, 'Budget ', h('b', { class: 'num', text: `${formatCalories(budget)} kcal` })), h('span', { class: 'dot', text: '·' }),
-            h('span', {}, 'Used ', h('b', { class: 'num', text: `${formatCalories(eaten)}` })), h('span', { class: 'dot', text: '·' }),
-            h('span', {}, 'Left ', h('b', { class: 'num', text: `${formatCalories(Math.max(0, budget - eaten))}` }))),
-        h('div', { class: 'week-days' }, per.map(p => h('div', { class: 'week-day' + (p.i === today ? ' is-today' : '') + (p.target > (Number(settings.calorie_target) || 2000) * 1.05 ? ' big' : '') },
-            h('span', { class: 'd-name', text: dayName(p.i, true) }),
-            h('span', { class: 'num', text: formatCalories(p.target) }),
-            h('small', { text: `plan ${formatCalories(p.planned)}` })))),
-        !w.confirmed ? h('p', { class: 'recipe-note', text: 'Your big days aren\'t in use yet: confirm them in Settings → Profile → Your week.' }) : null);
+            h('span', {}, 'Budget ', h('b', { class: 'num', text: `${formatCalories(b.budget)} kcal` })), h('span', { class: 'dot', text: '·' }),
+            h('span', {}, 'Heading for ', h('b', { class: 'num', text: formatCalories(b.projected) }))),
+        h('p', { class: 'week-detail', text: detail + (why ? ` (${why}.)` : '') }),
+        b.status !== 'on-track' && b.futureDays.length ? h('button', { type: 'button', class: 'btn btn-secondary week-share', onclick: shareOutWeek },
+            icon('i-swap'), `${b.status === 'over' ? 'Take it off' : 'Add it to'} the next ${b.futureDays.length === 1 ? 'day' : `${b.futureDays.length} days`}`) : null,
+        b.status !== 'on-track' && !b.futureDays.length ? h('p', { class: 'recipe-note', text: 'It\'s the last day of the plan, so there\'s nothing left to even out. A new week starts fresh.' }) : null,
+        moved ? h('button', { type: 'button', class: 'link-btn', onclick: undoShareOut, text: 'Put portions back to the plan' }) : null,
+        w ? h('div', { class: 'week-days' }, daysData.slice(0, 7).map((day, i) => ({ i, target: dayKcalTarget(i), planned: Math.round(NourishLog.totals(day, logEntry(i)).planned.calories) }))
+            .map(p => h('div', { class: 'week-day' + (p.i === today ? ' is-today' : '') + (p.target > (Number(settings.calorie_target) || 2000) * 1.05 ? ' big' : '') },
+                h('span', { class: 'd-name', text: dayName(p.i, true) }),
+                h('span', { class: 'num', text: formatCalories(p.target) }),
+                h('small', { text: `plan ${formatCalories(p.planned)}` })))) : null,
+        w && !w.confirmed ? h('p', { class: 'recipe-note', text: 'Your big days aren\'t in use yet: confirm them in Settings → Profile → Your week.' }) : null);
 }
 // The day's protein target (planner.js targetsOf: from body weight when known).
 function proteinTarget() { return NourishPlanner.targetsOf(plannerSettings()).protein; }
@@ -1365,7 +1431,7 @@ function mealSlotToggle(meal) {
 }
 
 // === APPEARANCE ===
-const APPEARANCE_KEYS = ['theme', 'bg', 'custom_bg', 'accent', 'custom_accent', 'font_pair', 'text_size', 'bold_text', 'icon_style', 'reduce_motion'];
+const APPEARANCE_KEYS = ['theme', 'bg', 'custom_bg', 'accent', 'custom_accent', 'font_pair', 'text_size', 'bold_text', 'icon_style', 'reduce_motion', 'density', 'corners', 'high_contrast', 'colour_amounts'];
 let lookSnapshot = null;   // the look when Appearance was opened, for "Undo"
 
 // A small live picture of the app in the current look, at the top of Appearance.
@@ -1788,7 +1854,13 @@ const SETTINGS_RENDERERS = {
             ...settingsGroup('Text', [
                 settingsChoice('Text size', T.TEXT_SIZES[settings.text_size] ? settings.text_size : 'default', T.TEXT_SIZES, v => pick('text_size', v)),
                 settingsToggle('bold_text', 'Bold text', { hint: 'Heavier text, easier to read', onchange: () => renderSettings() }),
+                settingsToggle('high_contrast', 'Increase contrast', { hint: 'Darker grey text and firmer edges', onchange: () => renderSettings() }),
+                settingsToggle('colour_amounts', 'Coloured amounts', { hint: 'Ingredient amounts in your accent colour, easy to spot while cooking', onchange: () => renderSettings() }),
             ]),
+            ...settingsGroup('Spacing and shape', [
+                settingsChoice('Spacing', T.DENSITIES[settings.density] ? settings.density : 'comfortable', T.DENSITIES, v => pick('density', v)),
+                settingsChoice('Corners', T.CORNERS[settings.corners] ? settings.corners : 'round', T.CORNERS, v => pick('corners', v)),
+            ], 'Compact fits more on the screen; Roomy gives everything more space. Corners change cards, buttons and sheets.'),
             ...settingsGroup('Icons', [
                 h('div', { class: 'icon-styles', role: 'radiogroup', 'aria-label': 'Icon style' }, Object.entries(T.ICON_STYLES).map(([id, name]) => {
                     const sel = (T.ICON_STYLES[settings.icon_style] ? settings.icon_style : 'outline') === id;
@@ -2039,6 +2111,15 @@ const SETTINGS_RENDERERS = {
                 settingsButton('Untick everything', resetGrocery),
                 settingsButton('Remove items I added', clearCustomGrocery, 'danger'),
             ], 'The list is built from your meal plan. Items you add yourself stay until you remove them. Ticks sync between your devices, so one person can shop while another checks.'),
+            ...settingsGroup('Pantry', [
+                settingsToggle('pantry_on', 'Keep pantry staples off the list', { hint: 'Things you always have are folded away at the bottom of the list instead of mixed in with your shopping.' }),
+                on('pantry_on') ? h('label', { class: 'settings-row pantry-edit' },
+                    h('span', { class: 'settings-label', text: 'What you always have (one per line, or separated by commas)' }),
+                    h('textarea', { class: 'settings-input', rows: '6', spellcheck: 'false',
+                        onchange: e => setSetting('pantry', NourishGrocery.pantryList(e.target.value).join('\n')) },
+                        (settings.pantry && settings.pantry.trim() ? NourishGrocery.pantryList(settings.pantry) : NourishGrocery.PANTRY_STARTER).join('\n'))) : null,
+                on('pantry_on') && settings.pantry ? settingsButton('Go back to the starter list', () => { setSetting('pantry', ''); renderSettings(); }) : null,
+            ], '"Salt" also covers "kosher salt" and "sea salt", but not "salted butter".'),
         ];
     },
     server() {
@@ -2451,7 +2532,9 @@ function openRecipeSheet(mealType, meal, dayIndex = null, { cookbookId = null } 
             h('div', { class: 'recipe-ingredients' }, ingredients.map((line, idx) => ingredientRow(line, idx)))) : null,
         meal.steps.length ? h('div', { class: 'recipe-section' },
             h('div', { class: 'recipe-section-title' }, 'Method', h('small', { text: `${meal.steps.length} steps` })),
-            h('p', { class: 'recipe-steps-hint', text: 'Tap a step to follow along while you cook.' }),
+            h('div', { class: 'recipe-steps-head' },
+                h('p', { class: 'recipe-steps-hint', text: 'Tap a step to follow along, or cook one step at a time with timers.' }),
+                h('button', { type: 'button', class: 'btn btn-primary cook-btn', onclick: () => { closeRecipeSheet(); openCookMode(meal, ingredients, units); } }, icon('i-utensils'), 'Cook mode')),
             h('div', { class: 'recipe-steps' }, meal.steps.map((s, idx) => h('button', {
                 type: 'button', class: 'recipe-step' + stepClass(idx), 'aria-pressed': String(idx < recipeProgress.step),
                 onclick: e => {
@@ -2510,6 +2593,117 @@ async function describeLater(meal, mealType, dayIndex, cookbookId) {
         fromRecipe('');
     }
 }
+
+// === COOK MODE ===
+// One step at a time in big type, with just the ingredients that step uses and a timer for any
+// time it mentions ("simmer for 20 minutes"). The screen is kept awake while it's open.
+let cookMode = null;
+function openCookMode(meal, ingredients, units) {
+    const steps = (meal.steps || []).map(s => NourishUnits.convertText(s, units));
+    if (!steps.length) return;
+    cookMode = { meal, ingredients, steps, step: Math.max(0, Math.min(steps.length - 1, recipeProgress && recipeProgress.step > 0 ? recipeProgress.step : 0)), timers: [], lock: null, tick: null };
+    let el = $('cookMode');
+    if (!el) {
+        el = h('div', { id: 'cookMode', class: 'cook-mode', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Cook mode' });
+        document.body.appendChild(el);
+    }
+    el.classList.add('active');
+    keepAwake(true);
+    cookMode.tick = setInterval(tickCookTimers, 1000);
+    renderCookMode();
+}
+function closeCookMode() {
+    if (!cookMode) return;
+    if (recipeProgress) recipeProgress.step = cookMode.step;
+    clearInterval(cookMode.tick);
+    keepAwake(false);
+    cookMode = null;
+    const el = $('cookMode');
+    if (el) { el.classList.remove('active'); setChildren(el); }
+    if (openRecipe) openRecipeSheet(openRecipe.mealType, openRecipe.meal, openRecipe.dayIndex, { cookbookId: openRecipe.cookbookId });
+}
+async function keepAwake(on) {
+    try {
+        if (on && 'wakeLock' in navigator && document.visibilityState === 'visible') {
+            cookMode.lock = await navigator.wakeLock.request('screen');
+        } else if (!on && cookMode && cookMode.lock) { await cookMode.lock.release(); }
+    } catch (e) { /* not allowed here (an old browser, or battery saver): cooking still works */ }
+}
+document.addEventListener('visibilitychange', () => { if (cookMode && document.visibilityState === 'visible') keepAwake(true); });
+function cookGo(delta) {
+    if (!cookMode) return;
+    const next = cookMode.step + delta;
+    if (next >= cookMode.steps.length) { closeCookMode(); showToast('Enjoy your meal!', false); return; }
+    cookMode.step = Math.max(0, next);
+    renderCookMode();
+}
+const clockText = s => { s = Math.max(0, Math.round(s)); const hh = Math.floor(s / 3600), mm = Math.floor(s % 3600 / 60), ss = s % 60; return (hh ? hh + ':' + String(mm).padStart(2, '0') : mm) + ':' + String(ss).padStart(2, '0'); };
+function startCookTimer(t, step) {
+    cookMode.timers.push({ id: Date.now() + Math.random(), label: t.label, step, seconds: t.seconds, end: Date.now() + t.seconds * 1000, done: false });
+    renderCookMode();
+}
+function tickCookTimers() {
+    if (!cookMode) return;
+    let finished = false;
+    cookMode.timers.forEach(t => {
+        const left = (t.end - Date.now()) / 1000;
+        if (!t.done && left <= 0) { t.done = true; finished = true; showToast(`Timer done: ${t.label} (step ${t.step + 1})`, false); }
+        const out = document.querySelector(`[data-timer="${t.id}"]`);
+        if (out) out.textContent = t.done ? 'Done' : clockText(left);
+    });
+    if (finished) { cookChime(); try { navigator.vibrate && navigator.vibrate([300, 150, 300]); } catch (e) {} renderCookMode(); }
+}
+// A soft two-note chime made on the device (no sound files, nothing downloaded).
+function cookChime() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        [0, 0.35].forEach((at, i) => {
+            const o = ctx.createOscillator(), g = ctx.createGain();
+            o.frequency.value = i ? 784 : 659; o.connect(g); g.connect(ctx.destination);
+            g.gain.setValueAtTime(0.0001, ctx.currentTime + at);
+            g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + at + 0.03);
+            g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + at + 0.6);
+            o.start(ctx.currentTime + at); o.stop(ctx.currentTime + at + 0.65);
+        });
+        setTimeout(() => ctx.close(), 1500);
+    } catch (e) { /* no sound on this device */ }
+}
+function renderCookMode() {
+    const el = $('cookMode');
+    if (!el || !cookMode) return;
+    const c = cookMode, i = c.step, text = c.steps[i];
+    const uses = NourishPlanner.stepIngredients(c.ingredients, c.meal.steps[i]).map(k => c.ingredients[k]);
+    // A timer already going for this step isn't offered again.
+    const timers = NourishPlanner.stepTimers(c.meal.steps[i]).filter(t => !c.timers.some(r => !r.dismissed && !r.done && r.step === i && r.label === t.label));
+    const running = c.timers.filter(t => !t.dismissed);
+    setChildren(el,
+        h('div', { class: 'cook-top' },
+            h('div', {}, h('div', { class: 'eyebrow', text: `Step ${i + 1} of ${c.steps.length}` }), h('div', { class: 'cook-title', text: c.meal.name })),
+            h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Leave cook mode', onclick: closeCookMode }, icon('i-close'))),
+        h('div', { class: 'cook-progress', 'aria-hidden': 'true' }, c.steps.map((_, k) => h('span', { class: k < i ? 'done' : k === i ? 'current' : '' }))),
+        running.length ? h('div', { class: 'cook-timers', 'aria-live': 'polite' }, running.map(t => h('div', { class: 'cook-timer' + (t.done ? ' done' : '') },
+            icon('i-clock'), h('span', { class: 'cook-timer-label', text: `Step ${t.step + 1} · ${t.label}` }),
+            h('b', { class: 'num', 'data-timer': String(t.id), text: t.done ? 'Done' : clockText((t.end - Date.now()) / 1000) }),
+            h('button', { type: 'button', class: 'icon-btn', 'aria-label': t.done ? 'Clear timer' : 'Stop timer', onclick: () => { t.dismissed = true; renderCookMode(); } }, icon('i-close'))))) : null,
+        h('div', { class: 'cook-body' },
+            h('p', { class: 'cook-step', text }),
+            uses.length ? h('div', { class: 'cook-uses' }, h('div', { class: 'label', text: 'You need' }),
+                h('ul', {}, uses.map(line => {
+                    const sp = NourishUnits.splitIngredient(line);
+                    const amount = sp && sp.qty != null && !sp.note && sp.text && line.endsWith(sp.text) ? line.slice(0, line.length - sp.text.length).trim() : '';
+                    return h('li', {}, amount ? h('b', { class: 'qty', text: amount }) : null, amount ? ' ' + sp.text : line);
+                }))) : null,
+            timers.length ? h('div', { class: 'cook-start-timers' }, timers.map(t => h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => startCookTimer(t, i) }, icon('i-clock'), `Start ${t.label} timer`))) : null),
+        h('div', { class: 'cook-nav' },
+            h('button', { type: 'button', class: 'btn btn-secondary', disabled: i === 0, onclick: () => cookGo(-1) }, icon('i-back'), 'Back'),
+            h('button', { type: 'button', class: 'btn btn-primary', onclick: () => cookGo(1) }, i === c.steps.length - 1 ? 'Finish' : 'Next step', icon(i === c.steps.length - 1 ? 'i-check' : 'i-chevron'))));
+}
+document.addEventListener('keydown', e => {
+    if (!cookMode) return;
+    if (e.key === 'Escape') { e.stopImmediatePropagation(); closeCookMode(); }
+    else if (e.key === 'ArrowRight') cookGo(1);
+    else if (e.key === 'ArrowLeft') cookGo(-1);
+}, true);
 
 let recipeProgress = null;
 function stepClass(idx) {
@@ -2840,9 +3034,16 @@ function greeting() {
     return name ? `${part}, ${name}` : part;
 }
 
+// Repeating foods due today are logged once, the first time Today is shown.
+function applyTodayRepeats() {
+    if (!foodLog || !foodLog.repeats || !foodLog.repeats.length) return;
+    const now = new Date();
+    if (NourishLog.applyRepeats(foodLog, NourishLog.dayKey(now), (now.getDay() + 6) % 7).length) changed('log');
+}
 function updateTodayScreen() {
     const body = $('todayBody');
     if (!body) return;
+    applyTodayRepeats();
     const hasPlan = daysData.length > 0;
     $('todayEyebrow').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
     $('todayTitle').textContent = greeting();
@@ -3197,7 +3398,15 @@ function renderFoodSheet() {
                     h('button', { type: 'button', 'aria-label': 'More', onclick: () => { d.items[i] = NourishLog.setAmount(it, it.amount + stepFor(it)); renderFoodSheet(); } }, '+')),
                 h('span', { class: 'food-unit', text: it.unit }),
                 h('span', { class: 'food-row-kcal num', text: `${formatCalories(it.nutrition.calories)} kcal` })),
-        it.needsCalories ? null : h('div', { class: 'food-row-macros num', text: `P ${Math.round(it.nutrition.protein_g)} g · C ${Math.round(it.nutrition.carbs_g)} g · F ${Math.round(it.nutrition.fat_g)} g${it.grams ? ` · ${Math.round(it.grams)} g` : ''}` }));
+        it.needsCalories ? null : h('div', { class: 'food-row-macros num', text: `P ${Math.round(it.nutrition.protein_g)} g · C ${Math.round(it.nutrition.carbs_g)} g · F ${Math.round(it.nutrition.fat_g)} g${it.grams ? ` · ${Math.round(it.grams)} g` : ''}` }),
+        it.needsCalories ? null : repeatPicker(it));
+    // Something had every day (the morning coffee) can log itself: Off, Every day or Weekdays.
+    const repeatPicker = it => {
+        const cur = it.repeatChoice || (() => { const r = NourishLog.repeatOf(foodLog, it); return !r ? 'off' : r.days.length === 7 ? 'every' : 'weekdays'; })();
+        return h('label', { class: 'food-repeat' }, icon('i-clock'), h('span', { text: 'Log this by itself' }),
+            h('select', { class: 'settings-input', 'aria-label': `Repeat ${it.name}`, onchange: e => { it.repeatChoice = e.target.value; } },
+                [['off', 'Off'], ['every', 'Every day'], ['weekdays', 'Weekdays']].map(([v, t]) => h('option', { value: v, selected: v === cur ? true : undefined }, t))));
+    };
     const chips = (list, label) => list.length ? h('div', { class: 'food-chips-wrap' }, h('div', { class: 'label', text: label }),
         h('div', { class: 'food-chips' }, list.slice(0, 12).map(it => h('button', { type: 'button', class: 'filter-chip', onclick: () => { d.items.push(Object.assign({}, it)); renderFoodSheet(); } }, `${it.name} · ${formatCalories(it.nutrition.calories)}`)))) : null;
     const results = d.search ? NourishLog.search(d.search) : [];
@@ -3248,14 +3457,22 @@ function saveFood() {
     const d = foodDraft;
     if (!d || !d.items.length) return;
     const key = logKey(d.idx);
-    if (d.editId) NourishLog.update(foodLog, key, d.editId, d.items[0]);
-    else d.items.forEach(it => NourishLog.add(foodLog, key, Object.assign({}, it, { needsCalories: undefined })));
+    const plain = it => Object.assign({}, it, { needsCalories: undefined, repeatChoice: undefined });
+    if (d.editId) NourishLog.update(foodLog, key, d.editId, plain(d.items[0]));
+    else d.items.forEach(it => NourishLog.add(foodLog, key, plain(it)));
+    let repeatNote = '';
+    // A repeat chosen here: logged by itself from now on (what was just added counts as today's).
+    d.items.filter(it => it.repeatChoice).forEach(it => {
+        const days = it.repeatChoice === 'every' ? NourishLog.EVERY_DAY : it.repeatChoice === 'weekdays' ? NourishLog.WEEKDAYS_ONLY : [];
+        NourishLog.setRepeat(foodLog, plain(it), days, key);
+        if (days.length) repeatNote = ` · ${it.name} now logs itself ${NourishLog.repeatLabel(days).toLowerCase()}`;
+    });
     changed('log');
     if (!d.editId) d.items.forEach(it => learn('log', { name: it.name, ingredients: [it.name] }));
     const n = d.items.length;
     closeFoodSheet();
     updateTodayScreen();
-    showToast(d.editId ? 'Saved' : `Added ${n} item${n > 1 ? 's' : ''}`, false);
+    showToast((d.editId ? 'Saved' : `Added ${n} item${n > 1 ? 's' : ''}`) + repeatNote, false);
 }
 
 // === PLAN SCREEN ===
@@ -3336,12 +3553,25 @@ function groceryItems() {
     return items;
 }
 
+// Staples you always have (salt, oil, spices…). Empty = the starter list; Settings → Grocery to edit.
+function pantryItems() {
+    if (!on('pantry_on')) return [];
+    return NourishGrocery.pantryList(settings.pantry && settings.pantry.trim() ? settings.pantry : NourishGrocery.PANTRY_STARTER.join(', '));
+}
 // Each aisle gets its own colour dot.
 const GROCERY_COLORS = { Protein: 'var(--fat)', Dairy: '#A9C7E8', 'Grains & bakery': 'var(--carbs)', Produce: 'var(--protein)', Pantry: '#C9A27E', Other: 'var(--text-3)' };
 function updateGroceryScreen() {
     const container = $('groceryContainer');
     if (!container) return;
     const items = groceryItems();
+    // What's already in the pantry comes off the list (shown folded away at the end, never hidden for good).
+    const pantry = pantryItems();
+    const inPantry = [];
+    Object.keys(items).forEach(c => {
+        const { buy, have } = NourishGrocery.splitPantry(items[c], pantry);
+        inPantry.push(...have);
+        if (buy.length) items[c] = buy; else delete items[c];
+    });
     const categories = GROCERY_ORDER.filter(c => items[c]);
     const checked = new Set(grocery.checked);
     const hide = on('grocery_hide_checked');
@@ -3353,6 +3583,14 @@ function updateGroceryScreen() {
         onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); addCustomItem(input); } } });
     const addRow = h('div', { class: 'add-item' }, input,
         h('button', { type: 'button', class: 'icon-btn accent', 'aria-label': 'Add', onclick: () => addCustomItem(input) }, icon('i-plus')));
+
+    const pantryCard = inPantry.length ? h('details', { class: 'card grocery-category pantry-card', style: '--cat:#C9A27E' },
+        h('summary', { class: 'category-header' }, h('span', { text: `Already in your pantry (${inPantry.length})` }), icon('i-chevron', 'chev')),
+        h('p', { class: 'pantry-hint', text: 'Staples you said you always have. Running low? Tap one to put it on the list.' }),
+        h('div', { class: 'pantry-chips' }, inPantry.map(r => h('button', { type: 'button', class: 'filter-chip', onclick: () => {
+            grocery.custom.push({ text: r.text.slice(0, 200), checked: false }); changed('grocery'); updateGroceryScreen(); showToast(`Added ${r.key}`, false);
+        } }, r.key))),
+        h('button', { type: 'button', class: 'link-btn', onclick: () => { switchTab('settings'); openSettingsPage('grocery'); } }, 'Change what\u2019s in your pantry')) : null;
 
     if (!total) {
         setChildren(container,
@@ -3391,7 +3629,8 @@ function updateGroceryScreen() {
                 h('div', { class: 'progress-bar' }, h('div', { class: 'progress-fill', id: 'progressFill', style: `width:${pct}%` })))),
         addRow,
         sections,
-        hide && done ? h('p', { class: 'empty-note', text: `${done} ticked item${done === 1 ? '' : 's'} hidden` }) : null);
+        hide && done ? h('p', { class: 'empty-note', text: `${done} ticked item${done === 1 ? '' : 's'} hidden` }) : null,
+        pantryCard);
 }
 
 function groceryChanged(box) {
@@ -3632,6 +3871,7 @@ function normalizePlan(data, strict = true) {
             const snacks = all.filter(x => !x.protein_extra).slice(0, 5 - extras.length).concat(extras);
             if (snacks.length) out.snacks = snacks;
             if (d.kcal_gap && Number(d.kcal_gap.target) > 0) out.kcal_gap = { have: toNumber(d.kcal_gap.have), target: toNumber(d.kcal_gap.target) };
+            if (Number(d.target_kcal) > 0) out.target_kcal = toNumber(d.target_kcal);
             if (d.protein_gap && Number(d.protein_gap.target) > 0) out.protein_gap = { have: toNumber(d.protein_gap.have), target: toNumber(d.protein_gap.target), extras: toNumber(d.protein_gap.extras) || 0 };
             return out;
         })

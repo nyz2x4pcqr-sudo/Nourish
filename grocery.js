@@ -73,6 +73,9 @@
         const num = parseNumber(source.replace(/^(\d+)\s*-\s*\d+/, '$1'));
         let rest = num ? source.slice(num.length).trim() : source;
         if (num) qty = num.value;
+        // "a pinch of salt", "dash of soy sauce": one of that small measure, not an item called "pinch salt".
+        const small = num ? null : rest.match(/^(?:(?:a|an|one)\s+)?(pinch|dash|splash|sprinkle|handful)(?:es|s)?\s+(?:of\s+)?/i);
+        if (small) { qty = 1; unit = UNITS[small[1].toLowerCase()] || small[1].toLowerCase(); rest = rest.slice(small[0].length).trim(); }
         const unitWord = (rest.match(/^([a-z]+)\.?\b/i) || [])[1];
         if (num && unitWord && UNITS[unitWord.toLowerCase()]) {
             unit = UNITS[unitWord.toLowerCase()];
@@ -189,7 +192,32 @@
         });
     }
 
-    const api = { junkReason, parseIngredient, ingredientKey, dedupeIngredients, buildList, categorize, singular, CATEGORIES };
+    // === PANTRY ===
+    // Staples someone always has (salt, oil, spices) are kept off the shopping list and shown apart,
+    // so the list is only what to buy. Typed as words, one per line or comma-separated. A staple
+    // covers more specific names ("salt" covers "kosher salt" and "sea salt"; "soy sauce" covers
+    // "low-sodium soy sauce"), but not a different food ("oil" doesn't cover "oil-packed tuna").
+    const PANTRY_STARTER = ['salt', 'black pepper', 'olive oil', 'vegetable oil', 'water', 'sugar', 'flour', 'baking soda', 'baking powder', 'vinegar', 'soy sauce', 'garlic powder', 'cumin', 'paprika', 'dried oregano', 'chili flakes', 'cinnamon'];
+    function pantryList(text) {
+        return Array.from(new Set(String(text || '').split(/[\n,;]+/).map(s => singular(s.trim().toLowerCase().replace(/\s+/g, ' '))).filter(s => s.length > 1))).slice(0, 200);
+    }
+    function inPantry(key, pantry) {
+        const k = String(key || '').toLowerCase();
+        const words = k.split(/\s+/).map(singular);
+        return (pantry || []).some(p => {
+            const pw = p.split(' ');
+            // The staple's words end the item's name: "salt" ends "kosher salt", "soy sauce" ends "low-sodium soy sauce".
+            return pw.length <= words.length && pw.every((w, i) => words[words.length - pw.length + i] === w);
+        });
+    }
+    // Splits a built list into what to buy and what the pantry already has.
+    function splitPantry(rows, pantry) {
+        const buy = [], have = [];
+        (rows || []).forEach(r => (inPantry(r.key, pantry) ? have : buy).push(r));
+        return { buy, have };
+    }
+
+    const api = { junkReason, parseIngredient, ingredientKey, dedupeIngredients, buildList, categorize, singular, CATEGORIES, PANTRY_STARTER, pantryList, inPantry, splitPantry };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.NourishGrocery = api;
 })(typeof window !== 'undefined' ? window : this);

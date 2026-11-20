@@ -551,6 +551,12 @@
             const v = n.value * eff, metric = /^(g|grams?|kg|ml|l)$/i.test(u);
             return `/ ${metric ? Math.max(5, Math.round(v / 5) * 5) : U.formatQty(Math.max(0.125, Math.round(v * 4) / 4))} ${u}`;
         });
+        // One (or less) of something counted: "1 cucumber", "½ carrot", not "1 cucumbers".
+        if (!unit && q <= 1 && item.qty > 1) text = text.replace(/^([^,(]*?)([a-z]+)(?=\s*(?:[,(]|$))/i, (m0, pre, w) => {
+            if (/(ss|us|is)$/i.test(w) || w.length < 4) return m0;
+            const one = /ies$/i.test(w) ? w.slice(0, -3) + 'y' : /(oes|ches|shes|xes)$/i.test(w) ? w.slice(0, -2) : /s$/i.test(w) ? w.slice(0, -1) : w;
+            return pre + one;
+        });
         return item.note !== undefined ? `${text}: ${amount}${item.note ? ' ' + item.note : ''}` : `${amount} ${text}`.trim();
     }
     const baseCalc = new WeakMap();   // a recipe's own calculation, worked out once
@@ -978,6 +984,96 @@
         });
         return out;
     }
+    // === COOK MODE ===
+    // Timers a step asks for: "simmer for 20 minutes", "bake 25–30 min", "1 hour 15 minutes",
+    // "30 seconds". A range offers its shorter end first (check early, cook on). "Overnight" or
+    // "for 2 days" isn't a kitchen timer. Returns [{ seconds, label }].
+    function stepTimers(step) {
+        const t = String(step || '').replace(/–|—/g, '-');
+        const out = [];
+        const seen = new Set();
+        const re = /(\d+(?:\.\d+)?|½|an?|one|two|three|four|five|ten|fifteen|twenty|thirty|forty|forty-five)(?:\s*(?:-|to)\s*(\d+(?:\.\d+)?))?\s*(hours?|hrs?|h\b|minutes?|mins?|m\b|seconds?|secs?)(?:\s*(?:and\s*)?(\d+)\s*(minutes?|mins?))?/gi;
+        const words = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, ten: 10, fifteen: 15, twenty: 20, thirty: 30, forty: 40, 'forty-five': 45, '½': 0.5 };
+        let m;
+        while ((m = re.exec(t))) {
+            const n = words[m[1].toLowerCase()] != null ? words[m[1].toLowerCase()] : Number(m[1]);
+            if (!(n > 0)) continue;
+            const unit = m[3].toLowerCase();
+            const mult = /^h/.test(unit) ? 3600 : /^s/.test(unit) ? 1 : 60;
+            let seconds = Math.round(n * mult) + (m[4] ? Number(m[4]) * 60 : 0);
+            if (seconds < 10 || seconds > 6 * 3600) continue;
+            const hi = m[2] ? Number(m[2]) * mult + (m[4] ? Number(m[4]) * 60 : 0) : 0;
+            if (seen.has(seconds)) continue;
+            seen.add(seconds);
+            const fmt = s => (s >= 3600 ? `${Math.floor(s / 3600)} h${s % 3600 ? ` ${Math.round((s % 3600) / 60)} min` : ''}` : s >= 60 ? `${Math.round(s / 60)} min` : `${s} sec`);
+            out.push({ seconds, label: hi > seconds ? `${fmt(seconds)} (to ${fmt(hi)})` : fmt(seconds) });
+        }
+        return out.slice(0, 3);
+    }
+    // The ingredient lines a step uses, by the food each line is about ("Cook the rice" → "⅓ cup
+    // jasmine rice"). A line used in an earlier step can come back ("the rest of the butter").
+    // Returns the indexes of `ingredients`.
+    const STEP_FAMILY = {
+        beef: ['steak', 'sirloin', 'brisket', 'chuck', 'mince', 'ribeye', 'flank', 'skirt'],
+        meat: ['steak', 'sirloin', 'beef', 'pork', 'lamb', 'chicken', 'turkey', 'mince'],
+        chicken: ['thigh', 'breast', 'drumstick', 'wing'],
+        pork: ['tenderloin', 'chop', 'loin', 'shoulder', 'bacon'],
+        fish: ['salmon', 'cod', 'tuna', 'haddock', 'tilapia', 'trout', 'halibut', 'mackerel'],
+        prawn: ['shrimp'], shrimp: ['prawn'],
+        noodle: ['spaghetti', 'udon', 'soba', 'ramen', 'linguine'],
+        pasta: ['spaghetti', 'penne', 'fusilli', 'linguine', 'rigatoni', 'macaroni', 'orzo', 'tagliatelle'],
+        greens: ['spinach', 'kale', 'chard', 'rocket', 'arugula'],
+        herb: ['parsley', 'cilantro', 'coriander', 'basil', 'mint', 'dill', 'chive'],
+        cheese: ['parmesan', 'cheddar', 'feta', 'mozzarella', 'ricotta', 'halloumi'],
+    };
+    function stepIngredients(ingredients, step) {
+        const text = ' ' + String(step || '').toLowerCase().replace(/[^a-z\s-]/g, ' ').replace(/\s+/g, ' ') + ' ';
+        const sing = w => w.replace(/(ies)$/, 'y').replace(/(oes|ches|shes|sses)$/, m => m.slice(0, -2)).replace(/([^s])s$/, '$1');
+        const words = new Set(text.trim().split(' ').map(sing));
+        const out = [];
+        (ingredients || []).forEach((line, i) => {
+            const m = N.matchFood(line);
+            const names = new Set();
+            if (m) { names.add(m.phrase); names.add(m.key); }
+            // The words of the line itself after the amount ("fresh ginger", "green onions").
+            const item = U.splitIngredient(String(line));
+            const own = String(item.text || line).toLowerCase().replace(/\(.*?\)|,.*$/g, '').replace(/[^a-z\s-]/g, ' ').trim();
+            if (own) names.add(own);
+            const hit = Array.from(names).some(n => {
+                const ws = String(n).toLowerCase().split(/\s+/).filter(w => w.length > 2 && !/^(fresh|large|small|medium|chopped|sliced|diced|minced|grated|ground|whole|low-sodium|cooked|dried|boneless|skinless|for|and|the|of)$/.test(w));
+                if (!ws.length) return false;
+                const head = sing(ws[ws.length - 1]);
+                if (words.has(head) || text.indexOf(' ' + ws.join(' ') + ' ') >= 0) return true;
+                // A step often says the family ("the beef") where the list names the cut ("sirloin steak").
+                return Object.keys(STEP_FAMILY).some(f => words.has(f) && ws.some(w => STEP_FAMILY[f].indexOf(sing(w)) >= 0));
+            });
+            if (hit) out.push(i);
+        });
+        return out;
+    }
+
+    // The week's budget after real life: calories over (a snack, a dinner out) or under (a skipped
+    // meal) are shared out over the days still to come by sizing their portions, never a recipe.
+    // No day goes under 75% or over 115% of its own target, so a big weekend isn't paid back by
+    // going hungry. days: the plan days; idxs: the days still to come; targets[i]: each day's calories;
+    // change: total calories to add (negative to take off). Returns { days, targets, applied, left }.
+    function spreadOver(days, { idxs = [], targets = [], change = 0, settings = {}, people = 1 } = {}) {
+        const out = days.slice();
+        const newTargets = targets.slice();
+        let left = Math.round(change);
+        const list = idxs.filter(i => days[i]);
+        list.forEach((i, n) => {
+            const t = Number(targets[i]) || 2000;
+            const share = left / (list.length - n);
+            const next = Math.round(Math.max(t * 0.75, Math.min(t * 1.15, t + share)));
+            const move = next - t;
+            left -= move;
+            newTargets[i] = next;
+            if (move) out[i] = fitDay(days[i], Object.assign({}, settings, { calorie_target: next, day_kcal: undefined }), people);
+        });
+        return { days: out, targets: newTargets, applied: Math.round(change) - left, left };
+    }
+
     // The last check on every plan, whoever made it: a day more than 10% off the calorie target has
     // its furthest-off meal swapped for one that brings it back (from `pools`, never a dish already
     // in the plan, always fitting the slot), then is sized again. Returns the days and what changed.
@@ -1431,7 +1527,7 @@
         }).join('');
     }
 
-    const api = { ingredientFoods, balanceDay, applyDayRules: balanceDay, proteinExtras, extrasFor, PROTEIN_EXTRAS, MAX_EXTRAS, proteinNote, PORTION_MIN, PORTION_MAX, weeklyTargets, WEEKDAYS, fatTip, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, outSlot, isOut, outMeal, outKcal, applyEatingOut, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
+    const api = { spreadOver, stepTimers, stepIngredients, ingredientFoods, balanceDay, applyDayRules: balanceDay, proteinExtras, extrasFor, PROTEIN_EXTRAS, MAX_EXTRAS, proteinNote, PORTION_MIN, PORTION_MAX, weeklyTargets, WEEKDAYS, fatTip, isFattyFish, weekMicros, fixMicros, MICRO_TARGETS, PROCESSED, pricey, FIBER_TARGET, MEAL_PROTEIN, sourceKey, budgetProblem, goalCost, LUXURY, stepMinutes, keepToTargets, sizeMeals, portionOptions, snapPortion, PORTIONS, quickMeal, QUICK_MEALS, recipeProfile, slotLimits, slotProblem, slotPenalty, timeAllowed, scheduleChoice, outSlot, isOut, outMeal, outKcal, applyEatingOut, SLOT_DEFAULTS, countIngredients, fitDay, lighten, addSnacks, mealsOf, snacksOf, SNACKS, mealFit, mainProtein, mainVeg, cuisineOf, flavorCheck, reseason, scaleRecipe, scaleLine, splitOf, targetsOf, planWeek, dayTotals, fixName, normName, adapt, substituteFor, SUBS, dishWords, dishKey, sameDish, dishList, SPLITS, MEALS };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.NourishPlanner = api;
 })(typeof window !== 'undefined' ? window : globalThis);
